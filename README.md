@@ -17,7 +17,7 @@
 
 <p align="center">
   <a href="#core-features">Core features</a> ·
-  <a href="#opening-an-unsigned-build">Unsigned builds</a> ·
+  <a href="#download-and-install">Download</a> ·
   <a href="#build">Build</a> ·
   <a href="docs/cli/README.md">CLI</a> ·
   <a href="CONTRIBUTING.md">Contributing</a>
@@ -31,7 +31,7 @@ It is Swift-native, runs locally (including its AI features), and is agent-ready
 
 It has only been tested on Apple silicon, macOS 27, Xcode 27, and Swift 6.4.
 
-This is early software under active development. Downloadable builds, when published, are on [Releases](https://github.com/michaelmagan/OpenHuman/releases). You can also build from source. Maintainers can follow the [release guide](docs/release/RELEASE-HOWTO.md) to build, verify and publish a DMG. Homebrew installation will be announced when ready.
+This is early software under active development. [Download the signed and notarized release](https://github.com/michaelmagan/OpenHuman/releases/tag/v0.1.0), or build from source. Maintainers can follow the [release guide](docs/release/RELEASE-HOWTO.md) to build, verify and publish a DMG. Homebrew installation will be announced when ready.
 
 <br>
 
@@ -81,9 +81,17 @@ This is early software under active development. Downloadable builds, when publi
 - **Themes.** Six built-in themes, and [your own](docs/themes.md) as plain JSON files.
 - **A CLI for agents.** `openhuman` reads the same local mail, writes drafts for you to review, and never sends. It includes an MCP server. See the [CLI documentation](docs/cli/README.md).
 
+## Download and install
+
+[Download version 0.1.0 (build 1003)](https://github.com/michaelmagan/OpenHuman/releases/tag/v0.1.0). This early development release is a Developer ID signed, Apple-notarized DMG for Apple silicon Macs running macOS 27.0 or later.
+
+Open the DMG and drag OpenHuman Mail to Applications. On first launch, follow onboarding to create and import your own Google Desktop app OAuth client. No shared Google client is bundled.
+
 ## Opening an unsigned build
 
 macOS may block unsigned builds because they are not notarized by Apple. To open one, try to open the app once. Then open System Settings, click Privacy & Security, and scroll to Security. Click Open Anyway, enter your login password, and click OK. The Open Anyway button stays available for about an hour after you first try to open the app.
+
+Local development builds and CI development artifacts use ad-hoc signing and are not notarized by Apple.
 
 ## Build
 
