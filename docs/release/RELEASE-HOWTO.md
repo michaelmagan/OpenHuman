@@ -164,7 +164,7 @@ keep the normal login Keychain available for prompts.
 
 See [Apple's notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
 
-## Build the signed DMG without iCloud
+## Signed build
 
 From the clean release checkout, with the optional cache override still set:
 
