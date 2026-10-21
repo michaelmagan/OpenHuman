@@ -259,6 +259,16 @@ func sweepStandaloneWindow<V: View>(_ view: V, store: ThemeStore, size: NSSize) 
     return window
 }
 
+// One named state of one view on its own, the cheapest sweep case; docs/RENDER-SWEEP.md has the template
+@MainActor
+func sweepShootView<V: View>(_ screen: String, theme: SweepTheme, size: NSSize, settle: Duration = .milliseconds(400),
+                             @ViewBuilder _ content: (ThemeStore) -> V) async throws {
+    let store = theme.makeStore()
+    let window = sweepStandaloneWindow(content(store), store: store, size: size)
+    defer { window.orderOut(nil) }
+    try await sweepShoot(window, screen: screen, theme: theme, settle: settle)
+}
+
 @MainActor
 enum SweepWindow {
     static let frameName = "dev.openhuman.tests.render-sweep"

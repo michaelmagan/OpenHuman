@@ -14,6 +14,11 @@ Tools/ci/check-imports.sh
 (cd Packages/OpenHumanMailCore && swift test)
 ```
 
+For UI changes, add or update a render-sweep scenario and include the screenshots:
+the Render Sweep workflow renders them on sample data and posts them to the pull
+request, also when you work from a cloud session that cannot build the app. See
+[docs/RENDER-SWEEP.md](docs/RENDER-SWEEP.md).
+
 Changes spanning packages should also pass `Tools/ci/test-all.sh` and the app
 tests. Keep meaningful regression coverage for changed behavior. Public API
 changes should update the relevant CLI schema or user documentation.
