@@ -18,6 +18,8 @@ Changes spanning packages should also pass `Tools/ci/test-all.sh` and the app
 tests. Keep meaningful regression coverage for changed behavior. Public API
 changes should update the relevant CLI schema or user documentation.
 
+Coding agents should follow [AGENTS.md](AGENTS.md).
+
 Keep generated projects, build output, machine-specific settings, OAuth
 credentials, signing keys, and real mail data out of commits. Preserve existing
 copyright and license notices. Contributions are provided under the project's
