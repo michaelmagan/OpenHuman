@@ -31,6 +31,10 @@ updates:
     commit-message:
       prefix: build
     groups:
+      # Why: mlx-swift and mlx-swift-lm are exact-pinned as a matched pair, and
+      # mlx-swift is 0.x, so any bump (minor included) can break; move them together
+      mlx:
+        patterns: ["mlx-swift*"]
       swift:
         patterns: ["*"]
         update-types: [minor, patch]
