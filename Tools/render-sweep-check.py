@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Checks a render-sweep folder: every index.json entry has a PNG, every PNG is listed, none is a single flat colour.
-Usage: Tools/render-sweep-check.py <folder>. Needs only the standard library plus macOS `sips` is NOT used; PNGs are decoded by zlib."""
+Usage: Tools/render-sweep-check.py [--list] <folder>; --list also prints each entry (file, screen, theme). Needs only the standard library plus macOS `sips` is NOT used; PNGs are decoded by zlib."""
 import json, os, struct, sys, zlib
 
 def decode(path):
@@ -26,7 +26,7 @@ def decode(path):
         rows.append(bytes(line)); prev = line
     return w, h, rows
 
-def main(folder):
+def main(folder, show=False):
     idx = json.load(open(os.path.join(folder, "index.json")))
     entries = idx if isinstance(idx, list) else idx.get("entries", idx.get("renders", []))
     listed = {e["file"] for e in entries}
@@ -42,6 +42,9 @@ def main(folder):
         except Exception as e: bad.append((f, f"unreadable: {e}"))
     print(f"{len(pngs)} PNGs, {len(listed)} index entries, {len(bad)} problems")
     for f, why in bad: print(" ", f, why)
+    if show:
+        for e in entries: print(f"  {e['file']}  ({e.get('screen', '?')}, {e.get('theme', '?')})")
     return 1 if bad else 0
 
-sys.exit(main(sys.argv[1]))
+args = sys.argv[1:]
+sys.exit(main(next(a for a in args if a != "--list"), "--list" in args))

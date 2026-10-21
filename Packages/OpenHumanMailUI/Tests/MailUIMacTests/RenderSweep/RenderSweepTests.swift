@@ -181,7 +181,6 @@ struct RenderSweepTests {
 
         let queued = try #require(compose.shownSending)
         compose.closeSendingView()
-        let store = theme.makeStore()
         for (screen, state) in [("sending-view-sent", SendingMessage.State.sent),
                                 ("sending-view-failed", .failed),
                                 ("sending-view-scheduled", .scheduled(at: Date().addingTimeInterval(86_400)))] {
@@ -189,10 +188,9 @@ struct RenderSweepTests {
                                          mode: queued.mode, from: queued.from, to: queued.to, cc: queued.cc,
                                          bcc: queued.bcc, subject: queued.subject, text: queued.text,
                                          attachmentNames: ["agenda.pdf"], date: queued.date, state: state)
-            let card = sweepStandaloneWindow(SendingCard(message: message, manager: compose).padding(24), store: store,
-                                             size: NSSize(width: 820, height: 520))
-            defer { card.orderOut(nil) }
-            try await sweepShoot(card, screen: screen, theme: theme)
+            try await sweepShootView(screen, theme: theme, size: NSSize(width: 820, height: 520)) { _ in
+                SendingCard(message: message, manager: compose).padding(24)
+            }
         }
     }
 

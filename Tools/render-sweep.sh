@@ -31,6 +31,8 @@ in $OH_SCRATCH_ROOT/OpenHumanMailUI instead, so a second run builds incrementall
                              paper, midnight, system-light, system-dark, light-reduce-motion,
                              dark-reduce-motion, light-increase-contrast, dark-increase-contrast.
                              The app half always renders the six built-in themes.
+  --list                     print each test, the themes it takes and the screens it renders, read from
+                             the test sources (Tools/render-sweep-list.py), then exit; needs no Xcode
   --keep-derived             keep the temporary build folder (its path is printed)
   -h, --help                 show this help
 EOF
@@ -44,6 +46,7 @@ while [[ $# -gt 0 ]]; do
         --swiftpm) SWIFTPM=1; shift ;;
         --tests) needs_value "$@"; TESTS="$2"; shift 2 ;;
         --themes) needs_value "$@"; THEMES="$2"; shift 2 ;;
+        --list) exec python3 "$ROOT/Tools/render-sweep-list.py" ;;
         --keep-derived) KEEP=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) die "unknown argument $1 (see --help)" ;;
