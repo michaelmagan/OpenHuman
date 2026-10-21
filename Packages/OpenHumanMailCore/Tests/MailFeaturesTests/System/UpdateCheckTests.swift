@@ -374,6 +374,49 @@ final class FakeUpdateFeed: Sendable {
         #expect(center.result == .notPublishedYet && feed.requests.count == 1)
     }
 
+    @Test func anInstalledUpdaterOwnsTheCheckAndGitHubIsNeverAsked() async {
+        let feed = FakeUpdateFeed(.success(feedReply(200, [releaseJSON("v0.2.0")])))
+        let updater = FakeSoftwareUpdater()
+        let center = UpdateCheckCenter(current: earlyBuild, fetch: feed.fetch, openURL: { _ in }, updater: updater,
+                                       now: { updateNow })
+        var shown = 0
+        center.showWindow = { shown += 1 }
+        center.begin()
+        center.begin()
+        await center.settle()
+        #expect(updater.checks == 2 && shown == 0)
+        #expect(!center.isPresented && center.phase == .idle && feed.requests.isEmpty)
+    }
+
+    @Test func thePaletteEntryHandsTheCheckToTheUpdater() async {
+        let f = ActionFixture()
+        let updater = FakeSoftwareUpdater()
+        let feed = FakeUpdateFeed()
+        f.env.system.updates = UpdateCheckCenter(current: earlyBuild, fetch: feed.fetch, openURL: { _ in }, updater: updater)
+        #expect(f.registry.availability(.checkForUpdates, host: f.router) == .enabled)
+        #expect(await f.run(.checkForUpdates, source: .palette))
+        #expect(updater.checks == 1 && feed.requests.isEmpty)
+    }
+
+    @Test func theLastCheckIsSaidPlainly() {
+        let updater = FakeSoftwareUpdater()
+        let center = UpdateCheckCenter(current: earlyBuild, fetch: FakeUpdateFeed().fetch, openURL: { _ in }, updater: updater,
+                                       now: { updateNow })
+        #expect(center.lastCheckedLine == "Not checked yet.")
+        updater.lastUpdateCheckDate = updateNow.addingTimeInterval(-2 * 3600)
+        #expect(center.lastCheckedLine == "Last checked 2 hours ago.")
+        updater.lastUpdateCheckDate = updateNow.addingTimeInterval(60)
+        #expect(center.lastCheckedLine == "Last checked now.", "a clock that moved back never reads as the future")
+        #expect(makeCenter(FakeUpdateFeed()).lastCheckedLine == nil, "the GitHub check has no schedule to report")
+    }
+
+    @Test func theUpdaterNoteSaysWhenAndWhatIsSent() {
+        #expect(UpdateCheck.updaterPrivacyNote.contains("when you click"))
+        #expect(UpdateCheck.updaterPrivacyNote.contains("once a day if you allow automatic checks"))
+        #expect(UpdateCheck.updaterPrivacyNote.contains("nothing about you or your mail"))
+        #expect(UpdateCheckCenter.automaticTitle == "Check for updates automatically")
+    }
+
     @Test func theCatalogEntryFollowsTheRules() throws {
         let descriptor = try #require(ActionCatalog.descriptor(.checkForUpdates))
         #expect(descriptor.id.rawValue == "updates.check" && descriptor.title == "Check for updates…")
@@ -383,5 +426,16 @@ final class FakeUpdateFeed: Sendable {
         #expect(descriptor.paletteKeywords.contains("update") && descriptor.paletteKeywords.contains("new version"))
         #expect(PaletteController.symbol(for: .checkForUpdates) == "arrow.down.circle")
         #expect(UpdateCheckCenter.menuTitle == "Check for Updates…" && UpdateCheckCenter.settingsTitle == "Check for updates")
+    }
+}
+
+@MainActor
+final class FakeSoftwareUpdater: SoftwareUpdater {
+    var automaticallyChecksForUpdates = false
+    var lastUpdateCheckDate: Date?
+    private(set) var checks = 0
+
+    func checkForUpdates() {
+        checks += 1
     }
 }

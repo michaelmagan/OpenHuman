@@ -1,0 +1,10 @@
+{#- The release notes Sparkle shows in its update window, as HTML. The release workflow passes this file to git-cliff
+    with --body, so the commits and their groups come from Tools/release/cliff.toml, like the markdown notes.
+
+    Every interpolated value goes through escape_xml: Tera does not escape by default, and an unescaped < in a commit
+    subject would be read by Sparkle's web view as a tag. -#}
+{% for group, commits in commits | group_by(attribute="group") %}<h3>{{ group | striptags | trim | upper_first | escape_xml }}</h3>
+<ul>
+{% for commit in commits %}  <li>{{ commit.message | split(pat="\n") | first | trim | escape_xml }}</li>
+{% endfor %}</ul>
+{% endfor %}

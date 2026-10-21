@@ -278,7 +278,7 @@ class CheckReleaseProfileTests(unittest.TestCase):
     def setUpClass(cls):
         cls.write_profile = staticmethod(make_profile_signer(cls))
 
-    def make_app(self, entitlements=None, fields=None, nested=None, **info):
+    def make_app(self, entitlements=None, fields=None, nested=None, downloader=None, **info):
         root = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root)
         app = root / "OpenHuman Mail.app"
@@ -295,10 +295,33 @@ class CheckReleaseProfileTests(unittest.TestCase):
             helper = app / "Contents" / "Helpers" / "helper"
             shutil.copy(shutil.which("true"), helper)
             self.sign(helper, nested, root / "helper.plist")
+        if downloader is not None:
+            self.make_sparkle(app, downloader, root)
         if fields is not None:
             self.write_profile(app / "Contents" / "embedded.provisionprofile", fields)
         self.sign(app, entitlements, root / "app.plist")
         return app
+
+    def make_sparkle(self, app, entitlements, root):
+        """A minimal Sparkle.framework whose Downloader.xpc is signed with the given entitlements, inside out."""
+        framework = app / "Contents" / "Frameworks" / "Sparkle.framework"
+        version = framework / "Versions" / "B"
+        xpc = version / "XPCServices" / "Downloader.xpc" / "Contents"
+        (xpc / "MacOS").mkdir(parents=True)
+        shutil.copy(shutil.which("true"), xpc / "MacOS" / "Downloader")
+        with open(xpc / "Info.plist", "wb") as handle:
+            plistlib.dump({"CFBundleExecutable": "Downloader", "CFBundleIdentifier": "org.sparkle-project.DownloaderService",
+                           "CFBundlePackageType": "XPC!"}, handle)
+        (version / "Resources").mkdir()
+        shutil.copy(shutil.which("true"), version / "Sparkle")
+        with open(version / "Resources" / "Info.plist", "wb") as handle:
+            plistlib.dump({"CFBundleExecutable": "Sparkle", "CFBundleIdentifier": "org.sparkle-project.Sparkle",
+                           "CFBundlePackageType": "FMWK"}, handle)
+        (framework / "Versions" / "Current").symlink_to("B")
+        for name in ("Sparkle", "Resources", "XPCServices"):
+            (framework / name).symlink_to(f"Versions/Current/{name}")
+        self.sign(xpc.parent, entitlements, root / "downloader.plist")
+        self.sign(framework, None, root / "framework.plist")
 
     def sign(self, path, entitlements, plist):
         args = ["codesign", "--force", "--sign", "-"]
@@ -382,6 +405,18 @@ class CheckReleaseProfileTests(unittest.TestCase):
         result, fails = self.check("--unsigned", self.make_app(nested={"keychain-access-groups": [GROUP]}))
         self.assertEqual(fails, ["Contents/Helpers/helper: entitlement keychain-access-groups needs a provisioning "
                                  "profile; only the app itself may carry it"])
+
+    def test_only_sparkles_downloader_may_keep_its_own_sandbox(self):
+        sandbox = {"com.apple.security.app-sandbox": True, "com.apple.security.network.client": True}
+        result, fails = self.check("--unsigned", self.make_app(downloader=sandbox))
+        self.assertEqual(fails, [], result.stdout)
+        self.assertIn("entitlement com.apple.security.network.client (Sparkle's sandboxed downloader)", result.stdout)
+        result, fails = self.check("--unsigned", self.make_app(nested=sandbox))
+        self.assertEqual(len(fails), 2, fails)
+        self.assertTrue(all(line.startswith("Contents/Helpers/helper: entitlement") for line in fails), fails)
+        result, fails = self.check("--unsigned", self.make_app(downloader={"com.apple.security.cs.disable-library-validation": True}))
+        self.assertEqual(len(fails), 1, fails)
+        self.assertIn("disable-library-validation is broader than this app needs", fails[0])
 
     def test_a_profile_no_entitlement_needs_only_warns(self):
         result, fails = self.check("--unsigned", self.make_app(fields=profile()))

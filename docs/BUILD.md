@@ -17,7 +17,9 @@ Tools/ci/build-app.sh
 ```
 
 Bootstrap downloads the pinned, checksum-verified XcodeGen version from
-`Tools/versions.env` and generates `Apps/Mail/Mail.xcodeproj`. Generated projects
+`Tools/versions.env` and generates `Apps/Mail/Mail.xcodeproj`. The app links
+[Sparkle](https://sparkle-project.org) for in-app updates as a Swift package
+pinned in `Apps/Mail/project.yml`; Xcode fetches it with the other packages. Generated projects
 and downloaded tools are ignored. Local builds use ad-hoc signing by default.
 For a development team override, copy
 `Apps/Mail/Config/Local.xcconfig.example` to `Local.xcconfig` and edit that local
@@ -70,6 +72,16 @@ Local build output is under `build/`; the app product is
 `build/dd/Build/Products/Release/OpenHumanMail.app`. Release signing and binary
 distribution are described in [the release guide](release/RELEASE-HOWTO.md).
 
+## Updates
+
+Sparkle starts only in a Release build whose `Info.plist` carries `SUFeedURL`
+and a `SUPublicEDKey`, never in Debug or DevTools builds and never under tests,
+so local runs and the test suites do not check for updates or reach the network.
+Those builds keep the earlier GitHub check behind the same menu item and
+Settings section. CI checks that the Release build embeds `Sparkle.framework`
+and reads the appcast on `main`. Releases, the appcast and the signing key are
+described in [In-app updates and automated releases](release/SPARKLE.md).
+
 ## Entitlements
 
 The build setting `OH_ENTITLEMENTS` names the entitlements file Xcode signs the
@@ -94,7 +106,7 @@ The app has three build configurations, all from the one `Mail` target:
 |---|---|---|
 | `Debug` | `DEBUG OH_DEV_TOOLS` | Everything below, unoptimised. Xcode runs and the tests use it. |
 | `DevTools` | `OH_DEV_TOOLS` | Release optimisation plus the developer tools: the Developer menu (test checklist, feedback over Tailscale), Settings › Advanced › Developer options (including Show debugging tools), the sample-data launch arguments and the developer variables below. Same bundle id and data as Release. |
-| `Release` | none | Nothing developer-only. This is the build `Tools/release/make-dmg.sh` ships. |
+| `Release` | none | Nothing developer-only; Sparkle updates once the public key is set. This is the build `Tools/release/make-dmg.sh` ships. |
 
 ```sh
 Tools/ci/build-app.sh --configuration DevTools --local-install

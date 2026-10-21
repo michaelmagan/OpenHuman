@@ -7,12 +7,26 @@ import SwiftUI
 @MainActor
 enum UpdateCheckSupport {
     static func makeCenter(environment: [String: String] = ProcessInfo.processInfo.environment,
-                           label: BuildLabel = .main) -> UpdateCheckCenter {
+                           label: BuildLabel = .main, info: [String: Any] = Bundle.main.infoDictionary ?? [:]) -> UpdateCheckCenter {
         let center = UpdateCheckCenter(current: label, feed: .openHuman, fetch: fetch(environment: environment),
-                                       openURL: { NSWorkspace.shared.open($0) })
+                                       openURL: { NSWorkspace.shared.open($0) },
+                                       updater: updater(environment: environment, info: info))
         center.showWindow = { MainWindowPresenter.show() }
         return center
     }
+
+    // Why: a test run or a developer build never starts Sparkle, and a build without a feed and key keeps the GitHub check
+    static func updater(environment: [String: String], info: [String: Any],
+                        developerBuild: Bool = isDeveloperBuild) -> (any SoftwareUpdater)? {
+        guard environment["XCTestConfigurationFilePath"] == nil, !developerBuild, SparkleUpdater.isConfigured(info) else { return nil }
+        return SparkleUpdater()
+    }
+
+    #if OH_DEV_TOOLS
+    static let isDeveloperBuild = true
+    #else
+    static let isDeveloperBuild = false
+    #endif
 
     // Why: a test run never reaches the network; only a click in a real launch asks GitHub
     static func fetch(environment: [String: String]) -> UpdateFeedFetch {

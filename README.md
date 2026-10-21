@@ -31,7 +31,7 @@ It is Swift-native, runs locally (including its AI features), and is agent-ready
 
 This is a very early alpha, so expect bugs. It runs on Apple silicon Macs with macOS 26.0 or later. Its author has only tested it on macOS 27 on Apple silicon. Features that depend on macOS 27, such as Apple's on-device model, degrade gracefully on macOS 26 and offer alternatives. It is built with Xcode 27 and Swift 6.4.
 
-[Download the signed and notarized release](https://github.com/michaelmagan/OpenHuman/releases/tag/v0.1.0), or build from source. Maintainers can follow the [release guide](docs/release/RELEASE-HOWTO.md) to build, verify and publish a DMG. Homebrew installation will be announced when ready.
+[Download the signed and notarized release](https://github.com/michaelmagan/OpenHuman/releases/tag/v0.1.0), or build from source. Maintainers can follow the [release guide](docs/release/RELEASE-HOWTO.md) to build, verify and publish a DMG, or let GitHub Actions do it ([automated releases](docs/release/SPARKLE.md)). Homebrew installation will be announced when ready.
 
 <br>
 
@@ -87,6 +87,10 @@ This is a very early alpha, so expect bugs. It runs on Apple silicon Macs with m
 
 Open the DMG and drag OpenHuman Mail to Applications. On first launch, follow onboarding to create and import your own Google Desktop app OAuth client. No shared Google client is bundled.
 
+### Updates
+
+Releases after 0.1.0 update themselves with [Sparkle](https://sparkle-project.org): use **Check for Updates…** in the app menu, or allow automatic daily checks when Mail asks on its second launch (Settings › General › Updates changes it later). A check sends the app's version to GitHub and nothing about you or your mail, and an update installs only if it is signed with OpenHuman's key. Version 0.1.0 has no updater: install the next release by hand once.
+
 ## Opening an unsigned build
 
 macOS may block unsigned builds because they are not notarized by Apple. To open one, try to open the app once. Then open System Settings, click Privacy & Security, and scroll to Security. Click Open Anyway, enter your login password, and click OK. The Open Anyway button stays available for about an hour after you first try to open the app.
@@ -120,7 +124,8 @@ create and import your own Google Desktop OAuth client. Mail and settings are st
 | `Apps/Mail/` | macOS application, XcodeGen project, and application tests |
 | `Packages/` | Shared Swift packages, mail storage and sync, UI, AI, and CLI |
 | `Tools/ci/` | Build, test, packaging, and architecture checks |
-| `Tools/release/` | Versioning, Developer ID signing, notarization, and DMG tooling |
+| `Tools/release/` | Versioning, Developer ID signing, notarization, DMG, release notes and appcast tooling |
+| `appcast.xml` | Sparkle update feed, changed only by release pull requests |
 | `docs/cli/` | CLI user guide, agent guide, and JSON schema |
 | `skills/openhuman-mail/` | Agent integration for the local CLI |
 

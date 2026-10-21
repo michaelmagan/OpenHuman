@@ -11,11 +11,13 @@ public final class UpdateCheckCenter {
 
     public static let menuTitle = "Check for Updates…"
     public static let settingsTitle = "Check for updates"
+    public static let automaticTitle = "Check for updates automatically"
 
     public private(set) var phase: Phase = .idle
     public var isPresented = false
     public let current: BuildLabel
     public let feed: UpdateFeed
+    public let updater: (any SoftwareUpdater)?
 
     @ObservationIgnored public var showWindow: (@MainActor () -> Void)?
     @ObservationIgnored private let fetch: UpdateFeedFetch
@@ -24,9 +26,11 @@ public final class UpdateCheckCenter {
     @ObservationIgnored private var running: Task<Void, Never>?
 
     public init(current: BuildLabel, feed: UpdateFeed = .openHuman, fetch: @escaping UpdateFeedFetch,
-                openURL: @escaping @MainActor (URL) -> Void, now: @escaping @Sendable () -> Date = { Date() }) {
+                openURL: @escaping @MainActor (URL) -> Void, updater: (any SoftwareUpdater)? = nil,
+                now: @escaping @Sendable () -> Date = { Date() }) {
         self.current = current
         self.feed = feed
+        self.updater = updater
         self.fetch = fetch
         self.openURL = openURL
         self.now = now
@@ -64,7 +68,17 @@ public final class UpdateCheckCenter {
 
     public var earlyDevelopmentLine: String? { UpdateCheck.earlyDevelopmentLine(for: result, current: current) }
 
+    public var lastCheckedLine: String? {
+        guard let updater else { return nil }
+        return UpdateCheck.lastCheckedLine(updater.lastUpdateCheckDate, now: now())
+    }
+
+    // Why: with an updater installed it owns the check, the download and the install; the sheet is the fallback
     public func begin() {
+        if let updater {
+            updater.checkForUpdates()
+            return
+        }
         showWindow?()
         isPresented = true
         if !isChecking { start() }

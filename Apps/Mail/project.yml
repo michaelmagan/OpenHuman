@@ -22,6 +22,8 @@ packages:
   OpenHumanAIMLX: { path: ../../Packages/OpenHumanAIMLX }
   OpenHumanSemanticIndex: { path: ../../Packages/OpenHumanSemanticIndex }
   OpenHumanMailLive: { path: ../../Packages/OpenHumanMailLive }
+  # In-app updates (docs/release/SPARKLE.md). Keep in step with SPARKLE_VERSION in Tools/versions.env
+  Sparkle: { url: https://github.com/sparkle-project/Sparkle, exactVersion: 2.10.0 }
 targets:
   Mail:
     type: application
@@ -61,6 +63,11 @@ targets:
         OHReleaseChannel: $(OH_RELEASE_CHANNEL)
         # Used only once the signature grants the group; ad hoc and CI builds keep the default group
         OHKeychainAccessGroup: $(AppIdentifierPrefix)dev.openhuman.shared
+        # Sparkle reads the appcast that the release workflow adds to main (docs/release/SPARKLE.md)
+        SUFeedURL: https://raw.githubusercontent.com/michaelmagan/OpenHuman/main/appcast.xml
+        # The base64 public key printed by Sparkle's generate_keys. Until it is set, Mail keeps the GitHub check
+        # and the release workflow refuses to run. Written here, not in an .xcconfig, where "//" starts a comment
+        SUPublicEDKey: ""
     postBuildScripts:
       - name: Stamp git commit
         basedOnDependencyAnalysis: false
@@ -91,6 +98,7 @@ targets:
       - { package: OpenHumanSemanticIndex, product: OpenHumanSemanticIndex }
       - { package: OpenHumanMailLive, product: OpenHumanMailLive }
       - { package: OpenHumanMailLive, product: MailSystem }
+      - { package: Sparkle, product: Sparkle }
   MailAppTests:
     type: bundle.unit-test
     platform: macOS

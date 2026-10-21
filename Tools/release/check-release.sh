@@ -52,6 +52,9 @@ ICLOUD_ENTITLEMENTS+=" com.apple.developer.icloud-container-identifiers com.appl
 ICLOUD_ENTITLEMENTS+=" keychain-access-groups"
 ALLOWED_ENTITLEMENTS="$ICLOUD_ENTITLEMENTS"
 IDENTITY_ENTITLEMENTS="com.apple.application-identifier com.apple.developer.team-identifier"
+# Sparkle's downloader service runs in a sandbox of its own: these narrow that one helper and grant the app nothing
+SPARKLE_DOWNLOADER="Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc/"
+SPARKLE_DOWNLOADER_ENTITLEMENTS="com.apple.security.app-sandbox com.apple.security.network.client"
 
 # Only Debug and DevTools builds may carry these; a Release build compiles them out
 DEVELOPER_NAMES="-UseFakeGmail -UseFakeData -UseFixtureStore -UseFakeCalendar -FakeGmailNotifications
@@ -139,6 +142,8 @@ check_signed_entitlements() {
             if [[ "$main" == 1 ]]; then ok "$label: entitlement $key (allowed)"
             else bad "$label: entitlement $key needs a provisioning profile; only the app itself may carry it"; fi
         elif has_word "$IDENTITY_ENTITLEMENTS" "$key"; then note "$label: identity entry $key (ties the signature to its provisioning profile)"
+        elif [[ "$main" == 0 && "$label" == "$SPARKLE_DOWNLOADER"* ]] && has_word "$SPARKLE_DOWNLOADER_ENTITLEMENTS" "$key"; then
+            ok "$label: entitlement $key (Sparkle's sandboxed downloader)"
         else bad "$label: entitlement $key is broader than this app needs (ALLOWED_ENTITLEMENTS in $0)"; fi
     done
 }

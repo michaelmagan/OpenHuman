@@ -1,0 +1,362 @@
+name: Release
+
+# Phase 1 of 2 (docs/release/SPARKLE.md). Running this publishes nothing and commits nothing to main. From the commit
+# at the tip of main it builds a Developer ID signed, notarized DMG with Tools/release/make-dmg.sh, signs the DMG for
+# Sparkle, puts it on a DRAFT GitHub pre-release, and opens a release/v<version> pull request that adds the release to
+# appcast.xml. Merging that pull request runs release-publish.yml, which publishes the draft; the appcast on main is
+# then what installed copies read. Nothing reaches people without a reviewed, merged pull request.
+#
+# The version is MARKETING_VERSION in Apps/Mail/Config/Version.xcconfig (Tools/release/bump-version.sh): raise it and
+# merge that change before dispatching. The build number, which Sparkle compares, is the commit count of main, raised
+# when needed above the last release's build (0.1.0 was build 1004).
+
+on:
+  workflow_dispatch:
+    inputs:
+      icloud:
+        description: Sign with the iCloud entitlements (needs the DEVELOPER_ID_PROVISIONING_PROFILE secret)
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write       # the draft release and the release/* branch
+  pull-requests: write  # the appcast pull request
+  actions: read         # the CI run on this commit
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    # Repository or "release" environment secrets; add required reviewers to that environment to gate each run
+    environment: release
+    runs-on: ${{ vars.MACOS_RUNNER_LABEL || 'xcode-27' }}
+    timeout-minutes: 150
+    env:
+      # Why: a released Xcode, never the newest installed beta
+      XCODE_APP: ${{ vars.XCODE_APP || '/Applications/Xcode_27.0.app' }}
+      XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select Xcode
+        run: |
+          if [ ! -d "$XCODE_APP" ]; then
+            echo "::error::$XCODE_APP is not installed on this runner; set the XCODE_APP and XCODE_VERSION repository variables"
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          found="$(xcodebuild -version | sed -n 's/^Xcode //p')"
+          if [ "$found" != "$XCODE_VERSION" ]; then
+            echo "::error::$XCODE_APP is Xcode $found, expected $XCODE_VERSION"
+            exit 1
+          fi
+          xcodebuild -version
+
+      - name: Install the Metal toolchain
+        run: |
+          if ! xcrun metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun metal --version
+
+      - name: Version, build number and tag
+        id: ver
+        run: |
+          set -euo pipefail
+          VERSION="$(Tools/release/bump-version.sh)"
+          TAG="v$VERSION"
+          # Sparkle offers an update only for a higher CFBundleVersion, so the build number never goes below one
+          # already handed out: the commit count of main, or one more than the last release or appcast entry
+          BUILD="$(git rev-list --count HEAD)"
+          last_appcast="$(sed -n 's/.*<sparkle:version>\([0-9]*\)<.*/\1/p' appcast.xml | sort -n | tail -1)"
+          last_tag="$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty')"
+          last_release=""
+          if [ -n "$last_tag" ]; then
+            last_release="$(gh release download "$last_tag" --pattern release-info.txt --output - 2>/dev/null | sed -n 's/^build=//p' | head -1 || true)"
+          fi
+          for last in "$last_appcast" "$last_release"; do
+            if [[ "$last" =~ ^[0-9]+$ ]] && (( last + 1 > BUILD )); then BUILD=$((last + 1)); fi
+          done
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG is already tagged, so $VERSION was released. Raise the version with Tools/release/bump-version.sh, merge that, then run this again."
+            exit 1
+          fi
+          state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || echo missing)"
+          if [ "$state" = false ]; then
+            echo "::error::$TAG is a published release already. Raise the version first."
+            exit 1
+          fi
+          {
+            echo "VERSION=$VERSION"
+            echo "TAG=$TAG"
+            echo "BUILD=$BUILD"
+            echo "DRAFT=$state"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION, build $BUILD, from $GITHUB_SHA"
+
+      # Why: the release is built from a commit CI already tested; running the suites again here would double the time
+      - name: Require a green CI run on this commit
+        run: |
+          set -euo pipefail
+          green="$(gh api "repos/$GH_REPO/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=success" --jq .total_count)"
+          if [ "$green" = 0 ]; then
+            echo "::error::CI has not passed on $GITHUB_SHA. Wait for the CI run on main to finish green, then run this again."
+            exit 1
+          fi
+
+      - name: Install the release tools
+        id: tools
+        run: |
+          set -euo pipefail
+          Tools/release/install-release-tools.sh
+          echo "SPARKLE_BIN=$(Tools/release/install-release-tools.sh --print-dir sparkle)" >> "$GITHUB_OUTPUT"
+          echo "GIT_CLIFF=$(Tools/release/install-release-tools.sh --print-dir git-cliff)/git-cliff" >> "$GITHUB_OUTPUT"
+
+      - name: Check the Sparkle keys
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          PUBLIC="$(sed -n 's/^[[:space:]]*SUPublicEDKey:[[:space:]]*"\{0,1\}\([^"[:space:]]*\)"\{0,1\}[[:space:]]*$/\1/p' Apps/Mail/project.yml)"
+          if [ -z "$PUBLIC" ]; then
+            echo "::error::SUPublicEDKey in Apps/Mail/project.yml is empty. Do the one-time key setup in docs/release/SPARKLE.md first."
+            exit 1
+          fi
+          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
+            echo "::error::The SPARKLE_PRIVATE_KEY secret is missing. See docs/release/SPARKLE.md."
+            exit 1
+          fi
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | xcrun swift Tools/release/check-sparkle-key.swift "$PUBLIC"
+
+      - name: Release notes
+        env:
+          TAG: ${{ steps.ver.outputs.TAG }}
+          GIT_CLIFF: ${{ steps.tools.outputs.GIT_CLIFF }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/notes"
+          # The commit range, defined once for every git-cliff run below. --unreleased, never --latest: the tag does
+          # not exist until release-publish.yml publishes the draft, so to git-cliff the "latest" release is still the
+          # previous one, and --latest would print the previous release's notes. --tag names the range being cut.
+          CLIFF=("$GIT_CLIFF" --config Tools/release/cliff.toml --unreleased --tag "$TAG" --strip header)
+          "${CLIFF[@]}" > "$RUNNER_TEMP/notes/changes.md"
+          "${CLIFF[@]}" --body "$(cat Tools/release/appcast-body.tera)" > "$RUNNER_TEMP/notes/appcast.html"
+
+          # Wrong notes are still notes, so a non-empty check proves little. Check the real invariant: every commit
+          # git-cliff chose is new since the last release tag.
+          LAST_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          "${CLIFF[@]}" --context > "$RUNNER_TEMP/notes/context.json"
+          git rev-list "${LAST_TAG:+$LAST_TAG..}HEAD" > "$RUNNER_TEMP/notes/range.txt"
+          python3 - "$RUNNER_TEMP/notes" "${LAST_TAG:-the first commit}" <<'PY'
+          import json, pathlib, sys
+          notes, last = pathlib.Path(sys.argv[1]), sys.argv[2]
+          in_range = set((notes / "range.txt").read_text().split())
+          commits = [c for release in json.loads((notes / "context.json").read_text()) for c in release.get("commits", [])]
+          stray = [c for c in commits if c["id"] not in in_range]
+          for c in stray[:10]:
+              print(f"  {c['id'][:8]} {c['message'].splitlines()[0]}")
+          if stray:
+              sys.exit(f"::error::{len(stray)} of {len(commits)} commits in the notes are not new since {last}")
+          print(f"Release notes cover {len(commits)} commit(s) since {last}")
+          PY
+          [ -s "$RUNNER_TEMP/notes/changes.md" ] || echo "No user-facing commits since ${LAST_TAG:-the first commit}." > "$RUNNER_TEMP/notes/changes.md"
+
+      - name: Set up a signing keychain for this run
+        id: signing
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_API_KEY_P8_BASE64: ${{ secrets.NOTARY_API_KEY_P8_BASE64 }}
+          NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
+          PROVISIONING_PROFILE_BASE64: ${{ secrets.DEVELOPER_ID_PROVISIONING_PROFILE }}
+          ICLOUD: ${{ inputs.icloud }}
+        run: |
+          set -euo pipefail
+          for name in DEVELOPER_ID_P12_BASE64 DEVELOPER_ID_P12_PASSWORD NOTARY_API_KEY_P8_BASE64 NOTARY_API_KEY_ID NOTARY_API_ISSUER_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::The $name secret is missing. See docs/release/SPARKLE.md, 'Secrets'."
+              exit 1
+            fi
+          done
+          if [ "$ICLOUD" = true ] && [ -z "$PROVISIONING_PROFILE_BASE64" ]; then
+            echo "::error::An iCloud release needs the DEVELOPER_ID_PROVISIONING_PROFILE secret."
+            exit 1
+          fi
+          # Everything lives in RUNNER_TEMP and is removed by the last step, whatever happens in between
+          DIR="$RUNNER_TEMP/signing"; mkdir -p "$DIR"; chmod 700 "$DIR"
+          KC="$DIR/openhuman-release.keychain-db"
+          openssl rand -hex 24 > "$DIR/keychain.password"; chmod 600 "$DIR/keychain.password"
+          security create-keychain -p "$(cat "$DIR/keychain.password")" "$KC"
+          # No timeout: notarization waits can be long, and make-dmg.sh unlocks it again before signing
+          security set-keychain-settings "$KC"
+          security unlock-keychain -p "$(cat "$DIR/keychain.password")" "$KC"
+          printf '%s' "$DEVELOPER_ID_P12_BASE64" | base64 --decode > "$DIR/identity.p12"
+          security import "$DIR/identity.p12" -k "$KC" -P "$DEVELOPER_ID_P12_PASSWORD" -f pkcs12 -x -T /usr/bin/codesign
+          rm -f "$DIR/identity.p12"
+          # Why: the chain must build from this keychain alone, whatever the runner's own keychains hold
+          curl -fsSL -o "$DIR/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+          security import "$DIR/DeveloperIDG2CA.cer" -k "$KC" || true
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$(cat "$DIR/keychain.password")" "$KC" >/dev/null
+          # Xcode's export step searches the user's keychain list, so this run's keychain joins it until cleanup
+          security list-keychains -d user | sed 's/^[[:space:]]*"\(.*\)"$/\1/' > "$DIR/search-list"
+          search=(); while IFS= read -r keychain; do search+=("$keychain"); done < "$DIR/search-list"
+          security list-keychains -d user -s "$KC" ${search[@]+"${search[@]}"}
+          printf '%s' "$NOTARY_API_KEY_P8_BASE64" | base64 --decode > "$DIR/AuthKey.p8"; chmod 600 "$DIR/AuthKey.p8"
+          xcrun notarytool store-credentials openhuman-release-ci --key "$DIR/AuthKey.p8" --key-id "$NOTARY_API_KEY_ID" \
+            --issuer "$NOTARY_API_ISSUER_ID" --keychain "$KC" >/dev/null
+          rm -f "$DIR/AuthKey.p8"
+          HASH="$(security find-identity -v -p codesigning "$KC" | sed -n 's/^[[:space:]]*1)[[:space:]]*\([0-9A-F]\{40\}\)[[:space:]]*"Developer ID Application: .*$/\1/p')"
+          if [ -z "$HASH" ]; then
+            echo "::error::DEVELOPER_ID_P12_BASE64 holds no 'Developer ID Application' identity."
+            exit 1
+          fi
+          {
+            echo "OH_SIGNING_KEYCHAIN=$KC"
+            echo "OH_SIGNING_KEYCHAIN_PASSWORD_FILE=$DIR/keychain.password"
+            echo "OH_SIGN_IDENTITY=$HASH"
+            echo "OH_NOTARY_PROFILE=openhuman-release-ci"
+          } > "$DIR/release.env"
+          if [ "$ICLOUD" = true ]; then
+            printf '%s' "$PROVISIONING_PROFILE_BASE64" | base64 --decode > "$DIR/release.provisionprofile"
+            echo "OH_PROVISIONING_PROFILE=$DIR/release.provisionprofile" >> "$DIR/release.env"
+          fi
+          echo "DIR=$DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Build, sign and notarize the DMG
+        env:
+          # Why: make-dmg.sh reads only this file, never a release.env this runner's account may hold
+          OH_RELEASE_ENV: ${{ steps.signing.outputs.DIR }}/release.env
+          BUILD: ${{ steps.ver.outputs.BUILD }}
+          ICLOUD: ${{ inputs.icloud }}
+        run: |
+          set -euo pipefail
+          flags=(--build-number "$BUILD")
+          [ "$ICLOUD" = true ] || flags+=(--no-icloud)
+          Tools/release/make-dmg.sh "${flags[@]}"
+
+      - name: Sign the DMG for Sparkle
+        id: sparkle
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          SPARKLE_BIN: ${{ steps.tools.outputs.SPARKLE_BIN }}
+          VERSION: ${{ steps.ver.outputs.VERSION }}
+          BUILD: ${{ steps.ver.outputs.BUILD }}
+        run: |
+          set -euo pipefail
+          OUT="build/release/OpenHuman-Mail-$VERSION-$BUILD"
+          DMG="$OUT/OpenHuman-Mail-$VERSION.dmg"
+          # sign_update prints the enclosure attributes: sparkle:edSignature="..." length="..."
+          FRAGMENT="$(printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_BIN/sign_update" --ed-key-file - "$DMG")"
+          echo "Sparkle signature: $FRAGMENT"
+          {
+            echo "FRAGMENT=$FRAGMENT"
+            echo "OUT=$OUT"
+            echo "DMG=$DMG"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Put the DMG on a draft pre-release
+        env:
+          VERSION: ${{ steps.ver.outputs.VERSION }}
+          TAG: ${{ steps.ver.outputs.TAG }}
+          DRAFT: ${{ steps.ver.outputs.DRAFT }}
+          OUT: ${{ steps.sparkle.outputs.OUT }}
+          DMG: ${{ steps.sparkle.outputs.DMG }}
+        run: |
+          set -euo pipefail
+          # A draft from an earlier run is replaced, so the draft always points at the commit built here
+          if [ "$DRAFT" = true ]; then gh release delete "$TAG" --yes; fi
+          python3 - "$OUT/release-notes.md" "$RUNNER_TEMP/notes/changes.md" <<'PY'
+          import pathlib, sys
+          notes, changes = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]).read_text().strip()
+          text = notes.read_text()
+          if "\n## Changes\n" not in text:
+              sys.exit("::error::make-dmg.sh wrote release notes without a '## Changes' section")
+          notes.write_text(text.replace("\n## Changes\n", f"\n## Changes\n\n{changes}\n", 1))
+          PY
+          # publish-github.sh checks the record, checksum and notes, and creates the draft at this exact commit
+          Tools/release/publish-github.sh --dmg "$DMG" "$VERSION"
+
+      - name: Add the release to the appcast
+        env:
+          VERSION: ${{ steps.ver.outputs.VERSION }}
+          TAG: ${{ steps.ver.outputs.TAG }}
+          BUILD: ${{ steps.ver.outputs.BUILD }}
+          FRAGMENT: ${{ steps.sparkle.outputs.FRAGMENT }}
+        run: |
+          set -euo pipefail
+          MINIMUM="$(sed -n 's/^[[:space:]]*LSMinimumSystemVersion:[[:space:]]*"\{0,1\}\([0-9.]*\)"\{0,1\}[[:space:]]*$/\1/p' Apps/Mail/project.yml)"
+          # The download works once release-publish.yml publishes the draft, which is also when this reaches main
+          python3 -B Tools/release/update-appcast.py --appcast appcast.xml --version "$VERSION" --build "$BUILD" \
+            --download-url "https://github.com/$GH_REPO/releases/download/$TAG/OpenHuman-Mail-$VERSION.dmg" \
+            --signature-fragment "$FRAGMENT" --notes-file "$RUNNER_TEMP/notes/appcast.html" \
+            --minimum-system-version "${MINIMUM:-26.0}" \
+            --early-development-note "Early development build — expect rough edges. Please send feedback."
+
+      - name: Open the appcast pull request
+        env:
+          VERSION: ${{ steps.ver.outputs.VERSION }}
+          TAG: ${{ steps.ver.outputs.TAG }}
+          BUILD: ${{ steps.ver.outputs.BUILD }}
+        run: |
+          set -euo pipefail
+          BRANCH="release/$TAG"
+          # The branch and its one commit are made through the API, so GitHub signs the commit
+          if gh api "repos/$GH_REPO/git/ref/heads/$BRANCH" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/heads/$BRANCH" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/$GH_REPO/git/refs" -f ref="refs/heads/$BRANCH" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          BLOB="$(git rev-parse "$GITHUB_SHA:appcast.xml")"
+          base64 < appcast.xml | tr -d '\n' > "$RUNNER_TEMP/appcast.b64"
+          gh api -X PUT "repos/$GH_REPO/contents/appcast.xml" -f branch="$BRANCH" -f sha="$BLOB" \
+            -f message="chore(release): add $TAG to the appcast" -F content=@"$RUNNER_TEMP/appcast.b64" >/dev/null
+
+          if [ -n "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            echo "The pull request for $BRANCH is open already; its branch now holds this run's appcast."
+            exit 0
+          fi
+          cat > "$RUNNER_TEMP/pr-body.md" <<EOF
+          Publishes **OpenHuman Mail $VERSION** (build $BUILD), an early development pre-release, built from $GITHUB_SHA.
+
+          Merging this pull request:
+          - adds the release to \`appcast.xml\` on \`main\`, where installed copies look for updates, and
+          - runs \`release-publish.yml\`, which publishes the draft release [$TAG](https://github.com/$GH_REPO/releases) and creates the tag at $GITHUB_SHA.
+
+          Before merging, check the draft's notes (edit **Known limitations** there), and open the signed DMG on another Mac (docs/release/RELEASE-HOWTO.md). Nothing is public until this merges.
+
+          > [!NOTE]
+          > GitHub does not run workflows for pull requests opened by GitHub Actions, so CI does not start on its own. Close and reopen this pull request to run it, then merge once it is green.
+          EOF
+          if ! gh pr create --base main --head "$BRANCH" --title "chore(release): $TAG" --body-file "$RUNNER_TEMP/pr-body.md"; then
+            echo "::error::Could not open the pull request. Allow GitHub Actions to create pull requests (Settings > Actions > General), or open it yourself from $BRANCH."
+            exit 1
+          fi
+
+      - name: Remove the signing keychain
+        if: always()
+        env:
+          DIR: ${{ steps.signing.outputs.DIR }}
+        run: |
+          DIR="${DIR:-$RUNNER_TEMP/signing}"
+          if [ -f "$DIR/search-list" ]; then
+            search=(); while IFS= read -r keychain; do search+=("$keychain"); done < "$DIR/search-list"
+            security list-keychains -d user -s "${search[@]}"
+          fi
+          security delete-keychain "$DIR/openhuman-release.keychain-db" 2>/dev/null || true
+          rm -rf "$DIR"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: release-logs
+          path: build/release/*/logs
+          if-no-files-found: ignore

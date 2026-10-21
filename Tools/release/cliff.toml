@@ -1,0 +1,36 @@
+# git-cliff settings for the release notes the release workflow writes (docs/release/SPARKLE.md). The workflow runs
+# git-cliff twice over the same commits: once with the markdown body below for the GitHub release, once with
+# Tools/release/appcast-body.tera for the HTML that Sparkle shows. Both read these parsers, so the two never group a
+# commit differently.
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | trim }}\
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+
+[git]
+# Conventional subjects (feat:, fix:) are grouped; every other commit subject is kept under "Changes", because most of
+# this repository's history predates conventional commits.
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+commit_parsers = [
+    { message = "^Merge ", skip = true },
+    { message = "^chore\\(release\\)", skip = true },
+    { message = "^feat", group = "<!-- 0 -->Features" },
+    { message = "^fix", group = "<!-- 1 -->Fixes" },
+    { message = "^perf", group = "<!-- 2 -->Performance" },
+    { message = "^docs", group = "<!-- 4 -->Documentation" },
+    { message = "^(refactor|style|test|build|ci|chore)", skip = true },
+    { message = ".*", group = "<!-- 3 -->Changes" },
+]
+protect_breaking_commits = true
+filter_commits = false
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+sort_commits = "oldest"

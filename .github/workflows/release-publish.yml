@@ -1,0 +1,78 @@
+name: Release publish
+
+# Phase 2 of 2 (docs/release/SPARKLE.md). Runs when a release/v<version> pull request opened by release.yml is merged
+# into main. It publishes the draft pre-release that release.yml made, which creates the tag. The appcast entry that
+# the pull request added is on main from the merge on, so the download and the update feed go live together.
+#
+# The tag names the commit the DMG was built from (the draft's target, which release-info.txt also records), never
+# "main": a branch name would let the tag land on whatever main is when this job runs.
+#
+# Security: this file runs from main, not from the pull request. A fork's branch cannot be named release/* in this
+# repository, and only maintainers can merge. The only secret in scope is the default token; the Sparkle and Apple
+# keys are never referenced here.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'release/v')
+    # Why: only gh calls, and the appcast entry is on main from the merge on, so this must not queue behind a Mac build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+    steps:
+      - name: Check the tag
+        id: tag
+        run: |
+          set -euo pipefail
+          TAG="${HEAD_REF#release/}"
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Unexpected tag '$TAG' from branch '$HEAD_REF'"; exit 1; }
+          echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the draft release
+        env:
+          TAG: ${{ steps.tag.outputs.TAG }}
+        run: |
+          set -euo pipefail
+          state="$(gh release view "$TAG" --json isDraft,targetCommitish --jq '[.isDraft, .targetCommitish] | @tsv' 2>/dev/null)" || {
+            echo "::error::No draft release $TAG. Did release.yml finish? Nothing was published."
+            exit 1
+          }
+          IS_DRAFT="${state%%$'\t'*}"; BUILT_SHA="${state#*$'\t'}"
+          if [ "$IS_DRAFT" != true ]; then
+            echo "$TAG is published already; nothing to do."
+            exit 0
+          fi
+          [[ "$BUILT_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::The draft's target is '$BUILT_SHA', not a commit. Nothing was published."; exit 1; }
+          # The DMG's commit must be in main's history at the merge, or the tag would name a commit main never had
+          status="$(gh api "repos/$GH_REPO/compare/$BUILT_SHA...$MERGE_SHA" --jq .status)"
+          case "$status" in
+            ahead|identical) ;;
+            *) echo "::error::$BUILT_SHA, which the DMG was built from, is not in main's history at $MERGE_SHA ($status). Nothing was published. Delete the $TAG draft and the appcast entry that just merged, then run release.yml again."
+               exit 1 ;;
+          esac
+          gh release edit "$TAG" --target "$BUILT_SHA" --draft=false --prerelease
+          echo "Published $TAG at $BUILT_SHA (appcast merged in $MERGE_SHA)"
+
+      - name: Say what to undo
+        if: failure()
+        env:
+          TAG: ${{ steps.tag.outputs.TAG }}
+        run: |
+          echo "::error::$TAG was not published, but its appcast entry is on main and points at a download that does not exist. Revert the merge of $HEAD_REF (or remove the $TAG item from appcast.xml), fix the cause, and run release.yml again."
+
+      - name: Delete the release branch
+        run: gh api -X DELETE "repos/$GH_REPO/git/refs/heads/$HEAD_REF" || true

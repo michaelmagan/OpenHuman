@@ -89,6 +89,15 @@ jobs:
       - name: Build development artifact
         run: Tools/ci/build-app.sh --build-number "${{ github.run_number }}"
 
+      - name: Check the updater in the built app
+        run: |
+          app=build/dd/Build/Products/Release/OpenHumanMail.app
+          test -d "$app/Contents/Frameworks/Sparkle.framework" || { echo "::error::Sparkle.framework is not in the app"; exit 1; }
+          feed="$(/usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "$app/Contents/Info.plist")"
+          test "$feed" = "https://raw.githubusercontent.com/michaelmagan/OpenHuman/main/appcast.xml" \
+            || { echo "::error::SUFeedURL is '$feed'"; exit 1; }
+          codesign --verify --deep --strict "$app"
+
       - name: Package development artifact
         run: Tools/ci/package-app.sh build/dd/Build/Products/Release/OpenHumanMail.app build/OpenHumanMail.zip
 

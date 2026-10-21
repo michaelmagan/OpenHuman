@@ -52,6 +52,10 @@ public enum UpdateCheck {
     public static let earlyDevelopmentNote = "This is an early-development release."
     public static let privacyNote = "Mail asks GitHub for the newest release only when you click. It sends one request with "
         + "nothing about you or your mail, and never downloads or installs anything itself."
+    public static let updaterPrivacyNote = "Mail reads OpenHuman's update feed on GitHub when you click, and once a day if "
+        + "you allow automatic checks. It sends the app's version and nothing about you or your mail. An update is "
+        + "installed only after its signature matches OpenHuman's signing key."
+    public static let automaticNote = "Looks for a new release once a day and shows it when there is one."
     public static let checking = UpdateCheckMessage(headline: "Checking for updates…",
                                                     detail: "Asking GitHub for the newest release.", tone: .neutral)
 
@@ -155,6 +159,15 @@ public enum UpdateCheck {
             return "Version \(release.version) is an early-development release."
         }
         return current.isEarlyDevelopment ? earlyDevelopmentNote : nil
+    }
+
+    public static func lastCheckedLine(_ date: Date?, now: Date) -> String {
+        guard let date else { return "Not checked yet." }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.unitsStyle = .full
+        formatter.dateTimeStyle = .named
+        return "Last checked " + formatter.localizedString(for: min(date, now), relativeTo: now) + "."
     }
 
     static let notPublishedDetail = "There's no published release to compare with yet. Try again later."

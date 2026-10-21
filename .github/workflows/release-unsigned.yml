@@ -1,9 +1,10 @@
 name: Unsigned release
 
+# An ad-hoc signed development build on a draft pre-release, started by hand. Signed releases come from release.yml,
+# whose publish step creates the v* tag, so this workflow no longer runs on tags, and it refuses a version that
+# already has a release: its uploads would replace the signed DMG.
 on:
   workflow_dispatch:
-  push:
-    tags: ['v*']
 
 concurrency:
   group: release-unsigned-${{ github.ref }}
@@ -51,10 +52,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "$GITHUB_REF_TYPE" = tag ]; then
-            version="${GITHUB_REF_NAME#v}"
-          else
-            version="$(Tools/release/bump-version.sh)"
+          version="$(Tools/release/bump-version.sh)"
+          # Only an answer of "not found" lets it continue: any other failure could hide a signed release
+          if answer="$(gh release view "v$version" --json isDraft 2>&1)"; then
+            echo "::error::v$version already has a release (signed or a draft). Raise the version to publish an unsigned build."
+            exit 1
+          elif [[ "$answer" != *"release not found"* ]]; then
+            echo "::error::Could not tell whether v$version has a release: $answer"
+            exit 1
           fi
           Tools/release/publish-github.sh "$version"
 

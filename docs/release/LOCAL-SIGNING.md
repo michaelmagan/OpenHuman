@@ -24,6 +24,10 @@ by scripts and tools. It is not a security boundary: anything running as you
 with your GitHub credentials can call `gh` directly. Repository rulesets that
 restrict who may create `v*` tags are the stronger control.
 
+Releases made by GitHub Actions do not use this setup: `release.yml` builds a
+keychain for each run from repository secrets and deletes it afterwards
+([In-app updates and automated releases](SPARKLE.md#3-secrets-and-settings)).
+
 ## One-time setup
 
 At the Mac, in Terminal.app (not over SSH), from a checkout:

@@ -7,6 +7,26 @@ struct UpdateCheckSettingsSection: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
+        if let updater = center.updater {
+            updaterSection(updater)
+        } else {
+            feedSection
+        }
+    }
+
+    private func updaterSection(_ updater: any SoftwareUpdater) -> some View {
+        SettingsSection("Updates", footnote: UpdateCheck.updaterPrivacyNote) {
+            SettingsRow(UpdateCheckCenter.settingsTitle, detail: center.versionLine, status: center.lastCheckedLine) {
+                Button("Check Now") { center.begin() }
+                    .accessibilityLabel(Text(verbatim: UpdateCheckCenter.settingsTitle))
+            }
+            SettingsRow(UpdateCheckCenter.automaticTitle, detail: UpdateCheck.automaticNote,
+                        isOn: Binding(get: { updater.automaticallyChecksForUpdates },
+                                      set: { updater.automaticallyChecksForUpdates = $0 }))
+        }
+    }
+
+    private var feedSection: some View {
         SettingsSection("Updates", footnote: UpdateCheck.privacyNote) {
             SettingsRow(UpdateCheckCenter.settingsTitle, detail: detail, status: center.summary, statusTone: tone) {
                 HStack(spacing: theme.space3) {

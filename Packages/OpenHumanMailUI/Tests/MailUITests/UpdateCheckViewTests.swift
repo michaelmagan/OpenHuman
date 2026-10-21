@@ -76,6 +76,28 @@ private func host<V: View>(_ view: V, size: NSSize, theme: ResolvedTheme = .ligh
 }
 
 @MainActor
+private final class StubUpdater: SoftwareUpdater {
+    var automaticallyChecksForUpdates = true
+    var lastUpdateCheckDate: Date? = updateNow.addingTimeInterval(-3600)
+    var checks = 0
+    func checkForUpdates() { checks += 1 }
+}
+
+@MainActor
+@Test func withAnUpdaterTheSectionOffersCheckNowAndTheAutomaticSwitch() {
+    let updater = StubUpdater()
+    let center = UpdateCheckCenter(current: earlyBuild, fetch: { _ in UpdateFeedReply(status: 404) }, openURL: { _ in },
+                                   updater: updater, now: { updateNow })
+    #expect(center.lastCheckedLine == "Last checked 1 hour ago.")
+    for theme in [ResolvedTheme.light, .dark] {
+        let hosting = host(UpdateCheckSettingsSection(center: center),
+                           size: NSSize(width: SettingsMetrics.contentMaxWidth, height: 300), theme: theme)
+        #expect(hosting.fittingSize.height > 100, "two rows and the note")
+    }
+    #expect(updater.checks == 0, "drawing the section checks nothing")
+}
+
+@MainActor
 @Test func theGeneralPageShowsUpdatesOnceTheAppInstallsTheCheck() async {
     let environment = AppEnvironment.fake(corpus: .rich(threadCount: 20, now: updateNow), options: .init(remoteAck: .immediate),
                                           featureFlags: FeatureFlags())

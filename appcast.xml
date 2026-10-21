@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>OpenHuman Mail</title>
+    <link>https://raw.githubusercontent.com/michaelmagan/OpenHuman/main/appcast.xml</link>
+    <description>Most recent updates to OpenHuman Mail</description>
+    <language>en</language>
+  </channel>
+</rss>

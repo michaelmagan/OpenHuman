@@ -19,6 +19,37 @@ struct UpdateCheckAppTests {
         #expect(MailApp.updates.feed == .openHuman && !MailApp.updates.isPresented)
     }
 
+    static let feed = "https://raw.githubusercontent.com/michaelmagan/OpenHuman/main/appcast.xml"
+    static let key = Data(count: 32).base64EncodedString()
+
+    @Test func aTestRunOrADeveloperBuildNeverStartsSparkle() {
+        let info: [String: Any] = [SparkleUpdater.feedKey: Self.feed, SparkleUpdater.publicKeyKey: Self.key]
+        #expect(SparkleUpdater.isConfigured(info))
+        #expect(UpdateCheckSupport.updater(environment: ["XCTestConfigurationFilePath": "x"], info: info, developerBuild: false) == nil)
+        #expect(UpdateCheckSupport.updater(environment: [:], info: info, developerBuild: true) == nil)
+        #expect(UpdateCheckSupport.updater(environment: [:], info: [:], developerBuild: false) == nil, "no feed and key, no Sparkle")
+        #expect(MailApp.updates.updater == nil, "the app's own center keeps the test-safe GitHub check under tests")
+    }
+
+    @Test func sparkleNeedsAnHTTPSFeedAndAnEdDSAPublicKey() {
+        func configured(_ feed: String?, _ key: String?) -> Bool {
+            var info: [String: Any] = [:]
+            info[SparkleUpdater.feedKey] = feed
+            info[SparkleUpdater.publicKeyKey] = key
+            return SparkleUpdater.isConfigured(info)
+        }
+        #expect(configured(Self.feed, Self.key))
+        #expect(!configured(Self.feed, ""), "the key the project ships before the one-time key setup")
+        #expect(!configured(Self.feed, nil) && !configured(nil, Self.key) && !configured("", Self.key))
+        #expect(!configured("http://example.com/appcast.xml", Self.key) && !configured("appcast.xml", Self.key))
+        #expect(!configured(Self.feed, "not base64") && !configured(Self.feed, Data(count: 16).base64EncodedString()))
+    }
+
+    @Test func theAppReadsTheAppcastOnMain() {
+        #expect(Bundle.main.object(forInfoDictionaryKey: SparkleUpdater.feedKey) as? String == Self.feed)
+        #expect(Bundle.main.object(forInfoDictionaryKey: SparkleUpdater.publicKeyKey) is String)
+    }
+
     @Test func theAppMenuOffersCheckForUpdatesUnderAbout() throws {
         let appMenu = try #require(NSApp.mainMenu?.items.first?.submenu)
         let titles = appMenu.items.map(\.title)

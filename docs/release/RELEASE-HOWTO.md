@@ -5,10 +5,24 @@ checksum, `release-info.txt`, and reviewed notes. Building a DMG does not upload
 it. A GitHub draft does not make it publicly downloadable. People without
 repository access need a **published** release in a **public** repository.
 
-Use this guide for a Developer ID signed, notarized release. `--no-icloud` is
-the route without a provisioning profile; the optional iCloud route is below.
-Unsigned builds remain available for development, with different first-open
-requirements. Do not commit binaries, archives, OAuth clients, or credentials.
+Releases are normally made by GitHub Actions: `release.yml` builds, signs,
+notarizes and drafts the release and opens a pull request that adds it to the
+Sparkle appcast, and merging that pull request publishes it. See
+[In-app updates and automated releases](SPARKLE.md) for that route and its
+one-time setup. The automated run uses the same scripts as this guide
+(`make-dmg.sh`, `check-release.sh`, `publish-github.sh`), so everything below
+about what they check still applies.
+
+Use this guide to build a Developer ID signed, notarized release by hand on the
+signing Mac. `--no-icloud` is the route without a provisioning profile; the
+optional iCloud route is below. Unsigned builds remain available for
+development, with different first-open requirements. Do not commit binaries,
+archives, OAuth clients, or credentials.
+
+A release made by hand is not in the appcast, so installed copies are not offered
+it. To offer it, sign its DMG with `sign_update`, add it with
+`Tools/release/update-appcast.py` and merge that change after publishing
+(see [SPARKLE.md](SPARKLE.md)).
 
 ## Prerequisites
 
@@ -53,7 +67,8 @@ development pre-release. Keep the generated notes' notice:
 > Early development build — expect rough edges. Please send feedback.
 
 Choose a build number greater than previously distributed builds; do not rely
-on a fresh repository's commit count. Examples below use version `0.1.0` and
+on a fresh repository's commit count. Sparkle offers an update only for a higher
+build number. 0.1.0 was build 1004; `release.yml` picks the number for you. Examples below use version `0.1.0` and
 build `1003`; substitute your version/build consistently.
 
 The release wrapper puts DerivedData, archive, logs, and outputs under its own
@@ -300,24 +315,13 @@ that older binary commit, or rebuild at the newer commit. Never change the
 binary's record/stamp or move a release tag to disguise a different source.
 Verify any existing remote version tag also names the binary commit.
 
-### Hosted CI and unsigned-workflow collision
+### Hosted CI and the unsigned workflow
 
-Before creating a signed release tag/draft, disable **only** the separate
-`release-unsigned.yml` workflow when Actions is enabled, and verify its state.
-That workflow listens on `v*` tags and builds an unsigned DMG. Its publisher
-can update an existing draft and uses `--clobber` with the same DMG, checksum
-and record asset names, so it can replace a signed draft's assets. Do not rely
-on whether a particular tag-creation method triggers it. Keep it disabled for
-this signed release; leave `ci.yml` enabled for validation.
-
-```sh
-gh workflow disable release-unsigned.yml --repo owner/repo
-gh api repos/owner/repo/actions/workflows/release-unsigned.yml --jq .state
-```
-
-Require `disabled_manually` before uploading signed assets. This is a
-repository workflow setting change, separate from building or signing. See
-[GitHub's workflow controls](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/disable-and-enable-workflows).
+`release-unsigned.yml` builds an unsigned DMG only when started by hand, and it
+refuses a version that already has a release or draft, because its uploads use
+the same asset names and `--clobber` and would replace a signed DMG. It no longer
+runs on `v*` tags. Do not start it for a version you are releasing signed; leave
+`ci.yml` enabled for validation.
 
 If `main` has advanced beyond the artifact source, use a dedicated release
 candidate branch fixed at the binary commit and protect it from changes during
@@ -362,7 +366,8 @@ not publication or proof that remote settings/assets are correct.
 
 Publish the reviewed draft in GitHub's UI, or intentionally repeat the command
 with `--publish`. Building, uploading a draft, publishing, and changing source
-visibility are separate actions. Keep the unsigned workflow disabled throughout.
+visibility are separate actions. Do not start the unsigned workflow for this
+version.
 
 A draft is not a public download page. A published release in a private
 repository still requires repository access. For a download link that
@@ -372,10 +377,13 @@ signed-out browser before sending people to
 [Releases](https://github.com/michaelmagan/OpenHuman/releases).
 See [GitHub's release access documentation](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases).
 
-The app's Check for Updates… reads published releases from GitHub's public API.
-It ignores drafts, compares version/build, and opens the release page in a
-browser; it does not download or install updates. A private or unpublished
-release is not an anonymous update/download channel.
+Release builds with a Sparkle public key update themselves from the appcast on
+`main` ([SPARKLE.md](SPARKLE.md)); a release reaches them only once it is in that
+appcast. Builds without a key, and Debug and DevTools builds, keep the earlier
+Check for Updates…: it reads published releases from GitHub's public API,
+ignores drafts, compares version/build, and opens the release page in a browser
+without downloading or installing anything. A private or unpublished release is
+not an anonymous update/download channel.
 
 ## Unsigned development builds
 
