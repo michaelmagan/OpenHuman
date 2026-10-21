@@ -109,6 +109,27 @@ class RenderSweepListTests(unittest.TestCase):
         self.assertEqual(inbox["screens"], ["inbox"])
         self.assertTrue(halves["app"])
 
+    def test_reads_view_screens_and_stops_at_the_next_member(self):
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(holder.cleanup)
+        with open(os.path.join(holder.name, "RenderSweepExampleTests.swift"), "w", encoding="utf-8") as handle:
+            handle.write("""extension RenderSweepTests {
+    @Test(arguments: SweepTheme.selected(SweepTheme.allBuiltIns, slugs: "light")) @available(macOS 26, *)
+    func cards(_ theme: SweepTheme) async throws {
+        try await sweepShootView("card-error", theme: theme, size: .zero) { _ in Text("x") }
+        try await sweepShoot(window, screen: "card-\\(name)", theme: theme)
+    }
+
+    private func helper() async throws {
+        try await sweepShoot(window, screen: "helper-only", theme: theme)
+    }
+}
+""")
+        [entry] = listing.tests(holder.name)
+        self.assertEqual(entry["test"], "cards")
+        self.assertEqual(entry["themes"], 'SweepTheme.selected(SweepTheme.allBuiltIns, slugs: "light")')
+        self.assertEqual(entry["screens"], ["card-error", "card-…"])
+
     def test_interpolated_screens_are_shown_with_an_ellipsis(self):
         self.assertEqual(listing.literal(r"settings-\(page.slug)-full"), "settings-…-full")
 

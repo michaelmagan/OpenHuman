@@ -38,7 +38,7 @@ on:
         default: true
 
 concurrency:
-  group: render-sweep-${{ github.ref }}
+  group: render-sweep-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -53,7 +53,10 @@ jobs:
       XCODE_APP: ${{ vars.XCODE_APP || '/Applications/Xcode_27.0.app' }}
       XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
     steps:
+      # The pull request's head, not the merge commit, so the comment's sha names what was rendered
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Select Xcode
         id: xcode
@@ -113,9 +116,7 @@ jobs:
         run: |
           out="$RUNNER_TEMP/render-sweep"
           test -f "$out/index.json" || { echo "::error::the sweep wrote no index.json"; exit 1; }
-          python3 Tools/render-sweep-check.py "$out"
-          python3 -c 'import json, sys; [print(e["file"], e["screen"], e["theme"], sep="  |  ") for e in json.load(open(sys.argv[1]))]' \
-            "$out/index.json" | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 Tools/render-sweep-check.py --list "$out" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -150,6 +151,10 @@ jobs:
       github.event_name == 'workflow_dispatch' && inputs.comment
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Why: every publish edits the one pr-screenshots release; run them one at a time
+    concurrency:
+      group: render-sweep-publish
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write

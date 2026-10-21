@@ -20,7 +20,7 @@ import sys
 sys.dont_write_bytecode = True
 
 MARKER = "<!-- render-sweep -->"
-SAFE_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,150}\.png$")
+SAFE_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,150}\.png$")
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 MAX_BYTES = 20 * 1024 * 1024
 

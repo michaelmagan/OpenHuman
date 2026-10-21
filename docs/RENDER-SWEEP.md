@@ -92,7 +92,7 @@ with the Xcode that `ci.yml` selects):
   empty renders each test's own themes), `only` (`package`, `app` or `both`; `--tests` always means the
   package half) and `comment` (`true` posts to the pull request).
 
-Every run uploads the artifact `render-sweep` (PNGs, `index.json`, logs; kept 14 days) and lists the files
+Pull request runs render the pull request's head commit, not its merge with `main`. Every run uploads the artifact `render-sweep` (PNGs, `index.json`, logs; kept 14 days) and lists the files
 in the job summary. When the run belongs to an open pull request (its event, or for workflow_dispatch the
 open pull request whose head commit is the dispatched commit), the publish job uploads up to 60 PNGs to the
 prerelease `pr-screenshots` as `pr-<number>-<file>` and creates or updates one comment on the pull request

@@ -13,8 +13,22 @@ HALVES = [
     ("app", "Apps/Mail/Tests/MailAppTests/RenderSweep"),
 ]
 TEST = re.compile(r"@Test\b(.*?)\bfunc\s+(\w+)\s*\(", re.DOTALL)
-SCREEN = re.compile(r"""\bscreen:\s*"((?:[^"\\]|\\.)*)\"""")
-ARGUMENTS = re.compile(r"arguments:\s*(.*)\)\s*$", re.DOTALL)
+SCREEN = re.compile(r"""(?:\bscreen:\s*|\bsweepShootView\(\s*)"((?:[^"\\]|\\.)*)\"""")
+# Where a test's body ends: the closing brace of its extension or type, or the next member function
+BODY_END = re.compile(r"\n\}|\n    (?:@\w+(?:\([^)]*\))?\s+)*(?:(?:private|fileprivate|static|nonisolated|func)\b)")
+
+
+def arguments(attributes):
+    """The text of the @Test(arguments: ...) list, or None for a test without arguments."""
+    start = attributes.find("arguments:")
+    if start < 0:
+        return None
+    depth, text = 1, attributes[start + len("arguments:"):]
+    for i, char in enumerate(text):
+        depth += {"(": 1, ")": -1}.get(char, 0)
+        if depth == 0:
+            return " ".join(text[:i].split())
+    return " ".join(text.split())
 
 
 def literal(text):
@@ -30,15 +44,17 @@ def tests(folder):
         for i, match in enumerate(matches):
             end = matches[i + 1].start() if i + 1 < len(matches) else len(source)
             body = source[match.end():end]
-            arguments = ARGUMENTS.search(match.group(1).strip())
-            if not arguments:
+            stop = BODY_END.search(body)
+            body = body[:stop.start()] if stop else body
+            themes = arguments(match.group(1))
+            if themes is None:
                 continue  # not parameterised by theme: a guard test, not a render
             screens = []
             for screen in SCREEN.findall(body):
                 screen = literal(screen)
                 if screen not in screens:
                     screens.append(screen)
-            found.append({"test": match.group(2), "themes": " ".join(arguments.group(1).split()),
+            found.append({"test": match.group(2), "themes": themes,
                           "screens": screens, "file": os.path.relpath(path, ROOT)})
     return found
 

@@ -15,9 +15,10 @@ permissions:
   contents: write
   pull-requests: write
 
+# Why: shared with the publish job in render-sweep.yml; every publish edits the one pr-screenshots release
 concurrency:
-  group: render-sweep-publish-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
-  cancel-in-progress: true
+  group: render-sweep-publish
+  cancel-in-progress: false
 
 jobs:
   publish:
