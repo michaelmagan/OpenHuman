@@ -39,11 +39,14 @@ def main():
     ap.add_argument("--root", default=".")
     a = ap.parse_args()
     paths = subprocess.run(["git", "-C", a.root, "ls-files", "*Package.resolved"], capture_output=True, text=True,
-                           check=True).stdout.split()
+                           check=True).stdout.splitlines()
     resolved = {}
     for path in paths:
         with open(f"{a.root}/{path}") as f:
             resolved[path] = json.load(f)
+        if resolved[path].get("version", 1) < 2:
+            print(f"check-resolved: {path}: Package.resolved version 1 is not supported; resolve it with Swift 5.6 or later")
+            return 1
     errors = mismatches(resolved)
     for e in errors:
         print(f"check-resolved: {e}")
