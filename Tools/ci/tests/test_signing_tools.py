@@ -118,12 +118,14 @@ class SigningScriptTests(unittest.TestCase):
         return subprocess.run(["bash", str(self.root / "Tools" / "signing" / name), *args], env=self.env,
                               stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False)
 
+    @unittest.skipUnless(sys.platform == "darwin", "setup.sh runs only on macOS")
     def test_setup_needs_a_terminal(self):
         result = self.run_script("setup.sh")
         self.assertEqual(result.returncode, 1)
         self.assertIn("run this yourself in Terminal.app", result.stderr)
         self.assertEqual(list(self.home.iterdir()), [])
 
+    @unittest.skipUnless(sys.platform == "darwin", "setup.sh runs only on macOS")
     def test_a_setup_dry_run_changes_nothing(self):
         result = self.run_script("setup.sh", "--dry-run")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
