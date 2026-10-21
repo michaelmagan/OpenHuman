@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-  # Pull requests that change only documentation or images skip the macOS jobs.
+  # Pull requests that change only documentation or images skip these jobs.
   # Nothing is a required check, so a skipped workflow cannot block a merge;
   # pushes to main always run everything.
   pull_request:
@@ -23,6 +23,19 @@ permissions:
   contents: read
 
 jobs:
+  # Why: fast feedback on a hosted runner, without waiting for the self-hosted Mac
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Check imports and generated contracts
+        run: |
+          Tools/ci/check-imports.sh
+          python3 Tools/ci/check-checklist.py
+          python3 -m unittest discover -s Tools/ci/tests -p 'test_*.py'
+
   # Build caches. Pull requests can restore caches saved on main, but not those of other
   # pull requests, so main saves after every run and a pull request saves only when it found
   # nothing to restore. Package .build folders keep the compiled dependencies (MLX, GRDB,
@@ -45,12 +58,12 @@ jobs:
       XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
       SWIFT_BACKTRACE: enable=yes,sanitize=yes,threads=all
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - uses: ./.github/actions/select-xcode
         id: xcode
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: cache
         with:
           path: |
@@ -71,7 +84,7 @@ jobs:
           OH_TEST_LOG_DIR: ${{ runner.temp }}/package-test-logs
         run: Tools/ci/build-packages.sh --platform macos --exclude OpenHumanMailUI
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: ${{ !cancelled() && (github.ref == 'refs/heads/main' || steps.cache.outputs.cache-matched-key == '') }}
         with:
           path: |
@@ -89,7 +102,7 @@ jobs:
               | xargs -0 grep -hE 'Test (Case )?.*started' | tail -n 40 || true
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: package-diagnostics
@@ -108,12 +121,12 @@ jobs:
       SWIFT_BACKTRACE: enable=yes,sanitize=yes,threads=all
       OH_COMPILATION_CACHE_PATH: ${{ github.workspace }}/build/compilation-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - uses: ./.github/actions/select-xcode
         id: xcode
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: cache
         with:
           path: |
@@ -162,7 +175,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: du -sh "$OH_COMPILATION_CACHE_PATH" || true
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: ${{ !cancelled() && (github.ref == 'refs/heads/main' || steps.cache.outputs.cache-matched-key == '') }}
         with:
           path: |
@@ -171,13 +184,13 @@ jobs:
             build/dd/SourcePackages
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: OpenHumanMail-${{ github.run_number }}
           path: build/OpenHumanMail.zip
           retention-days: 14
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: test-results
@@ -190,7 +203,7 @@ jobs:
             grep -E 'Test (Case )?.*started' "$RUNNER_TEMP/app-test.log" | tail -n 40 || true
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: app-diagnostics
@@ -208,12 +221,12 @@ jobs:
       XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
       SWIFT_BACKTRACE: enable=yes,sanitize=yes,threads=all
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - uses: ./.github/actions/select-xcode
         id: xcode
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: cache
         with:
           path: |
@@ -233,7 +246,7 @@ jobs:
           OH_TEST_LOG_DIR: ${{ runner.temp }}/package-test-logs
         run: Tools/ci/build-packages.sh --platform macos --serialized-tests OpenHumanMailUI
 
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         if: ${{ !cancelled() && (github.ref == 'refs/heads/main' || steps.cache.outputs.cache-matched-key == '') }}
         with:
           path: |
@@ -250,7 +263,7 @@ jobs:
               | xargs -0 grep -hE 'Test (Case )?.*started' | tail -n 40 || true
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: mail-ui-diagnostics
