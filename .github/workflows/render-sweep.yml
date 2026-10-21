@@ -1,22 +1,13 @@
 name: Render Sweep
 
-# Renders app screens in named states on sample data (Tools/render-sweep.sh) and uploads the PNGs, so UI changes can
-# be reviewed without building the app. docs/RENDER-SWEEP.md explains the inputs and how to fetch the results.
+# Renders app screens in named states on sample data (Tools/render-sweep.sh) when someone runs it, for example a
+# cloud session that cannot build the app, and uploads the PNGs. docs/RENDER-SWEEP.md explains the inputs and how to
+# fetch the results. It never runs by itself.
 #
-# SECURITY: the render job builds and runs pull request code, so it holds a read-only token and no secrets. Only the
-# publish job writes (release assets and one PR comment), it runs no checked-out build, and it is skipped for fork
-# pull requests, whose token is read-only anyway; render-sweep-publish.yml publishes those from main via workflow_run.
+# SECURITY: the render job builds and runs the branch's code, so it holds a read-only token and no secrets. Only the
+# publish job writes (release assets and one PR comment), and it runs no build.
 
 on:
-  pull_request:
-    paths:
-      - 'Packages/OpenHumanMailUI/**'
-      - 'Packages/OpenHumanMailCore/**'
-      - 'Apps/Mail/**'
-      - 'Tools/render-sweep*'
-      - 'Tools/ci/render-sweep-comment.py'
-      - 'Tools/ci/publish-render-sweep.sh'
-      - '.github/workflows/render-sweep*.yml'
   workflow_dispatch:
     inputs:
       tests:
@@ -38,7 +29,7 @@ on:
         default: true
 
 concurrency:
-  group: render-sweep-${{ github.event.pull_request.number || github.ref }}
+  group: render-sweep-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -53,10 +44,7 @@ jobs:
       XCODE_APP: ${{ vars.XCODE_APP || '/Applications/Xcode_27.0.app' }}
       XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
     steps:
-      # The pull request's head, not the merge commit, so the comment's sha names what was rendered
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Select Xcode
         id: xcode
@@ -90,24 +78,16 @@ jobs:
       - name: Render
         env:
           # Inputs reach the script through the environment, never the shell text; the script validates them
-          EVENT: ${{ github.event_name }}
-          INPUT_TESTS: ${{ inputs.tests }}
-          INPUT_THEMES: ${{ inputs.themes }}
-          INPUT_ONLY: ${{ inputs.only }}
-          PR_TESTS: ${{ vars.RENDER_SWEEP_PR_TESTS || 'inbox,reader' }}
-          PR_THEMES: ${{ vars.RENDER_SWEEP_PR_THEMES || 'light,dark' }}
+          TESTS: ${{ inputs.tests }}
+          THEMES: ${{ inputs.themes }}
+          ONLY: ${{ inputs.only }}
           OH_SCRATCH_ROOT: ${{ runner.temp }}/oh-scratch
         run: |
-          if [ "$EVENT" = workflow_dispatch ]; then
-            tests="$INPUT_TESTS"; themes="$INPUT_THEMES"; only="$INPUT_ONLY"
-          else
-            tests="$PR_TESTS"; themes="$PR_THEMES"; only=package
-          fi
           mkdir -p "$OH_SCRATCH_ROOT"
           args=(--out "$RUNNER_TEMP/render-sweep" --swiftpm)
-          [ "$only" = both ] || args+=(--only "$only")
-          [ -z "$tests" ] || args+=(--tests "$tests")
-          [ -z "$themes" ] || args+=(--themes "$themes")
+          [ "$ONLY" = both ] || args+=(--only "$ONLY")
+          [ -z "$TESTS" ] || args+=(--tests "$TESTS")
+          [ -z "$THEMES" ] || args+=(--themes "$THEMES")
           echo "Tools/render-sweep.sh ${args[*]}"
           Tools/render-sweep.sh "${args[@]}"
 
@@ -126,29 +106,9 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      # Read by render-sweep-publish.yml for fork pull requests. The values come from the event, not from PR code.
-      - name: Record pull request metadata
-        if: github.event_name == 'pull_request'
-        env:
-          PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/render-sweep-meta"
-          printf '%s\n' "$PR" > "$RUNNER_TEMP/render-sweep-meta/number"
-          printf '%s\n' "$HEAD_SHA" > "$RUNNER_TEMP/render-sweep-meta/head_sha"
-
-      - uses: actions/upload-artifact@v4
-        if: github.event_name == 'pull_request'
-        with:
-          name: render-sweep-meta
-          path: ${{ runner.temp }}/render-sweep-meta
-          retention-days: 1
-
   publish:
     needs: render
-    if: >-
-      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository ||
-      github.event_name == 'workflow_dispatch' && inputs.comment
+    if: inputs.comment
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Why: every publish edits the one pr-screenshots release; run them one at a time
@@ -163,7 +123,7 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RUN_ID: ${{ github.run_id }}
     steps:
-      # Same-repository code only (forks are excluded above); the scripts read the renders as data
+      # The scripts read the renders as data
       - uses: actions/checkout@v4
         with:
           sparse-checkout: Tools/ci
@@ -176,14 +136,10 @@ jobs:
       - name: Find the pull request
         id: pr
         env:
-          EVENT_PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
-          pr="$EVENT_PR"
-          if [ -z "$pr" ]; then
-            pr="$(gh pr list --state open --limit 200 --json number,headRefOid \
-              --jq "map(select(.headRefOid == \"$HEAD_SHA\")) | .[0].number // empty")"
-          fi
+          pr="$(gh pr list --state open --limit 200 --json number,headRefOid \
+            --jq "map(select(.headRefOid == \"$HEAD_SHA\")) | .[0].number // empty")"
           if [ -z "$pr" ]; then
             echo "::notice::No open pull request has $HEAD_SHA as its head; the PNGs are in the render-sweep artifact only"
           fi
