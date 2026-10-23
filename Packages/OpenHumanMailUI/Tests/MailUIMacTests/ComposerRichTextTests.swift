@@ -92,6 +92,10 @@ import Testing
         let photoAt = try #require(positions["b@openhuman"])
         let attachment = try #require(attributed.attribute(.attachment, at: photoAt, effectiveRange: nil) as? NSTextAttachment)
         #expect(attachment.fileWrapper?.preferredFilename == "b@openhuman.png", "the bytes travel under the content id")
+        #expect(attachment.image(forBounds: .zero, textContainer: nil, characterIndex: photoAt) === photo.image,
+                "and the picture is still what is drawn")
+        let resized = try #require(attachment as? InlineImageAttachment).resized(to: CGSize(width: 240, height: 180))
+        #expect(resized.fileWrapper?.preferredFilename == "b@openhuman.png", "a new size keeps the content id")
         #expect(AttributedBridge.contentID(fromAttachmentName: "b@openhuman.png") == "b@openhuman")
         let style = try #require(attributed.attribute(.paragraphStyle, at: photoAt, effectiveRange: nil) as? NSParagraphStyle)
         #expect(style.maximumLineHeight == 0 && style.minimumLineHeight == 18, "the picture's line is not cut to 18 pt")

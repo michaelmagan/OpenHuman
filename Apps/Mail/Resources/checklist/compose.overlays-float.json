@@ -1,0 +1,14 @@
+{
+  "id": "compose.overlays-float",
+  "area": "Composer",
+  "title": "Mentions and send notices float over the composer",
+  "steps": [
+    "Launch Mail with -UseFakeGmail, open a conversation and press r",
+    "Type a line, then @ and the first letters of a synthetic contact",
+    "Press Escape; then turn Wi-Fi off, press Cmd+Return and wait for the send error"
+  ],
+  "deepLink": null,
+  "expected": "The contact list floats under the body without moving the signature or the Send bar. The send error floats just above the Send bar with Send again and an x; neither the text nor the bar moves when it appears or is dismissed.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

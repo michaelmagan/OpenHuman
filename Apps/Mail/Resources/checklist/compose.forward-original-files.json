@@ -1,0 +1,15 @@
+{
+  "id": "compose.forward-original-files",
+  "area": "Composer",
+  "title": "A forward carries the original's files",
+  "steps": [
+    "On a test account, open a message you sent yourself with a PDF attached",
+    "Press f, address it to your own test address and remove nothing",
+    "Send it, then open the forward in Sent",
+    "Forward the same message again and remove the PDF before sending"
+  ],
+  "deepLink": null,
+  "expected": "The forward draft shows the PDF as an attachment tile under the quoted original. The sent forward contains the PDF and the forwarded message text. The second forward goes out with the quote and no attachment.",
+  "requires": "real",
+  "addedIn": "2026-10-20"
+}

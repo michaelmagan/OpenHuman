@@ -38,6 +38,8 @@ struct SweepTheme: Sendable, CustomTestStringConvertible {
 
     static let accessibility: [SweepTheme] = selected(allAccessibility)
 
+    static let systemLightAndDark: [SweepTheme] = selected(allBuiltIns.filter { $0.slug.hasPrefix("system-") })
+
     static let allBuiltIns: [SweepTheme] = [
         SweepTheme(name: "Light", slug: "light", preferences: ThemePreferences(mode: .light, lightThemeID: BuiltinThemeID.light)),
         SweepTheme(name: "Dark", slug: "dark", preferences: ThemePreferences(mode: .dark, darkThemeID: BuiltinThemeID.dark)),
@@ -143,8 +145,100 @@ func sweepShoot(_ window: NSWindow, screen: String, theme: SweepTheme, settle: D
     }
     try await Task.sleep(for: settle)
     let name = "\(screen)--\(theme.slug)"
-    try SnapshotRenderTests().snapshot(window, name: name)
+    try sweepCapture(window).write(to: directory.appendingPathComponent(name + ".png"))
     try SweepIndex.record(SweepIndexEntry(screen: screen, theme: theme.name, file: name + ".png"), in: directory)
+}
+
+// A titled window is captured through its frame view, so the title bar, toolbar and traffic lights are in the render
+@MainActor
+func sweepCaptureRoot(_ window: NSWindow) throws -> NSView {
+    let content = try #require(window.contentView)
+    guard window.styleMask.contains(.titled), let frame = content.superview else { return content }
+    return frame
+}
+
+@MainActor
+func sweepCapture(_ window: NSWindow) throws -> Data {
+    let root = try sweepCaptureRoot(window)
+    root.layoutSubtreeIfNeeded()
+    let group = DispatchGroup()
+    var shots: [(NSView, NSImage)] = []
+    for web in SnapshotRenderTests.webViews(in: root) where !web.isHiddenOrHasHiddenAncestor && web.alphaValue > 0 {
+        group.enter()
+        web.takeSnapshot(with: nil) { image, _ in
+            if let image { shots.append((web, image)) }
+            group.leave()
+        }
+    }
+    let deadline = Date().addingTimeInterval(5)
+    while group.wait(timeout: .now()) == .timedOut, Date() < deadline {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    }
+    let underlays = sweepSidebarUnderlays(in: root)
+    let rep = try SnapshotRenderTests.cacheDisplay(root, shots: shots)
+    let image = NSImage(size: root.bounds.size)
+    image.addRepresentation(rep)
+    let composed = NSImage(size: root.bounds.size)
+    composed.lockFocus()
+    for underlay in underlays { underlay.draw(in: root) }
+    image.draw(in: root.bounds)
+    composed.unlockFocus()
+    let tiff = try #require(composed.tiffRepresentation)
+    return try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+}
+
+/// Part of the window drawn on its own and placed under the window capture.
+struct SweepUnderlay {
+    let rect: NSRect
+    let fill: Bool
+    let image: NSImage?
+
+    @MainActor func draw(in root: NSView) {
+        let origin = root.bounds.origin
+        let y = root.isFlipped ? root.bounds.maxY - rect.maxY : rect.minY - origin.y
+        let target = NSRect(x: rect.minX - origin.x, y: y, width: rect.width, height: rect.height)
+        if fill {
+            root.effectiveAppearance.performAsCurrentDrawingAppearance {
+                NSColor.windowBackgroundColor.setFill()
+                target.fill()
+            }
+        }
+        image?.draw(in: target)
+    }
+}
+
+/// The window's sidebar column: the leading pane of the outermost vertical split view.
+@MainActor
+func sweepSidebarPane(in root: NSView) -> NSView? {
+    for split in subviews(of: NSSplitView.self, in: root) where split.isVertical && split.arrangedSubviews.count >= 2 {
+        let pane = split.arrangedSubviews[0]
+        guard !pane.isHiddenOrHasHiddenAncestor, pane.bounds.width > 1 else { continue }
+        let frame = root.convert(pane.bounds, from: pane)
+        if frame.minX < 16, frame.width < root.bounds.width / 2 { return pane }
+    }
+    return nil
+}
+
+// The system draws the sidebar column through its glass, which `cacheDisplay` leaves transparent, so the sidebar's
+// own scroll views are captured one by one and drawn flat on the window background under the window capture
+@MainActor
+func sweepSidebarUnderlays(in root: NSView) -> [SweepUnderlay] {
+    guard let pane = sweepSidebarPane(in: root) else { return [] }
+    var result = [SweepUnderlay(rect: root.convert(pane.bounds, from: pane), fill: true, image: nil)]
+    var captured: [NSView] = []
+    let scrolls: [NSView] = subviews(of: NSScrollView.self, in: pane)
+        .filter { !$0.isHiddenOrHasHiddenAncestor && $0.bounds.width > 1 }
+    for view in scrolls.isEmpty ? [pane] : scrolls where !captured.contains(where: { view.isDescendant(of: $0) }) {
+        view.layoutSubtreeIfNeeded()
+        view.displayIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let image = NSImage(size: view.bounds.size)
+        image.addRepresentation(rep)
+        captured.append(view)
+        result.append(SweepUnderlay(rect: root.convert(view.bounds, from: view), fill: false, image: image))
+    }
+    return result
 }
 
 @MainActor
@@ -174,13 +268,16 @@ enum SweepWindow {
                      selectAllTipPinned: Bool = false, pinnedTip: ActionID? = nil) async throws -> InlineReplyWindow {
         let themes = theme.makeStore()
         var attached: MainContentViewController?
+        // A window capture leaves Liquid Glass blank, so the overlays are drawn on their material fallback
         let hosting = NSHostingView(rootView: MainWindowRoot(environment: environment, themes: themes) { attached = $0 }
             .environment(\.selectAllTipPinned, selectAllTipPinned)
-            .environment(\.pinnedShortcutTip, pinnedTip))
+            .environment(\.pinnedShortcutTip, pinnedTip)
+            .environment(\.nativeOverlaySurface, .material))
+        hosting.sceneBridgingOptions = [.toolbars, .title]
         let frame = NSRect(origin: NSPoint(x: -6000, y: -6000), size: size)
-        let window = NSWindow(contentRect: frame, styleMask: [.titled, .resizable, .fullSizeContentView], backing: .buffered,
-                              defer: false)
-        window.titlebarAppearsTransparent = true
+        let window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                              backing: .buffered, defer: false)
+        window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
         #expect(window.setFrameAutosaveName(frameName), "the frame name \(frameName) is free")
         window.contentView = hosting
@@ -189,6 +286,8 @@ enum SweepWindow {
         try await until { attached != nil && environment.router.list?.state == .loaded }
         let content = try #require(attached)
         content.keyRouter.isMailWindow = { $0 === window }
+        // The renders show the frontmost window; an off-screen test window never becomes key
+        content.tableView.listController?.selectionEmphasisOverride = true
         return InlineReplyWindow(environment: environment, window: window, content: content)
     }
 
@@ -224,11 +323,8 @@ extension InlineReplyWindow {
         table.layoutSubtreeIfNeeded()
         var row = max(table.selectedRow, 0) + offset
         while row < table.numberOfRows {
-            if let rowView = table.rowView(atRow: row, makeIfNecessary: false) as? ThreadRowBackgroundView, !rowView.isSelected,
-               let event = NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
-                                                  windowNumber: window.windowNumber, context: nil, eventNumber: 0,
-                                                  trackingNumber: 0, userData: nil) {
-                rowView.mouseEntered(with: event)
+            if let rowView = table.rowView(atRow: row, makeIfNecessary: false) as? ThreadRowBackgroundView, !rowView.isSelected {
+                rowView.setHovering(true)
                 return
             }
             row += 1
@@ -239,11 +335,9 @@ extension InlineReplyWindow {
         guard let root = window.contentView, let table = subviews(of: ThreadTableView.self, in: root).first else { return }
         table.layoutSubtreeIfNeeded()
         guard table.selectedRow >= 0,
-              let rowView = table.rowView(atRow: table.selectedRow, makeIfNecessary: false) as? ThreadRowBackgroundView,
-              let event = NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
-                                                 windowNumber: window.windowNumber, context: nil, eventNumber: 0,
-                                                 trackingNumber: 0, userData: nil) else { return }
-        rowView.mouseEntered(with: event)
+              let rowView = table.rowView(atRow: table.selectedRow, makeIfNecessary: false) as? ThreadRowBackgroundView
+        else { return }
+        rowView.setHovering(true)
         try await Task.sleep(for: .milliseconds(50))
     }
 }

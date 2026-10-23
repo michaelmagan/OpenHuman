@@ -159,10 +159,12 @@ struct SuggestionWindow {
         let themes = ThemeStore(preferencesStore: MemoryThemePreferencesStore(ThemePreferences(mode: .light)))
         var attached: MainContentViewController?
         let hosting = NSHostingView(rootView: MainWindowRoot(environment: environment, themes: themes) { attached = $0 })
+        hosting.sceneBridgingOptions = [.toolbars, .title]
         let frame = NSRect(origin: NSPoint(x: -6000, y: -6000), size: NSSize(width: 1100, height: 800))
         UserDefaults.standard.removeObject(forKey: "NSWindow Frame dev.openhuman.tests.suggestion-\(name)")
-        let window = UnconstrainedTestWindow(contentRect: frame, styleMask: [.titled, .resizable], backing: .buffered,
-                                             defer: false)
+        let window = UnconstrainedTestWindow(contentRect: frame, styleMask: [.titled, .resizable, .fullSizeContentView],
+                                             backing: .buffered, defer: false)
+        window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
         #expect(window.setFrameAutosaveName("dev.openhuman.tests.suggestion-\(name)"))
         window.contentView = hosting
@@ -170,7 +172,7 @@ struct SuggestionWindow {
         window.orderFrontRegardless()
         try await until { attached != nil && environment.router.list?.state == .loaded }
         let content = try #require(attached)
-        try await settleTitleBarStrip(of: window)
+        try await settleWindowChrome(of: window)
         content.keyRouter.isMailWindow = { $0 === window }
         return SuggestionWindow(environment: environment, window: window, content: content, center: center,
                                 settings: settings)

@@ -3,6 +3,7 @@ import MailActions
 import MailFeatures
 import MailModel
 import MailTheme
+import MailUI
 import OpenHumanCore
 import Testing
 @testable import MailUIMac
@@ -311,8 +312,8 @@ struct RowActionsOverlapTests {
         let compact = ThreadRowStyle(theme: Self.tokens(light, density: .compact))
         let normal = ThreadRowStyle(theme: Self.tokens(light, density: .default))
         let comfortable = ThreadRowStyle(theme: Self.tokens(light, density: .comfortable))
-        #expect(compact.rowHeight == 32 && normal.rowHeight == 36 && comfortable.rowHeight == 44)
-        let designTen = ThreadRowStyle.Metrics(leading: 40, trailing: 24, dotCenterX: 22, senderGap: 16, columnGap: 16,
+        #expect(compact.rowHeight == 32 && normal.rowHeight == 40 && comfortable.rowHeight == 48)
+        let designTen = ThreadRowStyle.Metrics(leading: 40, trailing: 24, dotCenterX: 21, senderGap: 16, columnGap: 16,
                                                senderMin: 160, senderMax: 240, senderPct: 0.22, indicatorWidth: 40,
                                                indicatorSize: 12, dateWidth: 72, buttonGap: 4, buttonGlyph: 14)
         for style in [compact, normal] {
@@ -320,18 +321,19 @@ struct RowActionsOverlapTests {
             #expect(style.bodyFont.pointSize == 13 && style.lineHeight == 18 && style.plateRadius == 6)
         }
         #expect(comfortable.metrics == ThreadRowStyle.Metrics(
-            leading: 48, trailing: 36, dotCenterX: 24, senderGap: 32, columnGap: 16, senderMin: 185, senderMax: 240,
+            leading: 48, trailing: 36, dotCenterX: 21, senderGap: 32, columnGap: 16, senderMin: 185, senderMax: 240,
             senderPct: 0.22, indicatorWidth: 46, indicatorSize: 14, dateWidth: 83, buttonGap: 12, buttonGlyph: 16))
         #expect(comfortable.bodyFont.pointSize == 15 && comfortable.strongFont.pointSize == 15 && comfortable.lineHeight == 20)
         #expect(comfortable.metaFont.pointSize == 14)
-        #expect(comfortable.plateRadius == 10 && comfortable.plateInsetX == 8 && comfortable.hoverTarget == 28)
+        #expect(comfortable.plateRadius == 6 && comfortable.plateInsetX == 8 && comfortable.plateInsetY == 1)
+        #expect(comfortable.hoverTarget == 28)
         #expect(ThreadRowView.columns(width: 1000).sender == 40...260)
         let zoomed = ThreadRowStyle(theme: Self.tokens(light, density: .comfortable, zoom: 1.5))
         var columnsOnly = zoomed.metrics
         columnsOnly.dotCenterX = comfortable.metrics.dotCenterX
         #expect(zoomed.bodyFont.pointSize == 22.5 && columnsOnly == comfortable.metrics)
         #expect(zoomed.metrics.dotCenterX - zoomed.plateInsetX == comfortable.metrics.dotCenterX - comfortable.plateInsetX,
-                "the box follows the zoomed plate's bar")
+                "the box keeps its place on the zoomed plate")
         let header = ThreadGroupHeaderView(style: comfortable)
         header.frame = NSRect(x: 0, y: 0, width: 900, height: comfortable.rowHeight)
         header.configure(title: "Yesterday")
@@ -348,7 +350,7 @@ struct RowActionsOverlapTests {
                     let side = ThreadRowView.checkboxSize
                     let box = (style.metrics.dotCenterX - side / 2)...(style.metrics.dotCenterX + side / 2)
                     #expect(side >= 14 && side <= 16, "\(label)")
-                    #expect(box.lowerBound - (style.plateInsetX + style.cursorBarWidth) >= 6, "after the bar: \(label)")
+                    #expect(box.lowerBound - style.plateInsetX >= 6, "inside the plate: \(label)")
                     #expect(style.metrics.leading - box.upperBound >= 10, "before the sender: \(label)")
                     for width in [CGFloat(500), 1000, 2000] {
                         let c = style.columns(width: width)
@@ -381,16 +383,15 @@ struct RowActionsOverlapTests {
                 func fill(_ title: String, _ hue: LabelChipHue) -> NSColor? {
                     Self.pixel(style.chips.image(title, hue: hue, muted: false).image)
                 }
-                let coral = fill("marketing", .coral), sky = fill("clients", .sky)
-                #expect(Self.near(coral, tokens.component.labelChip.coralBg), "coral fill \(String(describing: coral)): \(label)")
-                #expect(Self.near(sky, tokens.component.labelChip.skyBg), "sky fill \(String(describing: sky)): \(label)")
-                if tokens.component.row.chipBg.alpha == 1 {
-                    let neutral = fill("important", .neutral)
-                    #expect(Self.near(neutral, tokens.component.row.chipBg), "neutral fill \(String(describing: neutral)): \(label)")
+                for (title, hue) in [("marketing", LabelChipHue.coral), ("clients", .sky), ("important", .neutral)] {
+                    let alpha = fill(title, hue)?.alphaComponent ?? 0
+                    #expect(abs(alpha - NativeMetrics.Tag.fillOpacity) < 0.03, "\(title) is a tint, alpha \(alpha): \(label)")
+                    #expect(style.chips.image(title, hue: hue, muted: false).image.size.height == style.chips.chipHeight)
                 }
-                #expect(style.chips.colors(hue: .coral, muted: false) == (tokens.component.labelChip.coralBg,
-                                                                          tokens.component.labelChip.coralText), "\(label)")
-                #expect(style.chips.colors(hue: .coral, muted: true) == (tokens.component.row.chipBg, tokens.textTertiary),
+                let coral = style.chips.colors(hue: .coral, muted: false)
+                #expect(coral.fill == LabelChipRenderer.tint(tokens.component.labelChip.coralText), "\(label)")
+                #expect(coral.ink.contrastRatio(on: coral.fill.composited(over: tokens.bgWindow)) >= 4.5, "\(label)")
+                #expect(style.chips.colors(hue: .coral, muted: true) == (LabelChipRenderer.tint(tokens.textTertiary), tokens.textTertiary),
                         "a fallback category is muted grey: \(label)")
             }
         }

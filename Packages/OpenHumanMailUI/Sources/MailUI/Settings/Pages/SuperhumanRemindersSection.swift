@@ -16,6 +16,7 @@ struct SuperhumanRemindersSection: View {
                 SettingsRow(SuperhumanRemindersSettingsModel.hideTitle, detail: SuperhumanRemindersSettingsModel.hideNote,
                             isOn: binding(model.hide))
                     .disabled(!model.availability.canEditSettings)
+                    .task { model.start() }
                 SettingsRow(SuperhumanRemindersSettingsModel.senderTitle, detail: SuperhumanRemindersSettingsModel.senderNote,
                             status: model.sendersError, statusTone: .danger) {
                     TextField(SuperhumanRemindersSettingsModel.senderTitle, text: $model.sendersText)
@@ -38,7 +39,6 @@ struct SuperhumanRemindersSection: View {
                 }
             }
         }
-        .task { model.start() }
     }
 
     @ViewBuilder private var importRow: some View {

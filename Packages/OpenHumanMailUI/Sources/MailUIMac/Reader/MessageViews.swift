@@ -177,168 +177,62 @@ final class ReaderButton: NSButton {
     }
 }
 
-@MainActor
-final class MessageCardView: NSView {
-    enum Appearance: Equatable { case flat, raised }
-
-    static func appearance(expanded: Bool, hovering: Bool, focused: Bool, hasComposer: Bool) -> Appearance {
-        expanded || hasComposer || hovering || focused ? .raised : .flat
-    }
-
-    let fill: NSColor
-    let border: NSColor
-    let ring: NSColor?
-    var showsFocusRing = false {
-        didSet { if showsFocusRing != oldValue { needsDisplay = true } }
-    }
-    private let radius: CGFloat
-    private let cardShadow: ThemeShadow
-    private let hairline: CGFloat
-    let margin: CGFloat
-    var look: Appearance = .raised {
-        didSet { if look != oldValue { needsDisplay = true } }
-    }
-    var segment: CardSegment = .single
-
-    init(theme: ThemeTokens) {
-        fill = theme.component.thread.cardBg.nsColor
-        border = (theme.increaseContrast ? theme.borderControl : theme.borderElevated).nsColor
-        ring = theme.increaseContrast ? theme.accentRing.nsColor : nil
-        radius = theme.radiusLG
-        cardShadow = theme.component.thread.cardShadow
-        hairline = theme.borderWidthHairline
-        margin = Self.margin(for: cardShadow)
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        setAccessibilityElement(false)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("not used") }
-
+/// The room a shadow needs around the surface that casts it, for floating pills and tips.
+enum ShadowRoom {
     static func margin(for shadow: ThemeShadow) -> CGFloat {
         shadow.layers.map { $0.blur + max(abs($0.x), abs($0.y)) + max(0, $0.spread) }.max().map { $0.rounded(.up) } ?? 0
     }
+}
 
-    func pin(around view: NSView) {
-        NSLayoutConstraint.activate([
-            leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: -margin),
-            trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: margin),
-            topAnchor.constraint(equalTo: view.topAnchor, constant: -margin),
-            bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: margin),
-        ])
+typealias MessageCardView = ShadowRoom
+
+/// The plate behind a message row: the hover tint on a collapsed row, and the focus tint (ringed under Increase
+/// Contrast) on the focused message's header. It never takes clicks and never changes a frame.
+@MainActor
+final class ReaderPlateView: NSView {
+    enum Look: Equatable { case none, hover, focus }
+
+    let hoverColor: NSColor
+    let focusColor: NSColor
+    let ring: NSColor?
+    private let radius: CGFloat
+    private let ringWidth: CGFloat
+    var look: Look = .none {
+        didSet {
+            guard look != oldValue else { return }
+            isHidden = look == .none
+            needsDisplay = true
+        }
     }
 
-    var cardRect: NSRect { bounds.insetBy(dx: margin, dy: margin) }
+    init(theme: ThemeTokens) {
+        hoverColor = theme.bgRowHover.nsColor
+        focusColor = theme.component.row.bgCursor.nsColor
+        ring = theme.increaseContrast ? theme.accentRing.nsColor : nil
+        radius = theme.radiusMD
+        ringWidth = theme.borderWidthHairline
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        isHidden = true
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    var showsRing: Bool { look == .focus && ring != nil }
 
     override func draw(_ dirtyRect: NSRect) {
-        let card = cardRect
-        guard look == .raised, card.width > 0, card.height > 0 else { return }
-        let path = NSBezierPath(roundedRect: card, xRadius: radius, yRadius: radius)
-        let edge = NSBezierPath(roundedRect: card.insetBy(dx: hairline / 2, dy: hairline / 2), xRadius: radius, yRadius: radius)
-        for layer in cardShadow.layers {
-            NSGraphicsContext.saveGraphicsState()
-            let cast = NSShadow()
-            cast.shadowOffset = NSSize(width: layer.x, height: -layer.y)
-            cast.shadowBlurRadius = layer.blur
-            cast.shadowColor = layer.color.nsColor
-            cast.set()
-            fill.setFill()
-            path.fill()
-            NSGraphicsContext.restoreGraphicsState()
-        }
-        fill.setFill()
+        guard look != .none, bounds.width > 0, bounds.height > 0 else { return }
+        let path = NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius)
+        (look == .focus ? focusColor : hoverColor).setFill()
         path.fill()
-        edge.lineWidth = hairline
-        border.setStroke()
+        guard showsRing, let ring else { return }
+        let edge = NSBezierPath(roundedRect: bounds.insetBy(dx: ringWidth / 2, dy: ringWidth / 2), xRadius: radius,
+                                yRadius: radius)
+        edge.lineWidth = ringWidth
+        ring.setStroke()
         edge.stroke()
-        if showsFocusRing, let ring {
-            let ringPath = edge.copy() as! NSBezierPath
-            ringPath.lineWidth = Self.focusRingWidth
-            ring.setStroke()
-            ringPath.stroke()
-        }
-    }
-
-    static let focusRingWidth: CGFloat = 1
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-}
-
-@MainActor
-func roundedPath(_ rect: NSRect, radius: CGFloat, top: Bool, bottom: Bool) -> NSBezierPath {
-    let r = min(radius, rect.height / 2, rect.width / 2)
-    let path = NSBezierPath()
-    if bottom {
-        path.move(to: NSPoint(x: rect.minX, y: rect.minY + r))
-        path.appendArc(withCenter: NSPoint(x: rect.minX + r, y: rect.minY + r), radius: r, startAngle: 180, endAngle: 270)
-        path.line(to: NSPoint(x: rect.maxX - r, y: rect.minY))
-        path.appendArc(withCenter: NSPoint(x: rect.maxX - r, y: rect.minY + r), radius: r, startAngle: 270, endAngle: 360)
-    } else {
-        path.move(to: NSPoint(x: rect.minX, y: rect.minY))
-        path.line(to: NSPoint(x: rect.maxX, y: rect.minY))
-    }
-    if top {
-        path.line(to: NSPoint(x: rect.maxX, y: rect.maxY - r))
-        path.appendArc(withCenter: NSPoint(x: rect.maxX - r, y: rect.maxY - r), radius: r, startAngle: 0, endAngle: 90)
-        path.line(to: NSPoint(x: rect.minX + r, y: rect.maxY))
-        path.appendArc(withCenter: NSPoint(x: rect.minX + r, y: rect.maxY - r), radius: r, startAngle: 90, endAngle: 180)
-    } else {
-        path.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
-        path.line(to: NSPoint(x: rect.minX, y: rect.maxY))
-    }
-    path.close()
-    return path
-}
-
-@MainActor
-final class FocusBarView: NSView {
-    let color: NSColor
-    private let radius: CGFloat
-
-    init(theme: ThemeTokens) {
-        color = theme.component.row.cursorBar.nsColor
-        radius = theme.radiusLG
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        widthAnchor.constraint(equalToConstant: theme.component.thread.focusEdgeWidth).isActive = true
-        setAccessibilityElement(false)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("not used") }
-
-    override func draw(_ dirtyRect: NSRect) {
-        NSGraphicsContext.saveGraphicsState()
-        roundedPath(NSRect(x: 0, y: 0, width: bounds.width + radius * 2, height: bounds.height), radius: radius,
-                    top: true, bottom: true).addClip()
-        color.setFill()
-        bounds.fill()
-        NSGraphicsContext.restoreGraphicsState()
-    }
-}
-
-@MainActor
-final class FocusPlateView: NSView {
-    let color: NSColor
-    private let radius: CGFloat
-    var roundsBottom = false { didSet { if roundsBottom != oldValue { needsDisplay = true } } }
-    var roundsTop = true { didSet { if roundsTop != oldValue { needsDisplay = true } } }
-
-    init(theme: ThemeTokens) {
-        color = theme.component.row.bgCursor.nsColor
-        radius = theme.radiusLG
-        super.init(frame: .zero)
-        translatesAutoresizingMaskIntoConstraints = false
-        setAccessibilityElement(false)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("not used") }
-
-    override func draw(_ dirtyRect: NSRect) {
-        color.setFill()
-        roundedPath(bounds, radius: radius, top: roundsTop, bottom: roundsBottom).fill()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -349,7 +243,9 @@ final class CollapsedMessageView: NSView {
     var onClick: (() -> Void)?
     let snippetLabel: NSTextField
 
-    static func rowHeight(_ theme: ThemeTokens) -> CGFloat { theme.collapsedMessageRow + theme.space2 }
+    static func rowHeight(_ theme: ThemeTokens) -> CGFloat {
+        CGFloat(theme.densityScaled(Double(NativeMetrics.Reader.collapsedRowHeight)))
+    }
 
     static func senderColumn(_ theme: ThemeTokens) -> CGFloat { theme.component.row.senderMin }
 
@@ -396,29 +292,33 @@ final class CollapsedMessageView: NSView {
 final class OlderMessagesPillView: NSView {
     var onClick: (() -> Void)?
     let count: Int
-    private let card: MessageCardView
-    var cardSegment: CardSegment {
-        get { card.segment }
-        set { card.segment = newValue }
-    }
-    var cardAppearance: MessageCardView.Appearance { card.look }
+    let separator: HairlineView
+    let plate: ReaderPlateView
 
     init(count: Int, theme: ThemeTokens) {
         self.count = count
-        card = MessageCardView(theme: theme)
-        card.look = .flat
+        separator = HairlineView(theme: theme)
+        plate = ReaderPlateView(theme: theme)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         let text = count == 1 ? "1 older message" : "\(count) older messages"
         let label = readerLabel(text, theme.typeLabel, theme.textSecondary)
-        addSubview(card)
+        addSubview(separator)
+        addSubview(plate)
         addSubview(label)
-        card.pin(around: self)
         let padding = MessageContainerView.horizontalPadding(theme)
+        let rowHeight = CollapsedMessageView.rowHeight(theme)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: CollapsedMessageView.rowHeight(theme)),
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            separator.topAnchor.constraint(equalTo: topAnchor),
+            heightAnchor.constraint(equalToConstant: rowHeight + separator.thickness),
+            plate.leadingAnchor.constraint(equalTo: leadingAnchor),
+            plate.trailingAnchor.constraint(equalTo: trailingAnchor),
+            plate.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: theme.space1),
+            plate.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -theme.space1),
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.centerYAnchor.constraint(equalTo: plate.centerYAnchor),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -padding),
         ])
         setAccessibilityElement(true)
@@ -430,6 +330,8 @@ final class OlderMessagesPillView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    var isHovered: Bool { plate.look == .hover }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for area in trackingAreas where area.owner === self { removeTrackingArea(area) }
@@ -437,8 +339,8 @@ final class OlderMessagesPillView: NSView {
                                        owner: self, userInfo: nil))
     }
 
-    override func mouseEntered(with event: NSEvent) { card.look = .raised }
-    override func mouseExited(with event: NSEvent) { card.look = .flat }
+    override func mouseEntered(with event: NSEvent) { plate.look = .hover }
+    override func mouseExited(with event: NSEvent) { plate.look = .none }
     override func mouseDown(with event: NSEvent) { onClick?() }
     override func accessibilityPerformPress() -> Bool { onClick?(); return true }
 }
@@ -458,26 +360,37 @@ struct MessageHeaderActions {
 
 @MainActor
 final class MessageHeaderView: NSView {
-    static let isOneLine = true
+    /// The header band: the monogram's height, with the sender and recipient lines centred beside it.
+    static var bandHeight: CGFloat { NativeMetrics.Reader.monogramSize }
     private let theme: ThemeTokens
     private let summary: MessageSummary
-    private let avatar: AvatarView
-    private var nameAfterAvatar: NSLayoutConstraint!
-    private var nameFlush: NSLayoutConstraint!
+    let avatar: AvatarView
+    let nameLabel: NSTextField
+    let dateLabel: NSTextField
     private let recipients: ReaderButton
     private let detailsStack = NSStackView()
     private let actionsStack = NSStackView()
     private var moreButton: ReaderButton!
     private(set) var detailsButton: ReaderButton!
     private var accessoryButton: ReaderButton?
+    private let lineOne = NSStackView()
     private let lineTwo = NSStackView()
+    private let lines = NSStackView()
+    private let band = NSLayoutGuide()
     var actions: MessageHeaderActions
-    static let oneLineBand: CGFloat = 28
     let bodyGap: CGFloat
     var pasteboard: NSPasteboard = .general
     private(set) var detailsShown = false
+    private(set) var actionsRaised = false
 
     private(set) var vipBadge: NSTextField?
+
+    static func senderStyle(_ theme: ThemeTokens) -> TypeStyle {
+        var style = theme.typeBodyStrong
+        style.size = Double(NativeMetrics.Reader.senderSize)
+        style.weight = 600
+        return style
+    }
 
     init(_ summary: MessageSummary, me: Set<String>, theme: ThemeTokens, format: ThreadRowFormatting, reader: ReaderFormatting,
          now: Date, actions: MessageHeaderActions, isVIP: Bool = false) {
@@ -486,65 +399,41 @@ final class MessageHeaderView: NSView {
         self.actions = actions
         recipients = ReaderButton.plain(format.recipientsLine(summary, me: me), theme: theme)
         let email = summary.from?.email ?? ""
-        avatar = AvatarView(initials: format.initials(name: summary.from?.name, email: email), email: email, theme: theme)
-        let name = readerLabel(summary.from?.name ?? (email.isEmpty ? "Unknown sender" : email), theme.typeBodyStrong, theme.textPrimary)
-        bodyGap = Self.isOneLine
-            ? max(0, theme.space4 - max(0, Self.oneLineBand - name.intrinsicContentSize.height) / 2)
-            : theme.space5
+        avatar = AvatarView(initials: format.initials(name: summary.from?.name, email: email), email: email, theme: theme,
+                            size: NativeMetrics.Reader.monogramSize)
+        nameLabel = readerLabel(summary.from?.name ?? (email.isEmpty ? "Unknown sender" : email), Self.senderStyle(theme),
+                                theme.textPrimary)
+        dateLabel = readerLabel(format.headerDate(summary.date, now: now), theme.typeMeta, theme.textTertiary)
+        bodyGap = theme.space4
         super.init(frame: .zero)
         recipients.onPress = { [weak self] in self?.toggleDetails() }
         translatesAutoresizingMaskIntoConstraints = false
+        let name = nameLabel, date = dateLabel
         if summary.from?.name != nil { name.toolTip = email }
-        let date = readerLabel(format.headerDate(summary.date, now: now), theme.typeMeta, theme.textTertiary)
         name.setContentHuggingPriority(.required, for: .horizontal)
+        name.setContentCompressionResistancePriority(.required, for: .vertical)
         date.setContentCompressionResistancePriority(.required, for: .horizontal)
         date.setContentHuggingPriority(.required, for: .horizontal)
 
-        recipients.setAccessibilityHelp("Shows all recipients and the date")
-        recipients.toolTip = "Show details"
-        recipients.identifier = NSUserInterfaceItemIdentifier("reader.recipients")
-        lineTwo.orientation = .horizontal
-        lineTwo.spacing = theme.space2
-        lineTwo.alignment = .firstBaseline
-        lineTwo.translatesAutoresizingMaskIntoConstraints = false
+        lineOne.orientation = .horizontal
+        lineOne.spacing = theme.space2
+        lineOne.alignment = .firstBaseline
+        lineOne.translatesAutoresizingMaskIntoConstraints = false
+        lineOne.addArrangedSubview(name)
         if isVIP {
             let badge = readerLabel("★ \(VIPCenter.chipTitle)", theme.typeMeta, theme.textWarning)
             badge.identifier = NSUserInterfaceItemIdentifier("reader.vip")
             badge.setAccessibilityLabel("VIP")
             badge.toolTip = "You marked this sender as a VIP: their mail is always important."
-            lineTwo.addArrangedSubview(badge)
+            lineOne.addArrangedSubview(badge)
             vipBadge = badge
         }
-        lineTwo.addArrangedSubview(recipients)
 
-        actionsStack.orientation = .horizontal
-        actionsStack.spacing = theme.space2
-        actionsStack.translatesAutoresizingMaskIntoConstraints = false
-        for descriptor in ReaderActions.messageActions where actions.isOffered(descriptor) {
-            let availability = actions.availability(descriptor)
-            let button = ReaderButton.icon(ReaderActions.symbol(for: descriptor.id) ?? "ellipsis", help: availability.help,
-                                           theme: theme, pointSize: ShellMetrics.rowIconSize) { [weak self] in
-                self?.actions.perform(descriptor.id)
-            }
-            button.isEnabled = availability.isEnabled
-            button.useQuietTints(theme)
-            button.identifier = NSUserInterfaceItemIdentifier(descriptor.id.rawValue)
-            button.setAccessibilityLabel(descriptor.title)
-            button.tip = KeycapTooltipContent.make(title: descriptor.title, bindings: actions.bindings(descriptor),
-                                                   enabled: availability.isEnabled, reason: availability.help)
-            actionsStack.addArrangedSubview(button)
-        }
-        let more = ReaderButton.icon("ellipsis", help: "More", theme: theme, pointSize: ShellMetrics.rowIconSize) { [weak self] in
-            self?.showMenu()
-        }
-        more.identifier = NSUserInterfaceItemIdentifier("reader.more")
-        more.setAccessibilityLabel("More actions for this message")
-        more.setAccessibilityRole(.menuButton)
-        more.tip = KeycapTooltipContent(title: "More")
-        actionsStack.addArrangedSubview(more)
-        moreButton = more
-        let details = ReaderButton.icon("chevron.up.chevron.down", help: "Show details", theme: theme, size: 24,
-                                        pointSize: 11) { [weak self] in
+        recipients.setAccessibilityHelp("Shows all recipients and the date")
+        recipients.toolTip = "Show details"
+        recipients.identifier = NSUserInterfaceItemIdentifier("reader.recipients")
+        let details = ReaderButton.icon("chevron.down", help: "Show details", theme: theme, size: 16, pointSize: 9) {
+            [weak self] in
             self?.toggleDetails()
         }
         details.identifier = NSUserInterfaceItemIdentifier("reader.details")
@@ -552,6 +441,35 @@ final class MessageHeaderView: NSView {
         details.setAccessibilityLabel("Show details")
         details.tip = KeycapTooltipContent(title: "Show details")
         detailsButton = details
+        lineTwo.orientation = .horizontal
+        lineTwo.spacing = theme.space1
+        lineTwo.alignment = .centerY
+        lineTwo.translatesAutoresizingMaskIntoConstraints = false
+        lineTwo.addArrangedSubview(recipients)
+        lineTwo.addArrangedSubview(details)
+        lineTwo.setCustomSpacing(theme.space2, after: details)
+
+        lines.orientation = .vertical
+        lines.alignment = .leading
+        lines.spacing = theme.space1
+        lines.translatesAutoresizingMaskIntoConstraints = false
+        lines.addArrangedSubview(lineOne)
+        lines.addArrangedSubview(lineTwo)
+
+        actionsStack.orientation = .horizontal
+        actionsStack.spacing = theme.space1
+        actionsStack.translatesAutoresizingMaskIntoConstraints = false
+        for button in makeMessageButtons() { actionsStack.addArrangedSubview(button) }
+        let more = ReaderButton.icon("ellipsis", help: "More", theme: theme, pointSize: ShellMetrics.rowIconSize) { [weak self] in
+            self?.showMenu()
+        }
+        more.identifier = NSUserInterfaceItemIdentifier("reader.more")
+        more.useQuietTints(theme)
+        more.setAccessibilityLabel("More actions for this message")
+        more.setAccessibilityRole(.menuButton)
+        more.tip = KeycapTooltipContent(title: "More")
+        actionsStack.addArrangedSubview(more)
+        moreButton = more
         for button in actionButtons + [details] {
             button.onHoverChange = { [weak self] button, inside in self?.actions.tooltipHover(button, inside) }
         }
@@ -565,44 +483,34 @@ final class MessageHeaderView: NSView {
             detailsStack.addArrangedSubview(Self.detailRow(line, theme: theme, copy: { [weak self] text in self?.copy(text) }))
         }
 
-        for v in [avatar, name, lineTwo, details, date, actionsStack, detailsStack] as [NSView] { addSubview(v) }
-        let header = NSLayoutGuide()
-        addLayoutGuide(header)
-        nameAfterAvatar = name.leadingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: theme.space4)
-        nameFlush = name.leadingAnchor.constraint(equalTo: leadingAnchor)
-        let oneLine = Self.isOneLine
-        avatar.isHidden = oneLine
-        let recipientsPlacement = oneLine
-            ? [lineTwo.leadingAnchor.constraint(equalTo: name.trailingAnchor, constant: theme.space2),
-               lineTwo.firstBaselineAnchor.constraint(equalTo: name.firstBaselineAnchor)]
-            : [lineTwo.leadingAnchor.constraint(equalTo: name.leadingAnchor),
-               lineTwo.topAnchor.constraint(equalTo: name.bottomAnchor, constant: theme.space1)]
-        let bandPlacement = oneLine
-            ? [header.heightAnchor.constraint(equalToConstant: Self.oneLineBand),
-               name.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-               actionsStack.centerYAnchor.constraint(equalTo: name.centerYAnchor)]
-            : [header.heightAnchor.constraint(equalToConstant: theme.messageHeaderHeight),
-               name.topAnchor.constraint(equalTo: topAnchor),
-               actionsStack.topAnchor.constraint(equalTo: topAnchor)]
-        NSLayoutConstraint.activate(recipientsPlacement + bandPlacement + [
-            oneLine ? nameFlush : nameAfterAvatar,
-            header.topAnchor.constraint(equalTo: topAnchor),
-            header.leadingAnchor.constraint(equalTo: leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: trailingAnchor),
+        for v in [avatar, lines, date, actionsStack, detailsStack] as [NSView] { addSubview(v) }
+        addLayoutGuide(band)
+        // Below the labels' compression resistance, so two lines taller than the monogram grow the band, not clip
+        let bandHeight = band.heightAnchor.constraint(equalToConstant: Self.bandHeight)
+        bandHeight.priority = .defaultLow
+        NSLayoutConstraint.activate([
+            band.topAnchor.constraint(equalTo: topAnchor),
+            band.leadingAnchor.constraint(equalTo: leadingAnchor),
+            band.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bandHeight,
+            band.heightAnchor.constraint(greaterThanOrEqualTo: avatar.heightAnchor),
             avatar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            avatar.topAnchor.constraint(equalTo: topAnchor),
-            name.trailingAnchor.constraint(lessThanOrEqualTo: actionsStack.leadingAnchor, constant: -theme.space4),
-            details.leadingAnchor.constraint(equalTo: lineTwo.trailingAnchor, constant: theme.space1),
-            details.centerYAnchor.constraint(equalTo: recipients.centerYAnchor),
-            details.trailingAnchor.constraint(lessThanOrEqualTo: actionsStack.leadingAnchor, constant: -theme.space4),
-            date.trailingAnchor.constraint(equalTo: trailingAnchor),
+            avatar.centerYAnchor.constraint(equalTo: band.centerYAnchor),
+            lines.leadingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: theme.space4),
+            lines.centerYAnchor.constraint(equalTo: band.centerYAnchor),
+            lines.topAnchor.constraint(greaterThanOrEqualTo: band.topAnchor),
+            lines.bottomAnchor.constraint(lessThanOrEqualTo: band.bottomAnchor),
+            lineOne.trailingAnchor.constraint(lessThanOrEqualTo: date.leadingAnchor, constant: -theme.space4),
+            lineTwo.trailingAnchor.constraint(lessThanOrEqualTo: actionsStack.leadingAnchor, constant: -theme.space4),
             date.firstBaselineAnchor.constraint(equalTo: name.firstBaselineAnchor),
-            actionsStack.trailingAnchor.constraint(equalTo: date.leadingAnchor, constant: -theme.space3),
-            detailsStack.topAnchor.constraint(equalTo: header.bottomAnchor, constant: theme.space3),
-            detailsStack.leadingAnchor.constraint(equalTo: name.leadingAnchor),
+            date.trailingAnchor.constraint(equalTo: actionsStack.leadingAnchor, constant: -theme.space3),
+            actionsStack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            actionsStack.centerYAnchor.constraint(equalTo: band.centerYAnchor),
+            detailsStack.topAnchor.constraint(equalTo: band.bottomAnchor, constant: theme.space3),
+            detailsStack.leadingAnchor.constraint(equalTo: lines.leadingAnchor),
             detailsStack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
         ])
-        bottomConstraintCollapsed = bottomAnchor.constraint(equalTo: header.bottomAnchor)
+        bottomConstraintCollapsed = bottomAnchor.constraint(equalTo: band.bottomAnchor)
         bottomConstraintExpanded = bottomAnchor.constraint(equalTo: detailsStack.bottomAnchor)
         bottomConstraintCollapsed.isActive = true
 
@@ -625,33 +533,62 @@ final class MessageHeaderView: NSView {
 
     override func mouseDown(with event: NSEvent) { onBackgroundClick?() }
 
+    /// The bottom of the sender band, for the focus plate around it; the details below it are not part of the plate.
+    var bandBottomAnchor: NSLayoutYAxisAnchor { band.bottomAnchor }
+
     func toggleDetails() {
         detailsShown.toggle()
         detailsStack.isHidden = !detailsShown
-        if Self.isOneLine {
-            avatar.isHidden = !detailsShown
-            let (off, on) = detailsShown ? (nameFlush!, nameAfterAvatar!) : (nameAfterAvatar!, nameFlush!)
-            off.isActive = false
-            on.isActive = true
-        }
         bottomConstraintCollapsed.isActive = !detailsShown
         bottomConstraintExpanded.isActive = detailsShown
         let label = detailsShown ? "Hide details" : "Show details"
         recipients.toolTip = label
         detailsButton.tip = KeycapTooltipContent(title: label)
         detailsButton.setAccessibilityLabel(label)
+        detailsButton.image = NSImage(systemSymbolName: detailsShown ? "chevron.up" : "chevron.down",
+                                      accessibilityDescription: label)?
+            .withSymbolConfiguration(.init(pointSize: 9, weight: .regular))
         actions.toggleDetails()
     }
 
-    func setActionsVisible(_ visible: Bool) {
-        for button in actionButtons where button !== moreButton { button.isRaised = visible }
-        detailsButton.isRaised = visible
-        moreButton.alphaValue = visible ? 1 : 0
+    /// The glyphs are always shown in a quiet tint; they take the full secondary tint while the message is hovered or
+    /// focused, so the open message's actions read as live without drawing a toolbar inside the conversation.
+    func setActionsRaised(_ raised: Bool) {
+        actionsRaised = raised
+        for button in actionButtons { button.isRaised = raised }
+        detailsButton.isRaised = raised
     }
 
-    var actionsVisible: Bool { moreButton.alphaValue > 0 }
-
     var actionButtons: [ReaderButton] { actionsStack.arrangedSubviews.compactMap { $0 as? ReaderButton } }
+
+    private func makeMessageButtons() -> [ReaderButton] {
+        ReaderActions.messageActions.filter { actions.isOffered($0) }.map { descriptor in
+            let availability = actions.availability(descriptor)
+            let button = ReaderButton.icon(ReaderActions.symbol(for: descriptor.id) ?? "ellipsis", help: availability.help,
+                                           theme: theme, pointSize: ShellMetrics.rowIconSize) { [weak self] in
+                self?.actions.perform(descriptor.id)
+            }
+            button.isEnabled = availability.isEnabled
+            button.useQuietTints(theme)
+            button.identifier = NSUserInterfaceItemIdentifier(descriptor.id.rawValue)
+            button.setAccessibilityLabel(descriptor.title)
+            button.tip = KeycapTooltipContent.make(title: descriptor.title, bindings: actions.bindings(descriptor),
+                                                   enabled: availability.isEnabled, reason: availability.help)
+            button.onHoverChange = { [weak self] button, inside in self?.actions.tooltipHover(button, inside) }
+            button.isRaised = actionsRaised
+            return button
+        }
+    }
+
+    /// Rebuilds Reply, Reply All and Forward from the current context. A header built before the window's account
+    /// was ready offers none of them until this runs.
+    func refreshMessageActions() {
+        for button in actionButtons where button !== moreButton {
+            actionsStack.removeArrangedSubview(button)
+            button.removeFromSuperview()
+        }
+        for (index, button) in makeMessageButtons().enumerated() { actionsStack.insertArrangedSubview(button, at: index) }
+    }
 
     func setAccessory(_ item: ReaderHeaderAccessoryItem?) {
         if let accessoryButton {
@@ -676,9 +613,8 @@ final class MessageHeaderView: NSView {
     }
 
     private func showMenu() {
-        guard let menu else { return }
-        let point = NSPoint(x: bounds.maxX - 28, y: isFlipped ? 36 : bounds.maxY - 36)
-        menu.popUp(positioning: nil, at: point, in: self)
+        guard let menu, let more = moreButton else { return }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: more.isFlipped ? more.bounds.maxY + 4 : -4), in: more)
     }
 
     func fillMenu(_ menu: NSMenu) {
@@ -760,24 +696,26 @@ final class AvatarView: NSView {
     private let ring: NSColor?
     private let ringWidth: CGFloat
 
-    init(initials: String, email: String, theme: ThemeTokens) {
+    init(initials: String, email: String, theme: ThemeTokens, size: CGFloat? = nil) {
         let avatar = theme.component.avatar
+        let side = size ?? CGFloat(avatar.size)
         let colored = Self.usesAccountColors
         fill = (colored ? theme.avatarFill(for: email) : avatar.bg).nsColor
         ring = colored ? nil : avatar.ring.nsColor
         ringWidth = theme.borderWidthHairline
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        var style = theme.typeCaption
+        var style = side >= NativeMetrics.Reader.monogramSize ? theme.typeBodyStrong : theme.typeCaption
         style.weight = 600
         let label = NSTextField(labelWithString: initials)
         label.font = style.font
         label.textColor = colored ? .white : avatar.text.nsColor
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
+        label.setAccessibilityElement(false)
         addSubview(label)
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: avatar.size), heightAnchor.constraint(equalToConstant: avatar.size),
+            widthAnchor.constraint(equalToConstant: side), heightAnchor.constraint(equalToConstant: side),
             label.centerXAnchor.constraint(equalTo: centerXAnchor), label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         setAccessibilityElement(false)
@@ -910,11 +848,10 @@ final class OutgoingMessageView: NSView {
                              message.state == .sent ? theme.textSuccess : theme.textSecondary)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        let card = MessageCardView(theme: theme)
-        addSubview(card)
-        card.pin(around: self)
+        let separator = HairlineView(theme: theme)
+        addSubview(separator)
         let email = message.from.email
-        let name = readerLabel(message.from.name ?? email, theme.typeBodyStrong, theme.textPrimary)
+        let name = readerLabel(message.from.name ?? email, MessageHeaderView.senderStyle(theme), theme.textPrimary)
         let to = readerLabel(summary.isEmpty ? "" : "to \(summary)", theme.typeMeta, theme.textSecondary)
         let body = NSTextField(wrappingLabelWithString: message.text.trimmingCharacters(in: .whitespacesAndNewlines))
         body.font = theme.typeReader.font
@@ -930,8 +867,11 @@ final class OutgoingMessageView: NSView {
         for v in [name, to, status, body] as [NSView] { addSubview(v) }
         let padding = MessageContainerView.horizontalPadding(theme)
         NSLayoutConstraint.activate([
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            separator.topAnchor.constraint(equalTo: topAnchor),
             name.leadingAnchor.constraint(equalTo: leadingAnchor, constant: padding),
-            name.topAnchor.constraint(equalTo: topAnchor, constant: theme.cardContentInsetY),
+            name.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: theme.cardContentInsetY),
             name.trailingAnchor.constraint(lessThanOrEqualTo: status.leadingAnchor, constant: -theme.space5),
             to.leadingAnchor.constraint(equalTo: name.trailingAnchor, constant: theme.space2),
             to.firstBaselineAnchor.constraint(equalTo: name.firstBaselineAnchor),

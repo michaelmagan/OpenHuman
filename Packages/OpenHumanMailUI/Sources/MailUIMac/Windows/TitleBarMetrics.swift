@@ -13,6 +13,8 @@ extension NSWindow: TitleBarMeasuring {
     var isFullScreen: Bool { styleMask.contains(.fullScreen) }
 }
 
+/// How far the title bar and toolbar reach over a full-size content view, for crops and layout checks. A window
+/// without a full-size content view, or in full screen, has nothing over its content.
 enum TitleBarMetrics {
     @MainActor
     static func stripHeight(of window: some TitleBarMeasuring) -> CGFloat {

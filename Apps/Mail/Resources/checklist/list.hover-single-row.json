@@ -1,0 +1,14 @@
+{
+  "id": "list.hover-single-row",
+  "area": "Thread list",
+  "title": "Only the row under the pointer shows the hover look while scrolling",
+  "steps": [
+    "Launch Mail with -UseFakeData; open the Inbox and rest the pointer over the list",
+    "Scroll the list up and down with the trackpad, including a fast flick, then stop without moving the pointer",
+    "Scroll with a mouse wheel if one is attached, then move the pointer off the list onto the reader"
+  ],
+  "deepLink": null,
+  "expected": "While the list scrolls no row keeps the grey plate or the hover checkbox. When scrolling stops, only the row under the pointer shows the grey plate and the checkbox in place of its dot; every other row shows its normal dot or avatar. With a mouse wheel the plate follows the row under the pointer. Moving off the list clears it. The cursor row keeps its accent plate throughout.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

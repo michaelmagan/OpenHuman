@@ -15,25 +15,23 @@ public struct AIActivityView: View {
     }
 
     public var body: some View {
-        Group {
-            if let detail = model.detail {
+        if let detail = model.detail {
+            Section {
                 AITraceDetailView(detail: detail, backTitle: model.backTitle, back: { model.closeDetail() },
                                   delete: { Task { await model.delete(detail.id) } }, editPrompt: editPrompt)
-            } else {
-                SettingsSectionStack {
-                    list
-                    retention
-                    cache
-                    SettingsErrorLine(text: model.error)
-                }
+                    .task(id: model.reloadKey) { await model.refresh() }
+                    .accessibilityIdentifier("settings.ai.activity")
             }
+        } else {
+            list
+            retention
+            cache
+            SettingsErrorLine(text: model.error)
         }
-        .task(id: model.reloadKey) { await model.refresh() }
-        .accessibilityIdentifier("settings.ai.activity")
     }
 
-    private var list: some View {
-        VStack(alignment: .leading, spacing: theme.space3) {
+    @ViewBuilder private var list: some View {
+        Section {
             HStack(spacing: theme.space4) {
                 Picker(String(localized: "Show"), selection: $model.page) {
                     ForEach(AIActivityModel.Page.allCases, id: \.self) { page in Text(page.title).tag(page) }
@@ -54,28 +52,28 @@ public struct AIActivityView: View {
                 case .feedback:
                     Toggle(String(localized: "Thumbs down only"), isOn: $model.onlyThumbsDown)
                         .ohCheckboxToggleStyle()
-                        .themeFont(theme.typeBody)
                         .fixedSize()
                         .accessibilityIdentifier("settings.ai.activity.thumbsDown")
                 }
             }
+            .task(id: model.reloadKey) { await model.refresh() }
+            .accessibilityIdentifier("settings.ai.activity")
             Text(verbatim: model.summary)
-                .themeFont(theme.typeMeta)
-                .foregroundStyle(theme.textSecondary.color)
+                .font(.system(size: NativeMetrics.Text.secondary))
+                .foregroundStyle(.secondary)
                 .accessibilityIdentifier("settings.ai.activity.summary")
-            SettingsSection(footnote: AIActivityModel.note, compact: true) {
-                let rows = model.rows
-                if rows.isEmpty {
-                    Text(verbatim: model.emptyText)
-                        .themeFont(theme.typeBody)
-                        .foregroundStyle(theme.textSecondary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .settingsRowPadding()
-                        .accessibilityIdentifier("settings.ai.activity.empty")
-                } else {
-                    ForEach(rows) { row in
-                        AIActivityRowView(row: row, showsSnippet: model.showsSnippets) { Task { await model.open(row.id) } }
-                    }
+        }
+        SettingsSection(footnote: AIActivityModel.note, compact: true) {
+            let rows = model.rows
+            if rows.isEmpty {
+                Text(verbatim: model.emptyText)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .settingsRowPadding()
+                    .accessibilityIdentifier("settings.ai.activity.empty")
+            } else {
+                ForEach(rows) { row in
+                    AIActivityRowView(row: row, showsSnippet: model.showsSnippets) { Task { await model.open(row.id) } }
                 }
             }
         }
@@ -111,7 +109,6 @@ public struct AIActivityView: View {
                     }
                     .padding(.leading, theme.space4)
                 }
-                .themeFont(theme.typeBody)
                 .settingsRowPadding()
                 .accessibilityIdentifier("settings.ai.activity.features")
             }
@@ -122,12 +119,12 @@ public struct AIActivityView: View {
                     .disabled(!model.keepsAny)
                     .accessibilityIdentifier("settings.ai.activity.clearAll")
             }
-        }
-        .confirmationDialog(AIActivityModel.clearConfirmTitle, isPresented: $confirmsClear) {
-            Button(String(localized: "Clear All Traces"), role: .destructive) { Task { await model.clearAll() } }
-            Button(String(localized: "Cancel"), role: .cancel) {}
-        } message: {
-            Text(AIActivityModel.clearConfirmDetail)
+            .confirmationDialog(AIActivityModel.clearConfirmTitle, isPresented: $confirmsClear) {
+                Button(String(localized: "Clear All Traces"), role: .destructive) { Task { await model.clearAll() } }
+                Button(String(localized: "Cancel"), role: .cancel) {}
+            } message: {
+                Text(AIActivityModel.clearConfirmDetail)
+            }
         }
     }
 
@@ -156,17 +153,16 @@ struct AIActivityRowView: View {
         Button(action: open) {
             HStack(alignment: .center, spacing: theme.space3) {
                 Text(row.date, format: .dateTime.month(.abbreviated).day().hour().minute())
-                    .themeFont(theme.typeMeta)
-                    .foregroundStyle(theme.textSecondary.color)
+                    .font(.system(size: NativeMetrics.Text.secondary))
+                    .foregroundStyle(.secondary)
                     .frame(width: 104, alignment: .leading)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(verbatim: row.feature)
-                        .themeFont(theme.typeBody)
-                        .foregroundStyle(theme.textPrimary.color)
+                        .foregroundStyle(.primary)
                         .lineLimit(1)
                     subtitle
-                        .themeFont(theme.typeMeta)
-                        .foregroundStyle(theme.textSecondary.color)
+                        .font(.system(size: NativeMetrics.Text.secondary))
+                        .foregroundStyle(.secondary)
                 }
                 Spacer(minLength: theme.space3)
                 marks
@@ -174,8 +170,8 @@ struct AIActivityRowView: View {
             .padding(.vertical, theme.space2)
             .padding(.horizontal, theme.space1)
             .frame(minHeight: SettingsMetrics.rowMinHeight)
-            .background(RoundedRectangle(cornerRadius: theme.radiusSM)
-                .fill(hovered ? theme.bgRowHover.color : Color.clear))
+            .background(RoundedRectangle(cornerRadius: theme.radiusMD)
+                .fill(hovered ? AnyShapeStyle(.quinary) : AnyShapeStyle(Color.clear)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -205,20 +201,20 @@ struct AIActivityRowView: View {
         HStack(spacing: theme.space3) {
             if row.failed {
                 Text("Failed")
-                    .themeFont(theme.typeCaption)
+                    .font(.system(size: NativeMetrics.Text.caption))
                     .foregroundStyle(theme.textDanger.color)
                     .accessibilityIdentifier("settings.ai.activity.failed")
             }
             if row.cacheHit {
                 Text("From cache")
-                    .themeFont(theme.typeCaption)
-                    .foregroundStyle(theme.textTertiary.color)
+                    .font(.system(size: NativeMetrics.Text.caption))
+                    .foregroundStyle(.tertiary)
                     .help(String(localized: "A saved answer was reused; the model didn't run"))
             }
             if let rating = row.rating, rating != 0 {
                 Image(systemName: rating > 0 ? "hand.thumbsup.fill" : "hand.thumbsdown.fill")
                     .font(.system(size: 11))
-                    .foregroundStyle(theme.textSecondary.color)
+                    .foregroundStyle(.secondary)
                     .accessibilityLabel(AITraceWording.rating(rating) ?? "")
             }
             Image(systemName: row.badge.symbol)
@@ -228,7 +224,7 @@ struct AIActivityRowView: View {
                 .accessibilityLabel(row.badge.title)
             Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(theme.textTertiary.color)
+                .foregroundStyle(.tertiary)
         }
         .fixedSize()
     }

@@ -45,15 +45,14 @@ private struct SidebarFolderRow: View {
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
-        HStack(spacing: theme.space3) {
+        HStack(spacing: theme.space4) {
             Image(systemName: row.folder.symbol)
                 .font(.system(size: SettingsMetrics.sidebarIconSize))
-                .foregroundStyle((isOn ? theme.textSecondary : theme.textTertiary).color)
+                .foregroundStyle(isOn ? HierarchicalShapeStyle.secondary : .tertiary)
                 .frame(width: theme.space6)
                 .accessibilityHidden(true)
             Text(row.folder.title)
-                .themeFont(theme.typeBody)
-                .foregroundStyle((isEnabled ? theme.textPrimary : theme.textTertiary).color)
+                .foregroundStyle(isEnabled ? HierarchicalShapeStyle.primary : .tertiary)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityHidden(true)
@@ -61,8 +60,8 @@ private struct SidebarFolderRow: View {
                 KeycapRow(keycaps: row.keycaps)
             } else if let route = row.route {
                 Text(route)
-                    .themeFont(theme.typeMono)
-                    .foregroundStyle(theme.textSecondary.color)
+                    .font(.system(size: NativeMetrics.Text.secondary).monospaced())
+                    .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
             }
             SettingsSwitch(title: row.folder.title, isOn: $isOn)
@@ -71,7 +70,6 @@ private struct SidebarFolderRow: View {
                 .accessibilityHint(Text(row.spokenHint))
                 .accessibilityIdentifier("settings.sidebar.\(row.id)")
         }
-        .padding(.vertical, theme.space2)
         .frame(minHeight: SettingsMetrics.compactRowMinHeight)
     }
 }

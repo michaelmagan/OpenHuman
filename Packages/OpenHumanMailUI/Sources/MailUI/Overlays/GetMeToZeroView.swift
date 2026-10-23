@@ -4,30 +4,29 @@ import SwiftUI
 struct GetMeToZeroView: View {
     let model: GetMeToZeroModel
     let dismiss: () -> Void
-    @Environment(\.theme) private var theme
     @FocusState private var focused: Bool
 
     var body: some View {
-        OverlayCard(width: OverlayMetrics.timePickerWidth, top: OverlayMetrics.timePickerTop, radius: theme.radiusXL,
-                    dismiss: dismiss) {
+        OverlayPanel(width: OverlayMetrics.timePickerWidth, dismiss: dismiss) { _ in
             VStack(spacing: 0) {
                 header
-                Divider().overlay(theme.borderHairline.color)
-                ForEach(Array(GetMeToZeroModel.Age.allCases.enumerated()), id: \.element.id) { index, age in
-                    ageRow(age, number: index + 1)
+                Divider()
+                VStack(spacing: 0) {
+                    ForEach(Array(GetMeToZeroModel.Age.allCases.enumerated()), id: \.element.id) { index, age in
+                        ageRow(age, number: index + 1)
+                    }
                 }
-                Divider().overlay(theme.borderHairline.color)
-                toggle("Keep unread", key: "U", isOn: Binding(get: { model.keepUnread }, set: { model.keepUnread = $0 }))
-                toggle("Keep starred", key: "S", isOn: Binding(get: { model.keepStarred }, set: { model.keepStarred = $0 }))
-                Divider().overlay(theme.borderHairline.color)
+                .padding(.vertical, OverlayMetrics.listPaddingY)
+                Divider()
+                VStack(spacing: 0) {
+                    toggle("Keep unread", key: "U", isOn: Binding(get: { model.keepUnread }, set: { model.keepUnread = $0 }))
+                    toggle("Keep starred", key: "S", isOn: Binding(get: { model.keepStarred }, set: { model.keepStarred = $0 }))
+                }
+                .padding(.vertical, OverlayMetrics.listPaddingY)
+                Divider()
                 confirmRow
-                Divider().overlay(theme.borderHairline.color)
-                Text(model.footer)
-                    .font(theme.typeCaption.swiftUIFont)
-                    .foregroundStyle(theme.textTertiary.color)
-                    .padding(.horizontal, OverlayMetrics.rowIconX)
-                    .padding(.vertical, theme.space3)
-                    .frame(maxWidth: .infinity, minHeight: OverlayMetrics.footerHeight, alignment: .leading)
+                Divider()
+                OverlayFooter { Text(model.footer).fixedSize(horizontal: false, vertical: true) }
             }
             .focusable()
             .focused($focused)
@@ -49,76 +48,80 @@ struct GetMeToZeroView: View {
     }
 
     private var header: some View {
-        HStack(spacing: theme.space4) {
+        HStack(spacing: OverlayMetrics.fieldSpacing) {
             Image(systemName: "tray.and.arrow.down")
-                .font(.system(size: OverlayMetrics.rowIconSize))
-                .foregroundStyle(theme.textTertiary.color)
+                .font(.system(size: NativeMetrics.Overlay.paletteFieldTextSize))
+                .foregroundStyle(.secondary)
+                .frame(width: OverlayMetrics.symbolColumn)
+                .accessibilityHidden(true)
             Text(model.title)
-                .font(theme.typePaletteInput.swiftUIFont)
-                .foregroundStyle(theme.textPrimary.color)
+                .font(.system(size: NativeMetrics.Overlay.paletteFieldTextSize))
+                .foregroundStyle(.primary)
             Spacer()
         }
-        .padding(.horizontal, OverlayMetrics.rowIconX)
+        .padding(.horizontal, OverlayMetrics.panelInsetX)
         .frame(height: OverlayMetrics.pickerInputHeight)
+        .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 
     private func ageRow(_ age: GetMeToZeroModel.Age, number: Int) -> some View {
         let isChosen = model.age == age
-        return Button { model.age = age } label: {
-            HStack(spacing: 0) {
-                KeycapView(text: "\(number)").padding(.leading, OverlayMetrics.rowIconX).frame(width: 48, alignment: .leading)
+        return OverlayRow(isSelected: isChosen) { model.age = age } label: {
+            HStack(spacing: OverlayMetrics.rowSpacing) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: OverlayMetrics.rowSymbolSize, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .opacity(isChosen ? 1 : 0)
+                    .frame(width: OverlayMetrics.symbolColumn)
+                    .accessibilityHidden(true)
                 Text(age.title)
-                    .font(isChosen ? theme.typeBodyStrong.swiftUIFont : theme.typeBody.swiftUIFont)
-                    .foregroundStyle(isChosen ? theme.accentText.color : theme.textPrimary.color)
-                Spacer(minLength: theme.space5)
+                    .font(.system(size: NativeMetrics.Text.body, weight: isChosen ? .semibold : .regular))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: OverlayMetrics.rowSpacing)
+                OverlayShortcutHint("\(number)")
+                    .frame(width: OverlayMetrics.hintColumn, alignment: .trailing)
             }
-            .padding(.trailing, OverlayMetrics.rowIconX)
-            .frame(height: theme.component.picker.rowHeight)
-            .background(CursorRowBackground(isCursor: isChosen))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .accessibilityLabel(age.title)
-        .accessibilityAddTraits(isChosen ? .isSelected : [])
+        .accessibilityValue("shortcut \(number)")
     }
 
     private func toggle(_ title: String, key: String, isOn: Binding<Bool>) -> some View {
         HStack {
-            Toggle(isOn: isOn) {
-                Text(title).font(theme.typeBody.swiftUIFont).foregroundStyle(theme.textPrimary.color)
-            }
-            .ohCheckboxToggleStyle()
+            Toggle(title, isOn: isOn)
+                .ohCheckboxToggleStyle()
+                .font(.system(size: NativeMetrics.Text.body))
             Spacer()
-            KeycapView(text: key)
+            OverlayShortcutHint(key)
+                .frame(width: OverlayMetrics.hintColumn, alignment: .trailing)
         }
-        .padding(.horizontal, OverlayMetrics.rowIconX)
-        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+        .padding(.horizontal, OverlayMetrics.panelInsetX)
+        .frame(maxWidth: .infinity, minHeight: OverlayMetrics.rowHeight, alignment: .leading)
     }
 
     private var confirmRow: some View {
-        Button { model.confirm() } label: {
-            HStack {
+        HStack(spacing: OverlayMetrics.rowSpacing) {
+            Group {
                 if model.isLoading {
-                    Text("Counting…").font(theme.typeBody.swiftUIFont).foregroundStyle(theme.textSecondary.color)
+                    Text("Counting…").foregroundStyle(.secondary)
                 } else if let error = model.loadError {
-                    Text(error).font(theme.typeBody.swiftUIFont).foregroundStyle(theme.textWarning.color)
+                    Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                 } else if model.matchCount == 0 {
-                    Text("Nothing to archive with these choices")
-                        .font(theme.typeBody.swiftUIFont).foregroundStyle(theme.textSecondary.color)
-                } else {
-                    Text(model.confirmTitle + (model.isPartial ? " (the newest part of a large inbox)" : ""))
-                        .font(theme.typeBodyStrong.swiftUIFont).foregroundStyle(theme.accentText.color)
+                    Text("Nothing to archive with these choices").foregroundStyle(.secondary)
+                } else if model.isPartial {
+                    Text("The newest part of a large inbox").foregroundStyle(.secondary)
                 }
-                Spacer()
-                KeycapView(text: "↵")
             }
-            .padding(.horizontal, OverlayMetrics.rowIconX)
-            .frame(height: theme.component.picker.rowHeight)
-            .contentShape(Rectangle())
+            .font(.system(size: NativeMetrics.Text.secondary))
+            .lineLimit(2)
+            Spacer(minLength: OverlayMetrics.rowSpacing)
+            Button(model.confirmTitle) { model.confirm() }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isLoading || model.matchCount == 0)
+                .accessibilityLabel(model.isLoading ? "Counting" : model.confirmTitle)
         }
-        .buttonStyle(.plain)
-        .disabled(model.isLoading || model.matchCount == 0)
-        .accessibilityLabel(model.isLoading ? "Counting" : model.confirmTitle)
+        .padding(.horizontal, OverlayMetrics.panelInsetX)
+        .frame(maxWidth: .infinity, minHeight: OverlayMetrics.pickerInputHeight)
     }
 }

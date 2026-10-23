@@ -1,7 +1,10 @@
 import AppKit
 import MailFeatures
 import MailTheme
+import MailUI
 
+/// A floating capsule over the bottom of the conversation that shows the messages that arrived while reading. It is
+/// a solid accent capsule, the system's look for a prominent control, so it reads the same with Reduce Transparency.
 @MainActor
 final class NewMessagesPillView: NSView {
     var onClick: (() -> Void)?
@@ -11,10 +14,11 @@ final class NewMessagesPillView: NSView {
     let fill: NSColor
     private let hoverFill: NSColor
     private let pillShadow: ThemeShadow
-    private let radius: CGFloat
     private let labelStyle: TypeStyle
     private let labelColor: ThemeColor
+    /// Room around the capsule for its shadow; the reader places the pill by it.
     let margin: CGFloat
+    static let capsuleHeight: CGFloat = 28
     private var isHovered = false { didSet { if isHovered != oldValue { needsDisplay = true } } }
 
     private let enter: MotionSpec
@@ -26,13 +30,12 @@ final class NewMessagesPillView: NSView {
         fill = theme.accentFill.nsColor
         hoverFill = theme.accentFillHover.nsColor
         pillShadow = theme.shadow2
-        radius = theme.radiusPill
-        margin = MessageCardView.margin(for: theme.shadow2)
+        margin = ShadowRoom.margin(for: theme.shadow2)
         labelStyle = theme.typeLabel
         labelColor = theme.accentOnFill
         label = readerLabel("", theme.typeLabel, theme.accentOnFill)
         let image = NSImage(systemSymbolName: "arrow.down", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 11, weight: .semibold)) ?? NSImage()
+            .withSymbolConfiguration(.init(pointSize: NativeMetrics.Text.caption, weight: .semibold)) ?? NSImage()
         arrow = NSImageView(image: image)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -41,15 +44,22 @@ final class NewMessagesPillView: NSView {
         arrow.translatesAutoresizingMaskIntoConstraints = false
         arrow.setAccessibilityElement(false)
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
-        addSubview(arrow)
-        addSubview(label)
+        let content = NSView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(arrow)
+        content.addSubview(label)
+        addSubview(content)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 28 + margin * 2),
-            arrow.leadingAnchor.constraint(equalTo: leadingAnchor, constant: margin + theme.space4),
-            arrow.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: Self.capsuleHeight + margin * 2),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: margin),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -margin),
+            content.topAnchor.constraint(equalTo: topAnchor, constant: margin),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -margin),
+            arrow.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: theme.space4),
+            arrow.centerYAnchor.constraint(equalTo: content.centerYAnchor),
             label.leadingAnchor.constraint(equalTo: arrow.trailingAnchor, constant: theme.space2),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(margin + theme.space4)),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -theme.space4),
+            label.centerYAnchor.constraint(equalTo: content.centerYAnchor),
         ])
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
@@ -82,7 +92,7 @@ final class NewMessagesPillView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let pill = pillRect
         guard pill.width > 0, pill.height > 0 else { return }
-        let r = min(radius, pill.height / 2)
+        let r = pill.height / 2
         let path = NSBezierPath(roundedRect: pill, xRadius: r, yRadius: r)
         let color = isHovered ? hoverFill : fill
         for layer in pillShadow.layers {

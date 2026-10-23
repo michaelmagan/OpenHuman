@@ -1,0 +1,14 @@
+{
+  "id": "list.native-rows",
+  "area": "Thread list",
+  "title": "Native rows: rounded selection that follows the window, tinted chips and system dates",
+  "steps": [
+    "Launch Mail with -UseFakeData; press j twice in the Inbox and look at the rows and dates",
+    "Click the search field, then click another app's window, then come back",
+    "In Settings > Appearance, try each density, then open the Important split"
+  ],
+  "deepLink": null,
+  "expected": "One-line rows, 40 pt by default (32/48). Unread senders are semibold, read ones medium; snippets grey. Dates read 10:42 AM, Yesterday or Oct 12 in steady grey digits, never in capitals. The selected row is a rounded accent tint while the window is key, even with search focused, and light grey behind another window. Chips are tinted capsules; the Important split shows no Important chip.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

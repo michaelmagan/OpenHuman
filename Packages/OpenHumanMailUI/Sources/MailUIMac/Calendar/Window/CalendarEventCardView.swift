@@ -8,12 +8,14 @@ import SwiftUI
 
 struct CalendarEventCardView: View {
     @Bindable var model: CalendarWindowModel
+    let width: CGFloat
     var maxHeight: CGFloat = 640
     @Environment(\.theme) private var theme
     @Environment(\.openURL) private var openURL
     @State private var editing = false
+    @FocusState private var notesFocused: Bool
 
-    static let headerHeight: CGFloat = 48
+    static let headerHeight: CGFloat = 44
     static let footerHeight: CGFloat = 52
 
     var body: some View {
@@ -22,22 +24,17 @@ struct CalendarEventCardView: View {
             let footer = hasFooter(card, mode)
             VStack(alignment: .leading, spacing: 0) {
                 header(card, mode)
-                ScrollView(.vertical) {
+                CalendarCardScroll(width: width) {
                     content(card, mode)
-                        .padding(.horizontal, theme.space6)
+                        .padding(.horizontal, mode == .form ? theme.space4 : theme.space5)
                         .padding(.top, mode == .detail ? theme.space1 : theme.space2)
-                        .padding(.bottom, theme.space5)
+                        .padding(.bottom, theme.space4)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxHeight: max(maxHeight - Self.headerHeight - (footer ? Self.footerHeight : 0), 120))
                 .fixedSize(horizontal: false, vertical: true)
                 if footer { footerBar(card, mode) }
             }
-            .background(RoundedRectangle(cornerRadius: theme.radiusXL).fill(theme.bgWindow.color))
-            .overlay(RoundedRectangle(cornerRadius: theme.radiusXL)
-                .strokeBorder(theme.component.popover.border.color, lineWidth: theme.borderWidthHairline))
-            .clipShape(RoundedRectangle(cornerRadius: theme.radiusXL))
-            .themeShadow(theme.component.popover.shadow)
             .onExitCommand { model.closeCard() }
             .onChange(of: card.event.id) { editing = false }
             .accessibilityElement(children: .contain)
@@ -53,7 +50,7 @@ struct CalendarEventCardView: View {
 
     private func header(_ card: CalendarEventCard, _ mode: CalendarCardMode) -> some View {
         HStack(alignment: .center, spacing: theme.space3) {
-            RoundedRectangle(cornerRadius: theme.radiusXS).fill(color(card)).frame(width: 12, height: 12)
+            Circle().fill(color(card)).frame(width: 10, height: 10)
                 .accessibilityHidden(true)
             Text(verbatim: headerTitle(card, mode))
                 .themeFont(theme.typeLabel).foregroundStyle(theme.textSecondary.color)
@@ -61,8 +58,10 @@ struct CalendarEventCardView: View {
             Spacer(minLength: theme.space2)
             moreMenu(card, mode)
             Button { model.closeCard() } label: {
-                Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
-                    .frame(width: 28, height: 28).contentShape(Rectangle())
+                Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                    .frame(width: 22, height: 22)
+                    .background(Circle().fill(theme.textPrimary.color.opacity(CalendarFormMetrics.sectionFillOpacity * 2)))
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(theme.textSecondary.color)
@@ -70,7 +69,7 @@ struct CalendarEventCardView: View {
             .accessibilityLabel("Close")
             .accessibilityIdentifier("calendar.card.close")
         }
-        .padding(.leading, theme.space6)
+        .padding(.leading, theme.space5)
         .padding(.trailing, theme.space3)
         .frame(height: Self.headerHeight)
     }
@@ -168,6 +167,12 @@ struct CalendarEventCardView: View {
                 .accessibilityIdentifier("calendar.card.title")
             CalendarEventDetailRows(details: details, colorIndex: model.colorIndex(for: card.event), idPrefix: "calendar.card",
                                     showsZone: false)
+            if card.event.hidesMyResponse {
+                Text(verbatim: CalendarEvent.responseNotShown).themeFont(theme.typeMeta)
+                    .foregroundStyle(theme.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("calendar.card.responseNotShown")
+            }
             note(card)
         }
     }
@@ -192,7 +197,10 @@ struct CalendarEventCardView: View {
                 asksSendUpdates: model.asksSendUpdates(for: card),
                 sendUpdates: Binding(get: { model.sendUpdates(for: model.card ?? card) },
                                      set: { model.chooseSendUpdates($0) }),
-                calendarName: card.calendarKey.isEmpty ? model.sidebar.providerName : card.calendarKey)
+                calendarName: card.calendarKey.isEmpty ? model.sidebar.providerName : card.calendarKey,
+                suggestGuests: { [sidebar = model.sidebar] prefix in await sidebar.guestSuggestions(prefix) },
+                pendingGuest: Binding(get: { model.card?.pendingGuest ?? "" }, set: { model.card?.pendingGuest = $0 }),
+                pendingGuestNote: card.pendingGuestNote)
                 .id(card.event.id)
             note(card)
         }
@@ -220,9 +228,11 @@ struct CalendarEventCardView: View {
             Text("Nothing changes until you accept.")
                 .themeFont(theme.typeCaption).foregroundStyle(theme.textTertiary.color)
         }
-        .padding(theme.space3)
+        .padding(.horizontal, CalendarFormMetrics.rowPaddingX)
+        .padding(.vertical, theme.space3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: theme.radiusMD).fill(theme.accentSubtle.color))
+        .background(RoundedRectangle(cornerRadius: CalendarFormMetrics.sectionRadius, style: .continuous)
+            .fill(theme.accentSubtle.color))
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("calendar.card.pendingMove")
     }
@@ -249,8 +259,9 @@ struct CalendarEventCardView: View {
     private func title(_ card: CalendarEventCard) -> some View {
         if card.canEditDetails {
             TextField("Title", text: binding(\.title, card))
-                .textFieldStyle(.plain)
-                .themeFont(theme.typeTitle).foregroundStyle(theme.textPrimary.color)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.large)
+                .font(.title3.weight(.semibold))
                 .accessibilityIdentifier("calendar.card.title")
         } else {
             Text(card.event.title).themeFont(theme.typeTitle).foregroundStyle(theme.textPrimary.color)
@@ -307,7 +318,7 @@ struct CalendarEventCardView: View {
     private func place(_ card: CalendarEventCard) -> some View {
         if card.canEditDetails {
             fieldRow(symbol: "mappin.and.ellipse") {
-                TextField("Location", text: binding(\.location, card)).textFieldStyle(.plain)
+                TextField("Location", text: binding(\.location, card)).textFieldStyle(.roundedBorder)
                     .accessibilityIdentifier("calendar.card.location")
             }
         } else if let location = card.event.location {
@@ -321,8 +332,10 @@ struct CalendarEventCardView: View {
     private func notes(_ card: CalendarEventCard) -> some View {
         if card.canEditDetails {
             fieldRow(symbol: "text.alignleft") {
-                TextField("Agenda or notes", text: binding(\.notes, card), axis: .vertical)
-                    .textFieldStyle(.plain).lineLimit(1...6)
+                TextEditor(text: binding(\.notes, card))
+                    .focused($notesFocused)
+                    .calendarTextArea(text: (model.card ?? card).notes, prompt: "Agenda or notes", focused: notesFocused)
+                    .accessibilityLabel("Agenda or notes")
                     .accessibilityIdentifier("calendar.card.notes")
             }
         } else if let notes = card.event.notes {
@@ -347,7 +360,7 @@ struct CalendarEventCardView: View {
             case .detail: EmptyView()
             }
         }
-        .padding(.horizontal, theme.space6)
+        .padding(.horizontal, theme.space5)
         .frame(height: Self.footerHeight)
         .overlay(alignment: .top) {
             Rectangle().fill(theme.borderHairline.color).frame(height: theme.borderWidthHairline)
@@ -377,13 +390,16 @@ struct CalendarEventCardView: View {
         let editable = card.rights.hasAnyEditable
         let accepting = card.pendingMove != nil
         Button(editable ? "Cancel" : "Close") { model.closeCard() }
-            .help("Esc").accessibilityIdentifier("calendar.card.cancel")
+            .help(editable ? "Cancel the changes  Esc" : "Close  Esc")
+            .accessibilityIdentifier("calendar.card.cancel")
         if editable {
+            // Why: Return types a new line in the notes and adds a guest, so Save takes Command-Return
             Button(accepting ? "Accept" : "Save") { Task { await model.saveCard() } }
                 .buttonStyle(.borderedProminent).tint(theme.accentFill.color)
                 .keyboardShortcut(accepting ? .defaultAction : KeyboardShortcut(.return, modifiers: .command))
                 .disabled(!card.hasChanges)
                 .help(accepting ? "Accept the change  ↵" : "Save the changes  ⌘↵")
+                .accessibilityHint(accepting ? "" : String(localized: "Command-Return"))
                 .accessibilityIdentifier(accepting ? "calendar.card.accept" : "calendar.card.save")
         }
     }
@@ -391,7 +407,7 @@ struct CalendarEventCardView: View {
     @ViewBuilder
     private func legacyActions(_ card: CalendarEventCard) -> some View {
         Button("Cancel") { model.closeCard() }
-            .help("Esc").accessibilityIdentifier("calendar.card.cancel")
+            .help("Cancel the changes  Esc").accessibilityIdentifier("calendar.card.cancel")
         Button("Save") { Task { await model.saveCard() } }
             .buttonStyle(.borderedProminent)
             .tint(theme.accentFill.color)

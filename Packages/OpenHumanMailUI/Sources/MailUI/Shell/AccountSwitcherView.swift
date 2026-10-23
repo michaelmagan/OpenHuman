@@ -61,7 +61,7 @@ public struct AccountSwitcherView: View {
         .contextMenu {
             if router.environment.settings != nil {
                 Button(mode == .off ? "Show count" : "Hide count") {
-                    store(AppSettings.accountCounts, mode == .off ? .important : .off)
+                    Self.toggleCounts(router)
                 }
                 Button("Hide All Inboxes") { router.hideAllInboxes() }
             }
@@ -87,16 +87,7 @@ public struct AccountSwitcherView: View {
         return Button {
             router.switchAccount(to: account.id)
         } label: {
-            Text(ThreadRowFormatting().initials(name: account.displayName, email: account.email))
-                .font(theme.typeCaption.swiftUIFont)
-                .foregroundStyle(Color.white)
-                .frame(width: size, height: size)
-                .background(Circle().fill(theme.tokens.avatarFill(for: account.email).color))
-                .overlay {
-                    if theme.appearance == .dark {
-                        Circle().strokeBorder(theme.borderElevated.color, lineWidth: theme.borderWidthHairline)
-                    }
-                }
+            AccountAvatar(account: account, size: size)
                 .padding(ring + offset)
                 .overlay {
                     if isActive {
@@ -128,15 +119,8 @@ public struct AccountSwitcherView: View {
             if !isActive {
                 Button("Switch to \(Self.name(account))") { router.switchAccount(to: account.id) }
             }
-            if needsSignIn, let accounts = router.environment.accounts {
-                Button("Sign in again…") {
-                    Task {
-                        do { try await accounts.reauthorize(account.id) } catch {
-                            router.environment.notices.post("Couldn't open the sign-in page", style: .error,
-                                                            actionTitle: nil)
-                        }
-                    }
-                }
+            if needsSignIn, router.environment.accounts != nil {
+                Button("Sign in again…") { Self.signInAgain(account, router: router) }
             }
         }
         .help(Self.tooltip(account, position: position))
@@ -166,17 +150,52 @@ public struct AccountSwitcherView: View {
         return "All Inboxes · \(countPhrase(count.formatted(), mode))  ⌃0"
     }
 
-    private func store<Value: Codable & Sendable & Equatable>(_ key: AppSettingKey<Value>, _ value: Value) {
+    /// Turns the account counts off, or back on to important unread.
+    static func toggleCounts(_ router: AppRouter) {
         guard let settings = router.environment.settings else { return }
+        let next: AccountCountMode = router.accountCountMode == .off ? .important : .off
         let notices = router.environment.notices
         Task {
-            do { try await settings.set(key, value) } catch {
+            do { try await settings.set(AppSettings.accountCounts, next) } catch {
                 notices.post("Couldn't change this setting", style: .error, actionTitle: nil)
+            }
+        }
+    }
+
+    static func signInAgain(_ account: Account, router: AppRouter) {
+        guard let accounts = router.environment.accounts else { return }
+        Task {
+            do { try await accounts.reauthorize(account.id) } catch {
+                router.environment.notices.post("Couldn't open the sign-in page", style: .error, actionTitle: nil)
             }
         }
     }
 
     static func name(_ account: Account) -> String {
         account.alias ?? account.displayName ?? account.email
+    }
+}
+
+/// An account's picture: its initials on the account colour.
+struct AccountAvatar: View {
+    let account: Account
+    let size: CGFloat
+    var textSize: CGFloat?
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        Text(ThreadRowFormatting().initials(name: account.displayName, email: account.email))
+            .font(textSize.map { Font.system(size: $0, weight: .semibold) } ?? theme.typeCaption.swiftUIFont)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .foregroundStyle(Color.white)
+            .frame(width: size, height: size)
+            .background(Circle().fill(theme.tokens.avatarFill(for: account.email).color))
+            .overlay {
+                if theme.appearance == .dark {
+                    Circle().strokeBorder(theme.borderElevated.color, lineWidth: theme.borderWidthHairline)
+                }
+            }
+            .accessibilityHidden(true)
     }
 }

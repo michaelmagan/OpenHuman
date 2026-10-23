@@ -1,0 +1,15 @@
+{
+  "id": "search.typing-stays-in-the-field",
+  "area": "Search",
+  "title": "Typing in a search field only types",
+  "steps": [
+    "Open All mail (G A), select a conversation, press /, and type eerjk# and some words; do the same in Inbox and a label",
+    "With two accounts, open All Inboxes, click its search field, type jessie e, and press Return",
+    "In the All Inboxes list, press J and then E",
+    "While a search field has the caret, switch Appearance between light and dark"
+  ],
+  "deepLink": null,
+  "expected": "The letters appear in the field; no conversation is marked done, trashed, replied to or moved, and the selection stays. In All Inboxes, Return keeps All Inboxes open and moves the keys to the list, where J and E work again. The caret stays in the field across the appearance change.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

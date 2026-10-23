@@ -100,7 +100,10 @@ func writeSnapshot(_ image: CGImage, _ name: String) throws {
         hosting.cacheDisplay(in: hosting.bounds, to: rep)
         if let image = rep.cgImage { try writeSnapshot(image, "appearance-settings-\(mode.rawValue)") }
         let pixels = try #require(rep.cgImage.flatMap(Pixels.init))
-        #expect(matches(pixels.at(4, 4, scale: rep.size.width > 0 ? CGFloat(rep.pixelsWide) / rep.size.width : 1), store.resolved.bgWindow))
+        let scale = rep.size.width > 0 ? CGFloat(rep.pixelsWide) / rep.size.width : 1
+        let left = pixels.at(4, 4, scale: scale), right = pixels.at(rep.size.width - 4, 4, scale: scale)
+        #expect(abs(left.0 - right.0) <= 3 && abs(left.1 - right.1) <= 3 && abs(left.2 - right.2) <= 3,
+                "the page draws one background edge to edge: \(left) and \(right)")
     }
 }
 #endif

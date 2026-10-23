@@ -19,16 +19,16 @@ struct ShortcutRecorder: View {
         Button { catcher.start(record) } label: {
             Group {
                 if catcher.isRecording {
-                    Text("Press the keys…").themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
+                    Text("Press the keys…").font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
                 } else {
-                    KeycapView(text: keys)
+                    NativeKeycap(keys)
                 }
             }
             .padding(.horizontal, theme.space2)
             .frame(minWidth: ShortcutRecorderMetrics.minWidth, minHeight: ShortcutRecorderMetrics.height)
-            .background(RoundedRectangle(cornerRadius: theme.radiusSM).fill(theme.bgWindow.color))
-            .overlay(RoundedRectangle(cornerRadius: theme.radiusSM)
-                .strokeBorder((catcher.isRecording ? theme.accentFill : theme.borderControl).color,
+            .background(.background, in: RoundedRectangle(cornerRadius: theme.radiusMD))
+            .overlay(RoundedRectangle(cornerRadius: theme.radiusMD)
+                .strokeBorder(catcher.isRecording ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
                               lineWidth: catcher.isRecording ? ShortcutRecorderMetrics.recordingBorder : theme.borderWidthControl))
             .contentShape(Rectangle())
         }

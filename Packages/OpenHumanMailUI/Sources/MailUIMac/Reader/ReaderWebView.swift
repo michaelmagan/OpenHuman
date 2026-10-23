@@ -1,5 +1,6 @@
 import AppKit
 import MailRender
+import OpenHumanCore
 import WebKit
 
 @MainActor
@@ -41,6 +42,7 @@ public final class ReaderWebView: WKWebView {
     private var cssHeight: CGFloat?
     var awaitsLayoutWidth = false
     private var pendingReport: (cssHeight: CGFloat, loaded: Bool, width: CGFloat?)?
+    private var selfGrowth = ReaderSelfGrowthGuard()
     var inlineParts: InlinePartSource?
     weak var owner: ReaderWebViewOwner?
     public private(set) var hoveredLink: HoveredLink?
@@ -83,6 +85,7 @@ public final class ReaderWebView: WKWebView {
         measuredHeight = nil
         cssHeight = nil
         pendingReport = nil
+        selfGrowth = ReaderSelfGrowthGuard()
         pageZoom = zoom
         alphaValue = 0
         setFrameSize(NSSize(width: max(width, 100), height: frame.height))
@@ -112,8 +115,14 @@ public final class ReaderWebView: WKWebView {
         if navigation === currentNavigation { committed = true }
     }
 
-    func contentHeightDidChange(_ cssHeight: CGFloat, loaded: Bool = true, width: CGFloat? = nil) {
+    func contentHeightDidChange(_ reported: CGFloat, loaded: Bool = true, width: CGFloat? = nil) {
         guard committed, rendered != nil else { return }
+        let stoppedBefore = selfGrowth.stopped
+        let cssHeight = selfGrowth.height(for: reported, width: width)
+        if selfGrowth.stopped, !stoppedBefore {
+            Log(.app).notice("reader: the body grew by the same step \(ReaderSelfGrowthGuard.limit) times; "
+                + "it stays at \(Int(cssHeight)) pt")
+        }
         self.cssHeight = cssHeight
         let height = (cssHeight * pageZoom).rounded(.up)
         measuredHeight = height
@@ -198,6 +207,7 @@ public final class ReaderWebView: WKWebView {
         measuredHeight = nil
         cssHeight = nil
         pendingReport = nil
+        selfGrowth = ReaderSelfGrowthGuard()
         awaitsLayoutWidth = false
         shown = false
         committed = false
@@ -295,5 +305,37 @@ public final class ReaderWebView: WKWebView {
             if item.isSeparatorItem, previousWasSeparator { menu.removeItem(item) }
             previousWasSeparator = item.isSeparatorItem
         }
+    }
+}
+
+// A body that grows by the same step on every report is following its own height: content sized from the viewport
+// (which is as tall as the view) with something below it. After `limit` such steps in a row the height stops growing
+// until the next load or another width; it can still shrink.
+struct ReaderSelfGrowthGuard {
+    static let limit = 32
+
+    private var last: CGFloat?
+    private var step: CGFloat?
+    private var streak = 0
+    private var width: CGFloat?
+    private(set) var ceiling: CGFloat?
+
+    var stopped: Bool { ceiling != nil }
+
+    mutating func height(for reported: CGFloat, width newWidth: CGFloat?) -> CGFloat {
+        if let newWidth, let width, abs(newWidth - width) > 1 { self = ReaderSelfGrowthGuard() }
+        if let newWidth { width = newWidth }
+        if let ceiling { return min(reported, ceiling) }
+        defer { last = reported }
+        guard let last, reported > last else {
+            streak = 0
+            step = nil
+            return reported
+        }
+        let delta = reported - last
+        streak = step.map { abs(delta - $0) <= 1 } == true ? streak + 1 : 1
+        step = delta
+        if streak >= Self.limit { ceiling = reported }
+        return reported
     }
 }

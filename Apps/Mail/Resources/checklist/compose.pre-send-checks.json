@@ -1,0 +1,15 @@
+{
+  "id": "compose.pre-send-checks",
+  "area": "Composer",
+  "title": "Mail asks before sending an empty message or a missing attachment",
+  "steps": [
+    "On a test account, press c, add your own test address and press ⌘↵ with no subject and no text",
+    "Press Return, then type \"The notes are attached\" and a subject and press ⌘↵",
+    "Click Send Anyway, then press ⌘Z in the undo window",
+    "Write a subject and a line with no mention of files and press ⌘↵"
+  ],
+  "deepLink": null,
+  "expected": "The first send shows a native alert \"Send without a subject or text?\" with Keep Writing as the default button; Return goes back to the draft. The second asks \"Send without an attachment?\". Send Anyway sends with the usual undo window and ⌘Z brings the draft back. The last message sends with no prompt. Send later asks the same with Schedule Anyway.",
+  "requires": "real",
+  "addedIn": "2026-10-20"
+}

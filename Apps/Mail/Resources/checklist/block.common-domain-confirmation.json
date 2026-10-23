@@ -1,0 +1,15 @@
+{
+  "id": "block.common-domain-confirmation",
+  "area": "Block",
+  "title": "A rule for a whole common domain such as gmail.com asks first",
+  "steps": [
+    "Launch with -UseFakeGmail (fake mail only); open Settings > Blocked, type gmail.com and press Block",
+    "In the alert press Cancel; type gmail.com again, press Block, choose Block Entire Domain, then Unblock it",
+    "Type acme.example and press Block, then Unblock it",
+    "In Settings > Importance & labels press Add rule…, choose Domain and Never important, type hotmail.co.uk and press Save; press Cancel in the alert"
+  ],
+  "deepLink": null,
+  "expected": "Both gmail.com tries show a native alert, 'Block everyone at gmail.com?', saying it is a shared email provider, with Cancel as the default. Cancel saves nothing; Block Entire Domain adds the rule. acme.example is blocked without an alert. The hotmail.co.uk rule asks the same way. Blocking the domain of a Gmail sender's conversation offers Block This Address Only first.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

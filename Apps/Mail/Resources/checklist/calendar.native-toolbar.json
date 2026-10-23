@@ -1,0 +1,15 @@
+{
+  "id": "calendar.native-toolbar",
+  "area": "Calendar",
+  "title": "Calendar window: view switch in the toolbar, the period with Today beside it",
+  "steps": [
+    "With -UseFakeData -UseFakeCalendar press 2",
+    "Click Day, 3 days, Week and Month in the toolbar; use Previous, Today and Next beside the month; press D, W, M, T, - and =",
+    "Click New Event (+) and Refresh in the toolbar; hover and drag one of your own events, then click it",
+    "Click Back to Mail; repeat with the dark appearance"
+  ],
+  "deepLink": null,
+  "expected": "The view switch is the toolbar's segmented control in the centre and follows the keys; there is no second bar of buttons over the calendar. The month and year are large at the top left with Previous, Today and Next on the right. Events tint on hover, your own show a grip at the bottom edge, and the clicked one lifts with a shadow.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

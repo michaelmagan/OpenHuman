@@ -194,7 +194,7 @@ struct ThreadListViewTests {
         let (controller, model, _, window) = try await Self.list(threads: 150)
         defer { window.close() }
         let table = controller.tableView
-        #expect(table.rowHeight == 36)
+        #expect(table.rowHeight == 40)
         model.moveCursor(by: 30)
         let clip = try #require(table.enclosingScrollView?.contentView)
         let top = clip.bounds.origin.y / table.rowHeight
@@ -429,10 +429,7 @@ struct ThreadListViewTests {
         defer { window.close() }
         let rowView = try #require(controller.tableView.rowView(atRow: 1, makeIfNecessary: false) as? ThreadRowBackgroundView)
         let view = try #require(cell(controller, 1))
-        let enter = NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
-                                           windowNumber: window.windowNumber, context: nil, eventNumber: 0,
-                                           trackingNumber: 0, userData: nil)!
-        rowView.mouseEntered(with: enter)
+        rowView.setHovering(true)
         view.layoutSubtreeIfNeeded()
         #expect(view.isHovering)
         let plate = try #require(view.subviews.first)
@@ -441,7 +438,7 @@ struct ThreadListViewTests {
         #expect(plate.frame.minX >= columns.subject.upperBound)
         #expect(plate.subviews.compactMap { $0 as? NSButton }.map { $0.accessibilityLabel() } == ["Mark done"])
         #expect(plate.subviews.compactMap { $0 as? NSButton }.allSatisfy { $0.toolTip == nil })
-        rowView.mouseExited(with: enter)
+        rowView.setHovering(false)
         #expect(!view.isHovering)
     }
 

@@ -1,0 +1,15 @@
+{
+  "id": "calendar.time-from-message",
+  "area": "Calendar",
+  "title": "Clicking a time in a message shows it on the calendar before any event form",
+  "steps": [
+    "Launch with -UseFakeData -UseFakeCalendar and open a conversation that mentions a day and time",
+    "Check the time is underlined, then click it",
+    "Press the previous and next day arrows (or − and =), come back to the day, then click the block",
+    "Press Cancel in the new event card"
+  ],
+  "deepLink": null,
+  "expected": "The calendar opens on that day with the time as a Create event block; over an event it takes the free right part and the event's title stays readable, with a Busy then line. The arrows change the day; the block stays on its own day. Clicking it opens a filled-in card over the day that fits the panel, scrolls and always shows Save and Cancel; Cancel brings the block back.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

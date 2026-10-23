@@ -30,13 +30,15 @@ public struct ComposerHostView: View {
     private func modalCard(_ session: ComposeSession) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                card(session, editorMinHeight: ComposerHostMetrics.editorMinModal, focusBody: session.mode != .new)
+                card(session, editorMinHeight: ComposerHostMetrics.editorMin(for: session), focusBody: session.mode != .new)
                     .padding(.top, ComposerHostMetrics.modalTop)
                     .padding(.horizontal, theme.space7)
                     .padding(.bottom, theme.space7)
                     .frame(maxWidth: .infinity)
             }
-            .environment(\.composerReveal, ComposerReveal { _ in proxy.scrollTo(ComposerReveal.panelID) })
+            .environment(\.composerReveal, ComposerReveal { _ in
+                proxy.scrollTo(ComposerReveal.sendBarID, anchor: .bottom)
+            })
         }
         .background(theme.bgCanvas.color)
         .id(session.id)
@@ -60,6 +62,7 @@ public struct ComposerHostView: View {
                          placeholder: ComposerEditor.placeholder(for: session.mode), onClose: { manager.close(session) })
                 .frame(minHeight: editorMinHeight, maxHeight: .infinity)
         }
+        .floatsCompletions()
     }
 }
 
@@ -67,6 +70,13 @@ enum ComposerHostMetrics {
     static let modalTop: CGFloat = 48
     static let editorMinModal: CGFloat = 240
     static let windowSize = NSSize(width: 720, height: 640)
+
+    // With the AI panel open the empty part of the body gives way, so the panel and the Send bar fit in the window
+    @MainActor
+    static func editorMin(for session: ComposeSession) -> CGFloat {
+        session.aiPanel == nil ? editorMinModal : ComposerMetrics.editorMinDocked
+    }
+    static let windowMinSize = NSSize(width: 520, height: 420)
 }
 
 @MainActor
@@ -75,7 +85,12 @@ public final class ComposerWindows: NSObject, NSWindowDelegate {
 
     private var windows: [UUID: NSWindow] = [:]
     private var managers: [UUID: ComposeManager] = [:]
-    public var theme: ResolvedTheme = .light
+    public var theme: ResolvedTheme = .light {
+        didSet {
+            guard theme != oldValue else { return }
+            for window in windows.values { Self.style(window, theme: theme) }
+        }
+    }
 
     public func install(on manager: ComposeManager) {
         guard manager.openWindow == nil else { return }
@@ -108,7 +123,11 @@ public final class ComposerWindows: NSObject, NSWindowDelegate {
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
         window.setContentSize(ComposerHostMetrics.windowSize)
-        window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
+        window.styleMask = [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.minSize = ComposerHostMetrics.windowMinSize
+        Self.style(window, theme: theme)
         window.title = session.title
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -116,6 +135,11 @@ public final class ComposerWindows: NSObject, NSWindowDelegate {
         windows[session.id] = window
         managers[session.id] = manager
         window.makeKeyAndOrderFront(nil)
+    }
+
+    static func style(_ window: NSWindow, theme: ResolvedTheme) {
+        window.applyThemeAppearance(theme)
+        window.backgroundColor = theme.component.compose.bg.nsColor
     }
 
     func close(_ session: ComposeSession) {
@@ -147,13 +171,19 @@ struct ComposerWindowRoot: View {
                                  focusOnAppear: session.mode != .new,
                                  placeholder: ComposerEditor.placeholder(for: session.mode),
                                  onClose: { manager.close(session) })
-                        .frame(minHeight: ComposerHostMetrics.editorMinModal, maxHeight: .infinity)
+                        .frame(minHeight: ComposerHostMetrics.editorMin(for: session), maxHeight: .infinity)
                 }
-                .padding(theme.space6)
+                .floatsCompletions()
+                .frame(maxWidth: .infinity)
             }
-            .environment(\.composerReveal, ComposerReveal { _ in proxy.scrollTo(ComposerReveal.panelID) })
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            .environment(\.composerReveal, ComposerReveal { _ in
+                proxy.scrollTo(ComposerReveal.sendBarID, anchor: .bottom)
+            })
         }
         .shortcutTipRoot()
-        .background(theme.bgCanvas.color)
+        .background(theme.component.compose.bg.color)
+        .environment(\.colorScheme, theme.appearance == .dark ? .dark : .light)
+        .tint(theme.accentFill.color)
     }
 }

@@ -21,43 +21,46 @@ import Testing
         return false
     }
 
-    @Test func everyMessageIsACardOnTheConversationsBackgroundInLightAndDark() async throws {
+    @Test func messagesSitOnTheConversationsBackgroundUnderHairlinesInLightAndDark() async throws {
         for mode in [AppearanceMode.light, .dark] {
             let w = try await InlineReplyWindow.make(mode: mode, frameName: Self.frameName)
             defer { w.close() }
             let (thread, messages) = try await w.conversationWithAMiddleSender()
-            _ = try await w.open(thread)
+            let model = try await w.open(thread)
             let keys = messages.map(\.id)
             try await until {
                 guard let reader = w.liveReader else { return false }
                 return reader.messageViews[keys.last!]?.isFocused == true && reader.messageViews.count >= 2
+            }
+            try await until {
+                guard let reader = w.liveReader else { return false }
+                return bodiesAreSettled(reader, model)
             }
             let reader = try #require(w.liveReader)
             let theme = reader.theme
             reader.view.layoutSubtreeIfNeeded()
             let image = try #require(snapshot(reader.view))
             for (key, view) in reader.messageViews {
-                #expect(view.card.superview === view, "a card behind \(key.gmailMessageID.rawValue)")
-                let cardFrame = view.card.convert(view.card.cardRect, to: view)
-                #expect(abs(cardFrame.minX) < 0.5 && abs(cardFrame.maxX - view.bounds.width) < 0.5
-                        && abs(cardFrame.height - view.bounds.height) < 0.5, "the card is the message's frame")
+                let name = "\(key.gmailMessageID.rawValue), \(mode)"
+                #expect(view.separator.superview === view, "a hairline above \(name)")
+                let line = view.separator.convert(view.separator.bounds, to: view)
+                #expect(abs(line.minX) < 0.5 && abs(line.maxX - view.bounds.width) < 0.5, "the hairline spans the column: \(name)")
+                #expect(view.isFlipped ? line.minY < 0.5 : abs(line.maxY - view.bounds.height) < 0.5, "at the top: \(name)")
+                #expect(view.plateLook == (view.isFocused ? ReaderPlateView.Look.focus : ReaderPlateView.Look.none), "\(name)")
                 let inside = view.convert(NSPoint(x: MessageContainerView.horizontalPadding(theme) / 2,
                                                   y: view.bounds.midY), to: reader.view)
                 let outside = view.convert(NSPoint(x: -30, y: view.bounds.midY), to: reader.view)
-                let raised = view.isExpanded || view.isFocused || view.attachedComposer != nil
-                #expect(view.cardAppearance == (raised ? .raised : .flat), "\(key.gmailMessageID.rawValue), \(mode)")
-                let surface = raised ? theme.component.thread.cardBg : theme.bgCanvas
-                if !view.isFocused || view.collapsedRow != nil {
-                    #expect(image.color(at: inside, in: reader.view).matches(surface), "card surface, \(mode)")
+                if view.focusPlate.isHidden || view.isExpanded {
+                    #expect(image.color(at: inside, in: reader.view).matches(theme.bgCanvas), "no card behind \(name)")
                 }
                 #expect(image.color(at: outside, in: reader.view).matches(theme.bgCanvas), "conversation background, \(mode)")
             }
             let focused = try #require(reader.messageViews[keys.last!])
-            let other = try #require(reader.messageViews[keys[keys.count - 2]])
-            let edge = focused.convert(NSPoint(x: 1, y: focused.bounds.midY), to: reader.view)
-            let otherEdge = other.convert(NSPoint(x: 1, y: other.bounds.midY), to: reader.view)
-            #expect(image.color(at: edge, in: reader.view).matches(theme.component.row.cursorBar), "accent edge, \(mode)")
-            #expect(!image.color(at: otherEdge, in: reader.view).matches(theme.component.row.cursorBar), "one accent edge, \(mode)")
+            let plate = focused.focusPlate
+            let tint = plate.convert(NSPoint(x: plate.bounds.maxX - 2, y: plate.bounds.midY), to: reader.view)
+            let color = theme.component.row.bgCursor.composited(over: theme.bgCanvas)
+            #expect(image.color(at: tint, in: reader.view).matches(color), "the focus plate, \(mode)")
+            #expect(reader.messageViews.values.filter { !$0.focusPlate.isHidden }.count == 1, "one plate, \(mode)")
         }
     }
 
@@ -199,7 +202,7 @@ import Testing
         #expect(store.sentMessages.count == 1)
     }
 
-    @Test func theCardsAndTheSendPillKeepTheirContrastInEveryBuiltInTheme() {
+    @Test func theMessageTextAndTheSendPillKeepTheirContrastInEveryBuiltInTheme() {
         let library = ThemeLibrary.builtIn
         let darkThemes = [BuiltinThemeID.dark, BuiltinThemeID.midnight, BuiltinThemeID.systemDark]
         for themeID in [BuiltinThemeID.light, BuiltinThemeID.paper, BuiltinThemeID.systemLight] + darkThemes {
@@ -210,10 +213,10 @@ import Testing
                                             increaseContrast: increase).tokens
                     let label = "\(themeID) \(accent) increaseContrast=\(increase)"
                     #expect(t.accentOnFill.contrastRatio(on: t.accentFill) >= 4.5, "Send on its pill: \(label)")
-                    let card = t.component.thread.cardBg
-                    #expect(t.textSuccess.contrastRatio(on: card) >= 4.5, "\"Draft\" on the card: \(label)")
-                    #expect(t.textSecondary.contrastRatio(on: card) >= 4.5, "\"to Dana\" on the card: \(label)")
-                    #expect(t.textTertiary.contrastRatio(on: card) >= 4.5, "the header's date on the card: \(label)")
+                    let canvas = t.bgCanvas
+                    #expect(t.textSuccess.contrastRatio(on: canvas) >= 4.5, "\"Draft\" on the conversation: \(label)")
+                    #expect(t.textSecondary.contrastRatio(on: canvas) >= 4.5, "\"to Dana\" on the conversation: \(label)")
+                    #expect(t.textTertiary.contrastRatio(on: canvas) >= 4.5, "the header's date on the conversation: \(label)")
                     #expect(t.textPrimary.contrastRatio(on: t.bgCanvas) >= 4.5, "the subject on the conversation: \(label)")
                 }
             }
@@ -227,6 +230,20 @@ import Testing
             Issue.record("timed out waiting for \(what())")
             throw error
         }
+    }
+
+    private func bodiesAreSettled(_ reader: ReaderViewController, _ model: ReaderModel) -> Bool {
+        for (key, view) in reader.messageViews where view.isExpanded {
+            switch model.message(key)?.body {
+            case .rendered(.html):
+                guard view.htmlBody?.current?.isShown == true && view.htmlBody?.incoming == nil else { return false }
+            case .rendered, .failed:
+                continue
+            case .notLoaded, .fetching, nil:
+                return false
+            }
+        }
+        return true
     }
 
     private func renderedBody(_ key: MessageKey, _ model: ReaderModel) async -> ReaderModel.BodyState? {

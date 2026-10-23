@@ -85,7 +85,7 @@ import Testing
     }
 
     @Test(arguments: [false, true])
-    func theCommandJPanelIsBelowTheTextAndScrolledIntoView(longBody: Bool) async throws {
+    func theCommandJPanelIsDockedAboveTheSendBarAndScrolledIntoView(longBody: Bool) async throws {
         let stage = try await OneSuggestionStage.make(busy: true,
                                                       frameName: "dev.openhuman.tests.one-suggestion-cmdj-\(longBody)")
         defer { stage.close() }
@@ -109,13 +109,29 @@ import Testing
             let panel = composer.convert(frame, to: document)
             return scroll.documentVisibleRect.insetBy(dx: -1, dy: -1).contains(panel)
         }
-        try await until { panelIsVisible() }
+        let editor = try #require(body.enclosingScrollView)
+        // The panel opens with an animation, so the frames are read once the panel, the text and the card have all
+        // held still for longer than it lasts
+        var last: [NSRect] = []
+        var stillSince = ContinuousClock.now
+        try await until {
+            guard panelIsVisible(), let now = composer.revealedPanelFrame else { return false }
+            let frames = [now, editor.convert(editor.bounds, to: composer), composer.bounds]
+            if frames != last { last = frames; stillSince = .now }
+            return ContinuousClock.now - stillSince >= .milliseconds(400)
+        }
         let frame = try #require(composer.revealedPanelFrame)
         #expect(frame.height > 20, "the panel has its size: \(frame)")
-        let editor = try #require(body.enclosingScrollView)
         let editorInWindow = editor.convert(editor.bounds, to: nil)
         let panelInWindow = composer.convert(frame, to: nil)
-        #expect(panelInWindow.maxY <= editorInWindow.minY + 0.5, "the panel is below the text: \(panelInWindow) vs \(editorInWindow)")
+        let cardInWindow = composer.convert(composer.cardFrame, to: nil)
+        #expect(panelInWindow.maxY <= editorInWindow.minY + 0.5, "below the text, never over it: \(panelInWindow) vs \(editorInWindow)")
+        let underPanel = panelInWindow.minY - cardInWindow.minY
+        #expect(underPanel >= ComposerMetrics.actionBarHeight && underPanel <= ComposerMetrics.actionBarHeight + 32,
+                """
+                docked right above the Send bar, with only the bar under it: \(underPanel) \
+                (card \(composer.bounds.height), fits \(composer.fittingSize.height))
+                """)
         try await until {
             guard let responder = stage.w.window.firstResponder as? NSView, responder !== body else { return false }
             return responder.isDescendant(of: composer)

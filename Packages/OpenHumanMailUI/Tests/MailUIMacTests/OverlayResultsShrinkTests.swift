@@ -23,7 +23,7 @@ import Testing
     }
 
     private func drawnFrame(of input: NSTextField, in w: InlineReplyWindow) async throws -> NSRect {
-        let size = CGFloat(ThemeTokens.light.typePaletteInput.size)
+        let size = NativeMetrics.Overlay.paletteFieldTextSize
         try await until {
             draw(w)
             return input.font?.pointSize == size && input.frame.height == input.intrinsicContentSize.height

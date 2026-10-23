@@ -87,7 +87,8 @@ private func host<V: View>(_ view: V, size: NSSize, name: String) throws -> NSHo
     await model.run()
     #expect(model.isVisible)
     #expect(FooterView.isVisible(status: model, hints: nil))
-    let height = CGFloat(ThemeTokens.light.component.footer.height)
+    let height = NativeMetrics.HintLine.height
+    #expect(FooterView.height == height)
     let view = FooterView(status: model, hints: nil, theme: .light)
     let hosting = try host(view, size: NSSize(width: 1360, height: height), name: "status-bar")
     #expect(hosting.fittingSize.height == height)

@@ -33,12 +33,16 @@ public struct ClassifierSettingsSection: View {
                         }
                     }
                 }
+                .task { await model.refresh() }
                 SettingsRow("Model folder", detail: model.directory) {
                     HStack(spacing: theme.space3) {
                         Button("Choose…") { choosingFolder = true }
                         Button("Default") { Task { await model.useDirectory(nil) } }
                     }
                     .disabled(model.isDownloading)
+                }
+                .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
+                    if case .success(let url) = result { Task { await model.useDirectory(url.path) } }
                 }
                 SettingsRow(ClassifierSettingsModel.lowPowerTitle, detail: ClassifierSettingsModel.lowPowerDetail,
                             isOn: $model.allowLowPower)
@@ -52,10 +56,6 @@ public struct ClassifierSettingsSection: View {
                 }
             }
             if let error = model.error { SettingsFootnote(error, tone: .warning) }
-        }
-        .task { await model.refresh() }
-        .fileImporter(isPresented: $choosingFolder, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result { Task { await model.useDirectory(url.path) } }
         }
     }
 }

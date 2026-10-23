@@ -1,0 +1,15 @@
+{
+  "id": "reader.native-column",
+  "area": "Reader",
+  "title": "The conversation is a 720 pt column with hairlines, no cards",
+  "steps": [
+    "Launch Mail with -UseFakeData; open a conversation with 4 or more messages and make the window wide",
+    "Press Up and Down to move between messages, then hover a collapsed message and 'N older messages'",
+    "Click the recipients or the small chevron in the open message's header; press ⌘F",
+    "Switch to Dark, then turn on Increase Contrast in System Settings › Accessibility › Display"
+  ],
+  "deepLink": null,
+  "expected": "The column is centred, at most 720 pt wide. A thin line starts each message: no cards, shadows or coloured bars. Collapsed messages are 36 pt rows; the focused one has a soft rounded plate (ringed with Increase Contrast); hover tints a row and nothing moves. The open header: round monogram, semibold sender, 'to …', date, Reply, Reply All, Forward, ⋯. Find floats as a glass capsule.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

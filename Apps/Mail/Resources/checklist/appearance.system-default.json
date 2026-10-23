@@ -1,0 +1,15 @@
+{
+  "id": "appearance.system-default",
+  "area": "Appearance",
+  "title": "System themes by default, with the live system accent",
+  "steps": [
+    "With a profile that last used the built-in Light theme, launch Mail with -UseFakeData and open Settings > Appearance",
+    "In System Settings > Appearance, change the accent colour (try Yellow, then Purple) and look at the mail window",
+    "In Mail, pick the Light theme, quit and relaunch",
+    "Pick the Pine accent, then the System accent again"
+  ],
+  "deepLink": null,
+  "expected": "The theme shows System Light (System Dark in dark mode) with the System accent. Unread dots, selection, links and buttons switch to the new accent without a relaunch; text on accent fills stays readable (dark text on Yellow). Light stays chosen after relaunch. With Pine, buttons and switches are pine; with System they follow the system accent again.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

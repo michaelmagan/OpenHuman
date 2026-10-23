@@ -1,4 +1,5 @@
 import MailFeatures
+import OpenHumanAI
 import SwiftUI
 
 public enum AISettingsTab: String, CaseIterable, Sendable {
@@ -13,6 +14,12 @@ public enum AISettingsTab: String, CaseIterable, Sendable {
     }
 }
 
+/// The prompts people most often want to adjust, one click from the AI overview.
+enum AISettingsInstructions {
+    static let prompts: [String] = [PromptName.classify.rawValue, PromptName.autoLabel.rawValue]
+    static let note = String(localized: "The instructions Mail gives the model for each job. Your version is used from the next request; every prompt is under Prompts.")
+}
+
 public struct AISettingsTabs<Overview: View>: View {
     public typealias Tab = AISettingsTab
 
@@ -21,7 +28,6 @@ public struct AISettingsTabs<Overview: View>: View {
     @State private var activity: AIActivityModel?
     private let navigator: SettingsNavigator?
     private let overview: Overview
-    @Environment(\.theme) private var theme
 
     public init(prompts: @autoclosure () -> PromptsSettingsModel?, activity: @autoclosure () -> AIActivityModel? = nil,
                 navigator: SettingsNavigator? = nil, initialTab: Tab = .overview, @ViewBuilder overview: () -> Overview) {
@@ -37,25 +43,46 @@ public struct AISettingsTabs<Overview: View>: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: theme.space7) {
-            if tabs.count > 1 {
+        if tabs.count > 1 {
+            Section {
                 Picker(String(localized: "AI settings"), selection: $tab) {
                     ForEach(tabs, id: \.self) { tab in Text(tab.title).tag(tab) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
+                .frame(maxWidth: .infinity)
                 .accessibilityIdentifier("settings.ai.tabs")
-            }
-            switch tab {
-            case .overview: overview
-            case .prompts:
-                if let prompts { PromptsSettingsView(model: prompts) }
-            case .activity:
-                if let activity { AIActivityView(model: activity, editPrompt: prompts == nil ? nil : { editPrompt($0) }) }
+                .task(id: navigator?.requestedPrompt) { await takeRequest() }
             }
         }
-        .task(id: navigator?.requestedPrompt) { await takeRequest() }
+        switch tab {
+        case .overview:
+            if prompts != nil { instructions }
+            overview
+        case .prompts:
+            if let prompts { PromptsSettingsView(model: prompts) }
+        case .activity:
+            if let activity { AIActivityView(model: activity, editPrompt: prompts == nil ? nil : { editPrompt($0) }) }
+        }
+    }
+
+    private var instructions: some View {
+        SettingsSection(String(localized: "Instructions"), footnote: AISettingsInstructions.note) {
+            ForEach(AISettingsInstructions.prompts, id: \.self) { id in
+                if let info = PromptCatalog.entry(id) {
+                    SettingsRow(info.title, detail: info.usedBy) {
+                        Button(String(localized: "Edit Prompt…")) { editPrompt(id) }
+                            .accessibilityLabel(String(localized: "Edit the \(info.title) prompt"))
+                    }
+                    .accessibilityIdentifier("settings.ai.instructions.\(id)")
+                }
+            }
+            SettingsRow(String(localized: "All prompts"), detail: String(localized: "Replies, summaries, search and scheduling.")) {
+                Button(String(localized: "Show Prompts")) { tab = .prompts }
+                    .accessibilityIdentifier("settings.ai.instructions.all")
+            }
+        }
     }
 
     private var tabs: [Tab] {

@@ -1,0 +1,15 @@
+{
+  "id": "overlays.native-look",
+  "area": "Navigation",
+  "title": "The command palette and the pickers float on Liquid Glass in the Mac's own style",
+  "steps": [
+    "Launch with -UseFakeData, select a conversation and press Command-K; type mark, press ↓ twice, then Escape",
+    "Open Remind me… (h or ⇧H), type fri 3pm, clear it, choose Pick a date…, then press → and Escape twice",
+    "Open Snooze…, Label… (l), Move to… (v) and Keyboard shortcuts (?) one after another",
+    "Switch Appearance between Light, Dark and Paper, then turn on Reduce Transparency in System Settings › Accessibility › Display and open the palette again"
+  ],
+  "deepLink": null,
+  "expected": "Each panel floats over the mail without moving it, on glass that shows the mail blurred behind it (a plain material with Reduce Transparency), and follows light or dark. Text is the system font; the field has no coloured bar. Rows have monochrome symbols, quiet shortcuts on the right and a soft accent highlight; destructive icons are red. The date picker is the system calendar.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

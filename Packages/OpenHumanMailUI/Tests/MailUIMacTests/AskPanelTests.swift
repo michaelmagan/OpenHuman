@@ -74,6 +74,7 @@ import Testing
     func host(_ overlays: OverlayCenter, name: String, theme: ResolvedTheme) throws -> NSHostingView<some View> {
         let hosting = NSHostingView(rootView: OverlayHostView(center: overlays).environment(\.theme, theme)
             .environment(\.colorScheme, theme.appearance == .dark ? .dark : .light)
+            .environment(\.nativeOverlaySurface, .material)
             .frame(width: 1100, height: 760)
             .background(theme.bgWindow.color))
         hosting.frame = NSRect(x: 0, y: 0, width: 1100, height: 760)

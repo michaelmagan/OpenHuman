@@ -4,153 +4,120 @@ import MailModel
 import MailTheme
 import SwiftUI
 
-public struct ShellToolbar: View {
+/// The main window's unified toolbar: Back and select-all at the leading edge, the split picker in the centre, the
+/// conversation's actions, Calendar, Compose and Search at the trailing edge. With the calendar open, its view switch
+/// takes the centre and New event and Refresh join the trailing edge. Every item is a `Label` with a menu
+/// command or a key behind it. The items follow the window's place, and a customizable toolbar would make AppKit keep
+/// every main window's items the same, so the toolbar is fixed.
+public struct ShellToolbar: ToolbarContent {
+    public static let searchFieldIdentifier = "search.field"
+
+    public enum ItemID {
+        public static let back = "mail.back"
+        public static let selectAll = "mail.selectAll"
+        public static let splits = "mail.splits"
+        public static let calendar = "mail.calendar"
+        public static let compose = "mail.compose"
+        public static let search = "mail.search"
+        public static func reader(_ action: ActionID) -> String { "mail.reader.\(action.rawValue)" }
+        public static let readerMore = "mail.reader.more"
+    }
+
     let router: AppRouter
-    @Environment(\.theme) private var theme
-    @Environment(\.titleBarInset) private var titleBarInset
 
     public init(router: AppRouter) {
         self.router = router
     }
 
-    public var body: some View {
-        HStack(spacing: 0) {
-            Color.clear.frame(width: titleBarInset > 0 ? theme.component.toolbar.paddingX : ShellMetrics.trafficLightInset, height: 1)
-            glyphButton("line.3.horizontal") { _ = router.perform(.toggleLabelSidebar, source: .toolbar) }
-                .shortcutTip(.toggleLabelSidebar, title: "Labels")
-                .accessibilityLabel("Show or hide labels")
-            let calendarWindow = router.environment.calendarWindow
-            if let calendarWindow {
-                let open = calendarWindow.isOpen
-                let action: ActionID = open ? .calendarBackToMail : .calendarOpen
-                glyphButton(open ? "envelope" : "calendar") {
-                    _ = router.perform(action, source: .toolbar)
-                }
-                .shortcutTip(action, title: open ? "Back to Mail" : "Calendar")
-                .accessibilityLabel(open ? "Back to Mail" : "Calendar")
-                .accessibilityIdentifier("toolbar.calendar")
-            }
-            Color.clear.frame(width: theme.space3, height: 1)
-            if router.showsAccountSwitcher {
-                AccountSwitcherView(router: router)
-                Color.clear.frame(width: theme.space7, height: 1)
-            }
-            if calendarWindow?.isOpen == true {
-                Text("Calendar").font(theme.typeTabActive.swiftUIFont)
-                    .foregroundStyle(theme.component.tab.textActive.color)
-                    .padding(.horizontal, ShellMetrics.tabHitPadding)
-                    .accessibilityAddTraits(.isHeader)
-            } else if let unified = router.unifiedInbox {
-                allInboxesTitle(unified)
-            } else if let state = router.active {
-                if state.searchOpen && state.mode == .list {
-                    SearchFieldView(search: router.environment.overlays.search)
-                } else if state.mode == .reader {
-                    readerTitle(state)
-                } else if state.isOnTab {
-                    if let list = state.list { SelectAllCheckbox(list: list, descriptors: router.environment.actions.descriptors) }
-                    SplitTabBar(router: router, state: state)
-                } else if let location = state.location {
-                    if let list = state.list { SelectAllCheckbox(list: list, descriptors: router.environment.actions.descriptors) }
-                    locationTitle(state, location)
-                }
-            }
-            Spacer(minLength: theme.space7)
-            if router.environment.isFake {
-                Text("Fake data")
-                    .font(theme.typeCaption.swiftUIFont)
-                    .foregroundStyle(theme.textTertiary.color)
-                    .padding(.trailing, theme.space5)
-            }
-            trailingControls
+    public var body: some ToolbarContent {
+        let surface = ShellSurface(router: router)
+        if surface.isReader {
+            ToolbarItem(id: ItemID.back, placement: .navigation) { backButton }
         }
-        .padding(.trailing, theme.component.toolbar.paddingX)
-        .frame(height: theme.component.toolbar.height)
-        .frame(maxWidth: .infinity)
-        .background(theme.component.toolbar.bg.color)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Toolbar")
+        if let list = surface.selectableList {
+            // The empty slot keeps the title in place; without a check it draws no glass behind it
+            ToolbarItem(id: ItemID.selectAll, placement: .navigation) {
+                SelectAllCheckbox(list: list, descriptors: router.environment.actions.descriptors)
+            }
+            .sharedBackgroundVisibility(list.headerCheck == .hidden ? .hidden : .automatic)
+        }
+        if let state = surface.splitState {
+            ToolbarItem(id: ItemID.splits, placement: .principal) { SplitInboxPicker(router: router, state: state) }
+        }
+        if let reader = surface.reader {
+            ReaderToolbarGroup(actions: ReaderToolbarActions(router: router, reader: reader), router: router)
+        }
+        if let calendar = router.environment.calendarWindowIfStarted, calendar.isOpen {
+            CalendarToolbarItems(router: router, calendar: calendar)
+        }
+        if let calendar = router.environment.calendarWindow {
+            ToolbarItem(id: ItemID.calendar, placement: .primaryAction) { calendarButton(isOpen: calendar.isOpen) }
+        }
+        ToolbarItem(id: ItemID.compose, placement: .primaryAction) { composeButton }
+        ToolbarItem(id: ItemID.search, placement: .primaryAction) { searchItem(surface) }
     }
 
-    private func readerTitle(_ state: AccountState) -> some View {
-        HStack(spacing: theme.space5) {
-            Button {
-                router.closeReader()
-            } label: {
-                HStack(spacing: theme.space2) {
-                    Image(systemName: "chevron.left").font(.system(size: ShellMetrics.smallIconSize, weight: .regular))
-                    Text("Back").font(theme.typeBody.swiftUIFont)
-                }
-                .foregroundStyle(theme.textSecondary.color)
-                .frame(height: ShellMetrics.toolbarControlHeight)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .shortcutTip(.backToList, title: "Back to the list", alignment: .leading)
-            .accessibilityLabel("Back")
+    private var backButton: some View {
+        Button {
+            router.closeReader()
+        } label: {
+            NativeToolbarLabel("Back", systemImage: "chevron.backward")
         }
+        .help(Self.help(router, .backToList, title: "Back to the list"))
+        .accessibilityLabel("Back")
+        .accessibilityIdentifier("toolbar.back")
     }
 
-    private func allInboxesTitle(_ model: AllInboxesModel) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: theme.component.tab.countGap) {
-            Text(model.title)
-                .font(theme.typeTabActive.swiftUIFont)
-                .foregroundStyle(theme.component.tab.textActive.color)
-                .lineLimit(1)
-            if let unread = router.allInboxesUnread, let text = SplitTabBar.countText(unread) {
-                Text(text)
-                    .font(theme.typeTabCount.swiftUIFont)
-                    .foregroundStyle(theme.component.tab.count.color)
-            }
+    private func calendarButton(isOpen: Bool) -> some View {
+        let action: ActionID = isOpen ? .calendarBackToMail : .calendarOpen
+        let title = isOpen ? "Back to Mail" : "Calendar"
+        return Button {
+            _ = router.perform(action, source: .toolbar)
+        } label: {
+            NativeToolbarLabel(title, systemImage: isOpen ? "envelope" : "calendar")
         }
-        .padding(.horizontal, ShellMetrics.tabHitPadding)
-        .help(router.allInboxesUnread.map {
-            AccountSwitcherView.countPhrase($0.formatted(), router.accountCountMode)
-        } ?? "")
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
+        .help(Self.help(router, action, title: title))
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("toolbar.calendar")
     }
 
-    private func locationTitle(_ state: AccountState, _ location: MailLocation) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: theme.component.tab.countGap) {
-            Text(state.title(for: location))
-                .font(theme.typeTabActive.swiftUIFont)
-                .foregroundStyle(theme.component.tab.textActive.color)
-                .lineLimit(1)
-            if let text = AccountState.titleCount(for: location, total: state.list?.totalCount) {
-                Text(text)
-                    .font(theme.typeTabCount.swiftUIFont)
-                    .foregroundStyle(theme.component.tab.count.color)
-            }
+    private var composeButton: some View {
+        let enabled = router.isEnabled(.compose)
+        return Button {
+            _ = router.perform(.compose, source: .toolbar)
+        } label: {
+            NativeToolbarLabel("Compose", systemImage: "square.and.pencil")
         }
-        .padding(.horizontal, ShellMetrics.tabHitPadding)
-        .help(Self.titleTooltip(state.list?.totalCount))
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    private var trailingControls: some View {
-        HStack(spacing: theme.space3) {
-            let canCompose = router.isEnabled(.compose)
-            glyphButton("square.and.pencil", enabled: canCompose) { _ = router.perform(.compose, source: .toolbar) }
-                .shortcutTip(.compose, hint: canCompose ? nil : "Compose is not available here")
-                .accessibilityLabel("Compose")
-            glyphButton("magnifyingglass", enabled: router.unifiedInbox == nil) { _ = router.perform(.search, source: .toolbar) }
-                .shortcutTip(.search)
-                .accessibilityLabel("Search")
-        }
-    }
-
-    private func glyphButton(_ symbol: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: theme.component.toolbar.iconSize, weight: .light))
-                .frame(width: ShellMetrics.toolbarControlHeight, height: ShellMetrics.toolbarControlHeight)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle((enabled ? theme.textTertiary : theme.textDisabled).color)
         .disabled(!enabled)
+        .help(enabled ? Self.help(router, .compose, title: "Compose") : "Compose is not available here")
+        .accessibilityLabel("Compose")
+        .accessibilityIdentifier("toolbar.compose")
+    }
+
+    @ViewBuilder
+    private func searchItem(_ surface: ShellSurface) -> some View {
+        if surface.showsSearchField {
+            SearchFieldView(search: router.environment.overlays.search)
+                .frame(minWidth: NativeMetrics.Search.fieldWidth, idealWidth: NativeMetrics.Search.focusedFieldWidth,
+                       maxWidth: NativeMetrics.Search.focusedFieldWidth)
+                .accessibilityIdentifier(Self.searchFieldIdentifier)
+        } else {
+            Button {
+                _ = router.perform(.search, source: .toolbar)
+            } label: {
+                NativeToolbarLabel("Search", systemImage: "magnifyingglass")
+            }
+            .disabled(router.unifiedInbox != nil)
+            .help(Self.help(router, .search, title: "Search"))
+            .accessibilityLabel("Search")
+            .accessibilityIdentifier("toolbar.search")
+        }
+    }
+
+    @MainActor
+    static func help(_ router: AppRouter, _ action: ActionID, title: String) -> String {
+        guard let keys = router.environment.actions.descriptor(action)?.shortcutHint else { return title }
+        return "\(title)  \(keys)"
     }
 
     public static func conversationTitle(_ reader: ReaderModel?) -> String {
@@ -164,5 +131,90 @@ public struct ShellToolbar: View {
     static func titleTooltip(_ total: Int?) -> String {
         guard let total, total > 0 else { return "" }
         return total == 1 ? "1 conversation" : "\(total.formatted()) conversations"
+    }
+}
+
+/// What the toolbar shows for the window's current place.
+@MainActor
+struct ShellSurface {
+    let state: AccountState?
+    let isMail: Bool
+
+    init(router: AppRouter) {
+        state = router.active
+        isMail = router.environment.calendarWindowIfStarted?.isOpen != true && router.unifiedInbox == nil
+    }
+
+    var isReader: Bool { isMail && state?.mode == .reader }
+
+    var reader: ReaderModel? { isReader ? state?.reader : nil }
+
+    var selectableList: ThreadListModel? {
+        guard isMail, let state, state.mode == .list, !state.searchOpen else { return nil }
+        return state.list
+    }
+
+    var splitState: AccountState? {
+        guard isMail, let state, SplitInboxPicker.shows(state) else { return nil }
+        return state
+    }
+
+    var showsSearchField: Bool {
+        guard isMail, let state else { return false }
+        return state.searchOpen && state.mode == .list
+    }
+}
+
+/// The open conversation's actions from `ReaderToolbarActions`: Done, Remind, Label and Trash, then Previous and
+/// Next, then everything else under More. The same actions, keys and availability as the conversation's menu commands.
+struct ReaderToolbarGroup: ToolbarContent {
+    static let moreSymbol = "ellipsis"
+
+    let actions: ReaderToolbarActions
+    let router: AppRouter
+
+    var body: some ToolbarContent {
+        ForEach(actions.primary) { item in
+            ToolbarItem(id: ShellToolbar.ItemID.reader(item.id), placement: .primaryAction) { button(item) }
+        }
+        ToolbarSpacer(.fixed, placement: .primaryAction)
+        ForEach(actions.navigation) { item in
+            ToolbarItem(id: ShellToolbar.ItemID.reader(item.id), placement: .primaryAction) { button(item) }
+        }
+        ToolbarItem(id: ShellToolbar.ItemID.readerMore, placement: .primaryAction) { moreMenu }
+        ToolbarSpacer(.fixed, placement: .primaryAction)
+    }
+
+    private func button(_ item: ReaderToolbarActions.Item) -> some View {
+        Button {
+            _ = ReaderToolbarActions.perform(item.id, router: router)
+        } label: {
+            NativeToolbarLabel(item.title, systemImage: item.symbol ?? Self.moreSymbol)
+        }
+        .disabled(!item.isEnabled)
+        .help(item.help)
+        .accessibilityLabel(item.title)
+        .accessibilityIdentifier("toolbar.\(item.id.rawValue)")
+    }
+
+    private var moreMenu: some View {
+        let sections = actions.more
+        return Menu {
+            ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                Section {
+                    ForEach(section) { item in
+                        Button(item.title) { _ = ReaderToolbarActions.perform(item.id, router: router, source: .menu) }
+                            .disabled(!item.isEnabled)
+                    }
+                }
+            }
+        } label: {
+            NativeToolbarLabel("More", systemImage: Self.moreSymbol)
+        }
+        .menuIndicator(.hidden)
+        .disabled(sections.isEmpty)
+        .help("More actions for this conversation")
+        .accessibilityLabel("More actions")
+        .accessibilityIdentifier("toolbar.readerMore")
     }
 }

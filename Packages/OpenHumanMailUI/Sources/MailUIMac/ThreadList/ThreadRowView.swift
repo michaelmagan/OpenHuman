@@ -204,7 +204,7 @@ public final class ThreadRowView: NSTableCellView {
             style.tertiary.setStroke()
             outline.stroke()
         } else if content.showsUnreadDot {
-            let size = CGFloat(style.row.unreadDotSize)
+            let size = style.unreadDotSize
             style.unreadDot.setFill()
             NSBezierPath(ovalIn: NSRect(x: x(c.dotCenterX - size / 2, size), y: ((height - size) / 2).rounded(),
                                         width: size, height: size)).fill()
@@ -228,8 +228,7 @@ public final class ThreadRowView: NSTableCellView {
     func drawnLine(_ frames: DrawnFrames) -> NSAttributedString? {
         guard let line = frames.line else { return nil }
         let fitted = fittedLine(width: line.width)
-        let text = isChecked ? style.chips.onChecked(fitted) : fitted
-        return onFill ? style.onFill(text) : text
+        return onFill ? style.onFill(fitted) : fitted
     }
 
     func drawnSender() -> NSAttributedString? {
@@ -346,7 +345,7 @@ public final class ThreadRowView: NSTableCellView {
         shownHoverActions = actions
         for button in plateButtons { button.removeFromSuperview() }
         plateButtons = actions.enumerated().map { index, action in
-            let config = NSImage.SymbolConfiguration(pointSize: style.metrics.buttonGlyph, weight: .light)
+            let config = NSImage.SymbolConfiguration(pointSize: style.metrics.buttonGlyph, weight: .regular)
             let image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: action.title)?
                 .withSymbolConfiguration(config) ?? NSImage()
             let button = RowActionButton(image: image, style: style)

@@ -60,11 +60,19 @@ import Testing
         return try #require(w.window.firstResponder as? NSTextView)
     }
 
+    /// ↓ from the field gives the results the keys once they have loaded. A query with no results (`subject:` alone)
+    /// leaves the keys in the field, so there the list takes them the way a click in it would.
     private func giveTheResultsTheKeys(_ w: InlineReplyWindow) async throws {
-        #expect(w.environment.overlays.search.focusResults())
+        let search = w.environment.overlays.search
+        #expect(search.focusResults())
         try await wait("the results to take the keys") {
             if w.window.firstResponder === w.content.tableView { return true }
-            _ = w.environment.overlays.search.focusResults()
+            if let list = w.router.list, list.state != .loading, list.rows.isEmpty,
+               list.location == search.shownQuery.map(MailLocation.search) {
+                w.window.makeFirstResponder(w.content.tableView)
+            } else {
+                _ = search.focusResults()
+            }
             return false
         }
     }
@@ -101,7 +109,7 @@ import Testing
         #expect(w.environment.undo?.canUndo != true, "still nothing trashed")
     }
 
-    @Test func backspaceAfterThePillsTurnsTheLastPillBackIntoText() async throws {
+    @Test func backspaceInTheResultsSelectsTheLastPillAndASecondRemovesIt() async throws {
         let w = try await InlineReplyWindow.make(frameName: Self.frameName, reduceMotion: true, exclusive: true)
         defer { w.close() }
         let model = w.environment.overlays.search
@@ -119,9 +127,11 @@ import Testing
         draw(w)
         #expect(w.window.makeFirstResponder(w.content.tableView))
         #expect(w.content.keyRouter.route(key("\u{7F}", code: 51, in: w)) == nil, "⌫ is taken from the results")
-        await awaitObserved("the pill as text again") { model.text == "subject:re" }
-        draw(w)
-        #expect(field.stringValue == "subject:re")
+        #expect(model.selectedPills == [0], "the pill before the caret is selected")
+        #expect(model.text == "subject:re ")
+        #expect(OverlayFocusKeeper.control(of: w.window.firstResponder) === field, "the field has the keys")
+        #expect(w.content.keyRouter.route(key("\u{7F}", code: 51, in: w)) == nil)
+        #expect(model.text.isEmpty, "the second ⌫ removes the pill")
         #expect(w.environment.undo?.canUndo != true, "nothing was trashed")
     }
 

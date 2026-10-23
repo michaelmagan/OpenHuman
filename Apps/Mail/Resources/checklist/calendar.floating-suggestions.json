@@ -1,0 +1,15 @@
+{
+  "id": "calendar.floating-suggestions",
+  "area": "Calendar",
+  "title": "Guest and Meet suggestions float over the form; notes take several lines",
+  "steps": [
+    "Launch with -UseFakeData -UseFakeCalendar, press 2 and click one of your own events",
+    "In Add guests type the first letters of a contact, press Down twice, then Esc; type one more letter and press Return",
+    "In the notes press Return between three lines, then open the Reminders and Colour menus",
+    "In the sidebar's Meet field type the first letters of a contact and press Return"
+  ],
+  "deepLink": null,
+  "expected": "The list floats under the field and nothing in the form moves; arrows move the highlight, Esc closes only the list, Return adds the highlighted guest. Notes take new lines and grow, then scroll. Reminders and Colour are menus with checkmarks and swatches. Meet suggests the same people and Return opens an event with them.",
+  "requires": "fake",
+  "addedIn": "2026-10-19"
+}

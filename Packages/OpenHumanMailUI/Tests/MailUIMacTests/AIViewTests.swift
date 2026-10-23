@@ -1,8 +1,9 @@
 import AppKit
 import MailActions
 import MailFakes
-import MailFeatures
+@testable import MailFeatures
 import MailModel
+import MailRender
 import MailTheme
 import MailUI
 import OpenHumanAI
@@ -140,6 +141,38 @@ import Testing
             .frame(width: 440).environment(\.theme, .dark))
         sheet.layoutSubtreeIfNeeded()
         #expect(sheet.fittingSize.height > 100)
+        env.compose.close(session)
+    }
+
+    // Narrower is never shorter, so a legacy scroll bar that shows when the panel grows cannot make it flip between
+    // side by side and one above the other
+    @Test func theComparisonIsNeverShorterWhenNarrower() async throws {
+        let short = ScriptedProvider { request, _ in
+            request.task == .rewrite ? .text("Shorter.") : FakeAIProvider.cannedScript(request)
+        }
+        let (env, center) = environment(providers: [short])
+        env.router.start()
+        await until { env.router.list?.state == .loaded }
+        let session = try #require(env.compose.openNew(placement: .modal))
+        let lines = (1...40).map { "Line \($0) of a long draft about the plan for the next quarter and who does what." }
+        session.updateBody(RichTextDocument(blocks: lines.map { .paragraph([.text($0, [])]) }))
+        let panel = try #require(center.togglePanel(session))
+        #expect(panel.scope == .wholeDraft)
+        panel.dismissExamples()
+        panel.instruction = "Shorter"
+        panel.generate()
+        await panel.settle()
+        #expect(panel.phase == .done)
+        #expect(panel.currentVersion != nil)
+        var previous = CGFloat.infinity
+        for width in stride(from: CGFloat(560), through: 700, by: 4) {
+            let host = NSHostingView(rootView: AIComposerPanel(model: panel, center: center).frame(width: width)
+                .environment(\.theme, .light))
+            host.layoutSubtreeIfNeeded()
+            let height = host.fittingSize.height
+            #expect(height <= previous + 0.5, "at \(width) pt the panel is \(height) pt, after \(previous) pt narrower")
+            previous = height
+        }
         env.compose.close(session)
     }
 

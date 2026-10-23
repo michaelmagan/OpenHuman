@@ -434,6 +434,56 @@ struct ReaderWebKitTests {
         #expect(small.measuredHeight == (smallBase * 2).rounded(.up))
     }
 
+    // The view is as tall as the body, so a block as tall as the viewport with a line below it made each report
+    // taller than the last
+    @Test func aViewportTallBlockKeepsTheBodysHeight() async throws {
+        let html = "<div style=\"height: 100vh; background: #eee\">Hero</div><p>A footer line under the hero.</p>"
+        guard case .html(let rendered) = MessageRenderer().render(MessageContent(html: html, text: nil)) else {
+            Issue.record("expected html"); return
+        }
+        let view = try #require(ReaderWebView.make(for: rendered, width: 600))
+        defer { ReaderWebKit.shared.pool.recycle(view) }
+        let window = TestWindows.window(view, size: NSSize(width: 600, height: 400))
+        defer { window.close() }
+        view.widthAnchor.constraint(equalToConstant: 600).isActive = true
+        await Reports.heights(of: view).wait { view.isShown }
+        let settled = try #require(view.measuredHeight)
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(abs(view.frame.height - settled) <= 1, "the view takes the body's height, and so does its viewport")
+        let measured = try await view.evaluateJavaScript(
+            "Math.ceil(document.getElementById('oh-root').getBoundingClientRect().height)", in: nil,
+            contentWorld: .defaultClient) as? Double
+        #expect(measured.map { CGFloat($0) } == settled, "at that viewport the body is no taller")
+        #expect(settled > 600 && settled < 800, "the block at a fixed viewport, height \(settled)")
+    }
+
+    @Test func aBodyFollowingItsOwnHeightStopsGrowing() {
+        var guarded = ReaderSelfGrowthGuard()
+        var height: CGFloat = 400
+        var shown: [CGFloat] = []
+        for _ in 0..<200 {
+            height += 20
+            shown.append(guarded.height(for: height, width: 600))
+        }
+        #expect(guarded.stopped)
+        let ceiling = 400 + 20 * CGFloat(ReaderSelfGrowthGuard.limit + 1)
+        #expect(shown.max() == ceiling, "stops after \(ReaderSelfGrowthGuard.limit) equal steps")
+        #expect(guarded.height(for: 300, width: 600) == 300, "it can still shrink")
+        #expect(guarded.height(for: 900, width: 700) == 900, "another width measures afresh")
+        #expect(!guarded.stopped)
+
+        var loading = ReaderSelfGrowthGuard()
+        var tall: CGFloat = 100
+        for step in 0..<200 {
+            tall += CGFloat(40 + step % 7 * 13)
+            #expect(loading.height(for: tall, width: 600) == tall, "growth by different steps, as images load, is kept")
+        }
+        #expect(!loading.stopped)
+        var steady = ReaderSelfGrowthGuard()
+        for value in [100, 120, 120, 140, 140, 160] as [CGFloat] { _ = steady.height(for: value, width: 600) }
+        #expect(!steady.stopped && steady.height(for: 5_000, width: 600) == 5_000, "a repeated height breaks the run")
+    }
+
     @Test func quotesToggleFromTheAppWorld() async throws {
         let html = """
         <div>Reply text.</div><div class="gmail_quote"><div>On Tue, Sam wrote:</div>

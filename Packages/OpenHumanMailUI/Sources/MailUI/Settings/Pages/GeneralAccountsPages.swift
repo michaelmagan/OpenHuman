@@ -66,6 +66,10 @@ struct GeneralSettingsPage: View {
                     ForEach(FollowSystemChoice.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
                 SettingsRow("Automatic lists", detail: ComposeTextSettings.autoListsNote, isOn: $writing.autoLists)
+                SettingsRow("Pasted image size", detail: ComposeTextSettings.pastedImageSizeNote,
+                            selection: $writing.pastedImageSize) {
+                    ForEach(InlineImageSize.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
             }
             SettingsSection("Window") {
                 switchRow("Show shortcut hints", model.showShortcutHints,
@@ -260,6 +264,13 @@ struct AccountsSettingsPage: View {
                 Task { await model.importClient(json: data) }
             }
         }
+        .alert(model.pendingMove.map { model.moveTitle($0) } ?? "",
+               isPresented: Binding(get: { model.pendingMove != nil }, set: { if !$0 { model.cancelMove() } })) {
+            Button("Cancel", role: .cancel) { model.cancelMove() }
+            Button(model.pendingMove.map { model.moveButton($0) } ?? "OK") { Task { await model.confirmMove() } }
+        } message: {
+            Text(model.pendingMove.map { model.moveMessage($0) } ?? "")
+        }
         .alert(AccountsSettingsModel.removalConfirmationTitle,
                isPresented: Binding(get: { model.confirmingRemoval != nil }, set: { if !$0 { model.cancelRemoval() } })) {
             Button("Cancel", role: .cancel) { model.cancelRemoval() }
@@ -304,13 +315,6 @@ struct AccountsSettingsPage: View {
                 }
                 if let notice = model.clientNotice { SettingsFootnote(notice) }
             }
-            .alert(model.pendingMove.map { model.moveTitle($0) } ?? "",
-                   isPresented: Binding(get: { model.pendingMove != nil }, set: { if !$0 { model.cancelMove() } })) {
-                Button("Cancel", role: .cancel) { model.cancelMove() }
-                Button(model.pendingMove.map { model.moveButton($0) } ?? "OK") { Task { await model.confirmMove() } }
-            } message: {
-                Text(model.pendingMove.map { model.moveMessage($0) } ?? "")
-            }
         }
     }
 
@@ -334,12 +338,11 @@ struct AccountsSettingsPage: View {
             }
             if showsGoogleSteps {
                 Text(GoogleClientGuide.plainText)
-                    .themeFont(theme.typeMeta)
-                    .foregroundStyle(theme.textSecondary.color)
+                    .font(.system(size: NativeMetrics.Text.secondary))
+                    .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, theme.space3)
             }
         }
     }

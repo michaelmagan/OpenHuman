@@ -22,6 +22,9 @@ public final class ThemeStore {
     public var reduceMotion: Bool {
         didSet { if reduceMotion != oldValue { apply(.environment) } }
     }
+    public var liveAccent: LiveAccent? {
+        didSet { if liveAccent != oldValue { apply(.environment) } }
+    }
     public private(set) var resolved: ResolvedTheme
     public private(set) var version = 0
     public private(set) var readerCSS: String
@@ -42,7 +45,7 @@ public final class ThemeStore {
 
     public init(library: ThemeLibrary = .builtIn, preferencesStore: (any ThemePreferencesStoring)? = nil,
                 folder: ThemeFolder? = nil, systemAppearance: ThemeAppearance = .light, increaseContrast: Bool = false,
-                reduceMotion: Bool = false) {
+                reduceMotion: Bool = false, liveAccent: LiveAccent? = nil) {
         self.library = library
         self.preferencesStore = preferencesStore
         self.folder = folder
@@ -50,10 +53,14 @@ public final class ThemeStore {
         self.systemAppearance = systemAppearance
         self.increaseContrast = increaseContrast
         self.reduceMotion = reduceMotion
-        let preferences = preferencesStore?.load() ?? ThemePreferences()
+        self.liveAccent = liveAccent
+        let stored = preferencesStore?.load()
+        let preferences = stored?.migrated() ?? ThemePreferences()
+        if let stored, stored != preferences { preferencesStore?.save(preferences) }
         self.preferences = preferences
         let resolved = library.resolve(preferences, appearance: preferences.mode.effective(system: systemAppearance),
-                                       increaseContrast: increaseContrast).applyingReduceMotion(reduceMotion)
+                                       increaseContrast: increaseContrast, liveAccent: liveAccent)
+            .applyingReduceMotion(reduceMotion)
         self.resolved = resolved
         self.readerCSS = ReaderCSS.stylesheet(for: resolved)
         self.available = library.summaries
@@ -67,13 +74,21 @@ public final class ThemeStore {
     public var effectiveAppearance: ThemeAppearance { preferences.mode.effective(system: systemAppearance) }
 
     public func resolve(_ preferences: ThemePreferences, appearance: ThemeAppearance) -> ResolvedTheme {
-        let theme = library.resolve(preferences, appearance: appearance, increaseContrast: increaseContrast)
+        let theme = library.resolve(preferences, appearance: appearance, increaseContrast: increaseContrast, liveAccent: liveAccent)
             .applyingReduceMotion(reduceMotion)
         guard let isFontInstalled else { return theme }
         return theme.replacingMissingFonts(isInstalled: isFontInstalled)
     }
 
     public func resetPreferences() { preferences = ThemePreferences() }
+
+    /// Called when the system colours change. Takes the new accent and always bumps `version`, so observers that
+    /// cache system colours in layers redraw even when no theme token changed.
+    public func systemColorsDidChange(liveAccent accent: LiveAccent?) {
+        let before = version
+        liveAccent = accent
+        if version == before { version += 1 }
+    }
 
     public func reloadThemes() async {
         guard let loader else { return }
@@ -132,7 +147,8 @@ public final class ThemeStore {
     }
 
     private func apply(_ reason: Reason) {
-        var next = library.resolve(preferences, appearance: effectiveAppearance, increaseContrast: increaseContrast)
+        var next = library.resolve(preferences, appearance: effectiveAppearance, increaseContrast: increaseContrast,
+                                   liveAccent: liveAccent)
             .applyingReduceMotion(reduceMotion)
         if let isFontInstalled { next = next.replacingMissingFonts(isInstalled: isFontInstalled) }
         let selected = preferences.themeID(for: effectiveAppearance)
@@ -201,7 +217,7 @@ struct ThemedModifier: ViewModifier {
             .environment(store)
             .environment(\.colorScheme, scheme)
             .preferredColorScheme(scheme)
-            .tint(resolved.accentFill.color)
+            .tint(resolved.controlTint)
             .transaction(value: resolved) { transaction in
                 transaction.animation = nil
                 transaction.disablesAnimations = true

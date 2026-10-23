@@ -11,6 +11,13 @@ extension Color {
     public init(token: ThemeColor) { self = token.color }
 }
 
+extension ResolvedTheme {
+    public var usesSystemAccent: Bool { accentID == LiveAccent.accentID }
+
+    /// The tint for native controls: none with the System accent, so they follow the live system accent.
+    public var controlTint: Color? { usesSystemAccent ? nil : tokens.accentFill.color }
+}
+
 extension TypeStyle {
     public var swiftUIWeight: Font.Weight {
         switch weight {

@@ -33,6 +33,6 @@ extension ReaderViewController {
     func openDate(_ mention: CalendarDateMention) {
         guard let model, let sidebar = router?.environment.calendarSidebar else { return }
         let thread = model.thread
-        Task { await sidebar.beginDraft(for: thread, at: mention) }
+        Task { await sidebar.reveal(mention, in: thread) }
     }
 }

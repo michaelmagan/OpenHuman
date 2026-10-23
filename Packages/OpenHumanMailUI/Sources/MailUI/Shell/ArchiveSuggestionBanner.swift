@@ -10,16 +10,16 @@ struct ArchiveSuggestionBanner: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: theme.space3) {
             Image(systemName: "archivebox")
-                .foregroundStyle(theme.textSecondary.color)
+                .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: theme.space1) {
                 Text(suggestion.text)
                     .font(theme.typeLabel.swiftUIFont)
-                    .foregroundStyle(theme.textPrimary.color)
+                    .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(ArchiveSuggestionModel.footnote)
                     .font(theme.typeCaption.swiftUIFont)
-                    .foregroundStyle(theme.textTertiary.color)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: theme.space3)
@@ -39,12 +39,13 @@ struct ArchiveSuggestionBanner: View {
                 .font(theme.typeLabel.swiftUIFont)
             Button { model.dismiss() } label: { Image(systemName: "xmark") }
                 .buttonStyle(.plain)
-                .foregroundStyle(theme.textTertiary.color)
+                .foregroundStyle(.secondary)
                 .accessibilityLabel("Close the cleanup suggestion")
         }
-        .padding(.horizontal, theme.space5)
-        .padding(.vertical, theme.space2)
+        .padding(.horizontal, NativeMetrics.Banner.paddingX)
+        .padding(.vertical, theme.space3)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .nativeGlassCard()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Inbox cleanup suggestion")
     }

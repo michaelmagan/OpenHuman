@@ -1,0 +1,33 @@
+# Hand-drawn chrome that stays, for Tools/native-ui-audit.py. Tab-separated: glob, pattern id or *, max hits, # reason.
+# A "skip" line leaves matching files out of the count. Keep each max at the measured count.
+
+*/Composer/*	skip	# composer views: audited separately
+*/Compose/*	skip	# composer views: audited separately
+*AIComposer*	skip	# composer AI panel: audited with the composer
+*AIModelPopover*	skip	# composer model menu: audited with the composer
+*InstantReplyStrip*	skip	# composer reply strip: audited with the composer
+*QuickRepl*	skip	# composer quick replies: audited with the composer
+*CalendarEventForm*	skip	# calendar event editor: audited separately
+*CalendarEventDetails*	skip	# calendar event inspector: audited separately
+*CalendarEventCard*	skip	# calendar event card: audited separately
+*CalendarFormControls*	skip	# calendar editor controls: audited separately
+*CalendarWindowView*	skip	# calendar window chrome: audited separately
+*SettingsShellView*	skip	# settings window sidebar: audited separately
+
+*/MailUI/Support/NativeStyles.swift	*	40	# the shared SwiftUI helpers: glass, keycap, tag capsule, selection plate
+*/MailUIMac/Support/NativeControls.swift	*	40	# the shared AppKit helpers
+*/MailUIMac/ThreadList/ThreadRowView.swift	*	6	# the large list draws text, dot and skeleton for speed
+*/MailUIMac/ThreadList/ThreadRowBackgroundView.swift	*	4	# hover and checked fills: NSTableView has neither
+*/MailUIMac/ThreadList/ThreadTableView.swift	P6-hover	1	# row hover tracking
+*/MailUIMac/ThreadList/LabelChipRenderer.swift	*	4	# cached chip images for drawn rows
+*/MailUIMac/Reader/MessageViews.swift	*	6	# ReaderPlateView and the AvatarView monogram
+*/MailUIMac/Reader/PlainTextMessageView.swift	*	2	# quote bars are content
+*/MailUIMac/Reader/ReaderWebView.swift	P6-hover	1	# link hover feeds the link preview
+*/MailUIMac/Reader/MessageContainerView.swift	P6-hover	1	# collapsed-row hover
+*/MailUIMac/Windows/MainContentViewController.swift	P8-layer-paint	2	# content canvas colour
+*/MailUI/Theme/ThemePreviewView.swift	*	30	# a picture of a theme, not chrome
+*/MailUIMac/Calendar/CalendarDayView.swift	*	10	# event grid: no system control
+*/MailUIMac/Calendar/Window/CalendarTimeGridView.swift	*	10	# event grid: no system control
+*/MailUIMac/Calendar/Window/CalendarMonthView.swift	*	6	# month grid with events: no system control
+*/MailUI/Overlays/SearchFieldView.swift	*	6	# token search field, while the system search field cannot keep its keys
+*/MailUI/Overlays/OverlayNativeStyle.swift	*	5	# click-outside layer, row button, field, material shadow, scope capsule
