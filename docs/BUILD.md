@@ -17,8 +17,11 @@ Tools/ci/build-app.sh
 ```
 
 Bootstrap downloads the pinned, checksum-verified XcodeGen version from
-`Tools/versions.env` and generates `Apps/Mail/Mail.xcodeproj`. Generated projects
-and downloaded tools are ignored. Local builds use ad-hoc signing by default.
+`Tools/versions.env` and generates `Apps/Mail/Mail.xcodeproj`. The app links
+[Sparkle](https://sparkle-project.org) for in-app updates, a Swift package pinned
+by commit in `Apps/Mail/project.yml`; Xcode fetches it with the other packages
+([why and how it is pinned](release/SPARKLE.md#decision-sparkle-as-a-dependency)).
+Generated projects and downloaded tools are ignored. Local builds use ad-hoc signing by default.
 For a development team override, copy
 `Apps/Mail/Config/Local.xcconfig.example` to `Local.xcconfig` and edit that local
 file. Do not commit signing credentials or OAuth clients.
@@ -70,6 +73,16 @@ Local build output is under `build/`; the app product is
 `build/dd/Build/Products/Release/OpenHumanMail.app`. Release signing and binary
 distribution are described in [the release guide](release/RELEASE-HOWTO.md).
 
+## Updates
+
+No build from this guide checks for updates. `SUFeedURL` and `SUPublicEDKey`
+stay empty unless `Tools/release/make-dmg.sh --enable-updates` sets them for a
+Developer ID signed release, and the app starts Sparkle only in a Release build
+that carries both and is Developer ID signed, never in Debug or DevTools builds
+and never under tests. Every other build keeps the GitHub release check behind
+Check for Updates… and says in Settings › General › Updates why it does not
+update. See [In-app updates](release/SPARKLE.md).
+
 ## Entitlements
 
 The build setting `OH_ENTITLEMENTS` names the entitlements file Xcode signs the
@@ -94,7 +107,7 @@ The app has three build configurations, all from the one `Mail` target:
 |---|---|---|
 | `Debug` | `DEBUG OH_DEV_TOOLS` | Everything below, unoptimised. Xcode runs and the tests use it. |
 | `DevTools` | `OH_DEV_TOOLS` | Release optimisation plus the developer tools: the Developer menu (test checklist, feedback over Tailscale), Settings › Advanced › Developer options (including Show debugging tools), the sample-data launch arguments and the developer variables below. Same bundle id and data as Release. |
-| `Release` | none | Nothing developer-only. This is the build `Tools/release/make-dmg.sh` ships. |
+| `Release` | none | Nothing developer-only. This is the build `Tools/release/make-dmg.sh` ships; it updates itself only when made with `--enable-updates`. |
 
 ```sh
 Tools/ci/build-app.sh --configuration DevTools --local-install

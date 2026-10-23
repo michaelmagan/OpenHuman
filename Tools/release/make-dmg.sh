@@ -21,6 +21,11 @@ It embeds your Developer ID provisioning profile in the app, after checking that
 grants each of them for this App ID, team and certificate; a profile that does not stops the
 build before anything is built.
 
+Every build leaves Sparkle's XPC services out of the app and signs Sparkle again: Mail is not
+sandboxed, so the updater never uses them. A build updates itself only when it is made with
+--enable-updates, which needs a Developer ID build with --no-icloud and the feed and key settings
+below (docs/release/SPARKLE.md). Every other build carries an empty feed and key and never checks.
+
   --dry-run            print each command instead of running it: builds, signs and sends
                        nothing; needs no certificate
   --build-number <n>   CFBundleVersion (default: the number of commits in HEAD)
@@ -34,6 +39,9 @@ build before anything is built.
                        hand it out)
   --from-archive       skip "xcodebuild -exportArchive" and use the app as signed in the
                        archive (fallback)
+  --enable-updates     build in the update feed and public key, so installed copies update
+                       themselves. Needs --no-icloud: every update keeps the entitlements of the
+                       first installed build. Not with --unsigned
   -h, --help           show this help
 
 Settings (environment, then ~/.config/openhuman/release.env, which Tools/signing/setup.sh writes,
@@ -51,6 +59,12 @@ a name wins:
   OH_PROVISIONING_PROFILE
                        path to the Developer ID provisioning profile you downloaded for the
                        app's App ID; not needed with --unsigned or --no-icloud
+  OH_UPDATE_FEED_URL   with --enable-updates: the https:// address of the update feed
+                       (appcast.xml). http://127.0.0.1 is accepted only with --sign-only, for a
+                       staged update test on this Mac
+  OH_SPARKLE_PUBLIC_KEY
+                       with --enable-updates: the base64 public key that "generate_keys -p"
+                       prints. Updates must be signed with its private key
 
 Output (ignored by git): build/release/OpenHuman-Mail-<version>-<build>/ (with -unsigned or
 -signed-only appended for those builds) with the .dmg, its .sha256, release-info.txt, a
@@ -60,7 +74,7 @@ EOF
 }
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HERE="$ROOT/Tools/release"
-DRY=0; BUILD_NUMBER=""; ALLOW_DIRTY=0; SIGN_ONLY=0; FROM_ARCHIVE=0; UNSIGNED=0; NO_ICLOUD=0
+DRY=0; BUILD_NUMBER=""; ALLOW_DIRTY=0; SIGN_ONLY=0; FROM_ARCHIVE=0; UNSIGNED=0; NO_ICLOUD=0; ENABLE_UPDATES=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY=1; shift ;;
@@ -71,12 +85,17 @@ while [[ $# -gt 0 ]]; do
         --no-icloud) NO_ICLOUD=1; shift ;;
         --sign-only) SIGN_ONLY=1; shift ;;
         --from-archive) FROM_ARCHIVE=1; shift ;;
+        --enable-updates) ENABLE_UPDATES=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "make-dmg: unknown argument $1 (see --help)" >&2; exit 2 ;;
     esac
 done
 [[ "$UNSIGNED" == 0 || "$SIGN_ONLY" == 0 ]] || { echo "make-dmg: --unsigned and --sign-only do not go together" >&2; exit 2; }
 ICLOUD=1; [[ "$UNSIGNED" == 0 && "$NO_ICLOUD" == 0 ]] || ICLOUD=0
+if [[ "$ENABLE_UPDATES" == 1 ]]; then
+    [[ "$UNSIGNED" == 0 ]] || { echo "make-dmg: --enable-updates needs a Developer ID build; an unsigned build never updates" >&2; exit 2; }
+    [[ "$NO_ICLOUD" == 1 ]] || { echo "make-dmg: --enable-updates needs --no-icloud. Every update must keep the entitlements of the first installed build, and updating builds are made without iCloud" >&2; exit 2; }
+fi
 
 say()  { printf 'make-dmg: %s\n' "$*"; }
 die()  { printf 'make-dmg: %s\n' "$*" >&2; exit 1; }
@@ -253,6 +272,45 @@ if [[ "$ICLOUD" == 1 ]]; then
     fi
 fi
 
+FEED=""; KEY=""
+if [[ "$ENABLE_UPDATES" == 1 ]]; then
+    step "Updates"
+    FEED="${OH_UPDATE_FEED_URL:-}"; KEY="${OH_SPARKLE_PUBLIC_KEY:-}"
+    if [[ -z "$FEED" || -z "$KEY" ]]; then
+        [[ "$DRY" == 1 ]] || die "--enable-updates needs OH_UPDATE_FEED_URL (the https:// address of the update feed) and OH_SPARKLE_PUBLIC_KEY (the public key generate_keys prints), in the environment or Tools/release/release.env (docs/release/SPARKLE.md). Nothing was built."
+        FEED="${FEED:-https://<your-update-feed>/appcast.xml}"; KEY="${KEY:-<your-SUPublicEDKey>}"
+        say "OH_UPDATE_FEED_URL or OH_SPARKLE_PUBLIC_KEY is not set; the dry run uses a placeholder. A real run stops here."
+    else
+        FEED_KIND="$(python3 -I -c '
+import base64, binascii, sys
+from urllib.parse import urlsplit
+feed, key = sys.argv[1], sys.argv[2]
+try:
+    whole = len(base64.b64decode(key, validate=True)) == 32
+except (binascii.Error, ValueError):
+    whole = False
+if not whole:
+    sys.exit("OH_SPARKLE_PUBLIC_KEY is not a base64 EdDSA public key of 32 bytes. Copy the key that generate_keys -p prints.")
+parts = urlsplit(feed)
+if any(c.isspace() or c in "\"<>\\" for c in feed) or parts.username or parts.password or not parts.hostname:
+    sys.exit(f"OH_UPDATE_FEED_URL {feed!r} is not a usable address.")
+if parts.scheme == "https":
+    print("https")
+elif parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost"):
+    print("loopback")
+else:
+    sys.exit(f"OH_UPDATE_FEED_URL {feed!r} must start with https:// (http://127.0.0.1 only for a staged test with --sign-only).")
+' "$FEED" "$KEY" 2>&1)" || die "$FEED_KIND Nothing was built."
+        if [[ "$FEED_KIND" == loopback && "$SIGN_ONLY" == 0 ]]; then
+            die "OH_UPDATE_FEED_URL $FEED is on this Mac. That is only for a staged update test: add --sign-only, and never hand the build out. Nothing was built."
+        fi
+    fi
+    say "updates on: feed $FEED, public key $KEY"
+else
+    say "updates off: no feed or key in the app, so it never checks for updates (--enable-updates turns them on)"
+fi
+UPDATES=("OH_UPDATE_FEED_URL=$FEED" "OH_SPARKLE_PUBLIC_KEY=$KEY")
+
 NAME="OpenHuman-Mail-$VERSION"
 OUT="$ROOT/build/release/$NAME-$BUILD_NUMBER"
 [[ "$SIGN_ONLY" == 0 ]] || OUT="$OUT-signed-only"
@@ -271,6 +329,7 @@ else
     CHECK=("$HERE/check-release.sh" --team "$TEAM" --expect-commit "$STAMP")
 fi
 [[ "$ICLOUD" == 0 ]] || CHECK+=(--icloud)
+if [[ "$ENABLE_UPDATES" == 1 ]]; then CHECK+=(--updates "$FEED" --update-key "$KEY"); else CHECK+=(--updates off); fi
 [[ "$ALLOW_DIRTY" == 0 ]] || CHECK+=(--allow-dirty)
 
 FREE_GB="$(df -g "$ROOT" | awk 'NR == 2 { print $4 }')"
@@ -315,7 +374,8 @@ run_logged "$LOGS/archive.log" xcodebuild archive -jobs 2 \
     -project "$ROOT/Apps/Mail/Mail.xcodeproj" -scheme Mail -configuration Release \
     -destination 'generic/platform=macOS' -derivedDataPath "$DD" -archivePath "$ARCHIVE" \
     "${SIGNING[@]}" "OH_BUNDLE_ID_PREFIX=$PREFIX" OH_ENTITLEMENTS=Entitlements/Mail.entitlements \
-    "OH_GIT_COMMIT=$STAMP" "CURRENT_PROJECT_VERSION=$BUILD_NUMBER" "OH_RELEASE_CHANNEL=$CHANNEL" SWIFT_USE_INTEGRATED_DRIVER=YES
+    "OH_GIT_COMMIT=$STAMP" "CURRENT_PROJECT_VERSION=$BUILD_NUMBER" "OH_RELEASE_CHANNEL=$CHANNEL" "${UPDATES[@]}" \
+    SWIFT_USE_INTEGRATED_DRIVER=YES
 need_dir "$ARCHIVE/Products/Applications/OpenHumanMail.app"
 
 step "Export the app"
@@ -331,6 +391,29 @@ else
     run rm -rf "$WORK/export"
 fi
 run rm -rf "$DD"
+
+step "Leave Sparkle's XPC services out and sign Sparkle again"
+# Why: Mail is not sandboxed, so Sparkle installs through its Autoupdate tool and never starts these services
+# (SUEnableDownloaderService and SUEnableInstallerLauncherService stay off). Without them no helper in the release
+# carries entitlements of its own
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+if [[ "$DRY" == 0 && ! -d "$SPARKLE" ]]; then
+    [[ "$ENABLE_UPDATES" == 0 ]] || die "the app has no Sparkle.framework, so --enable-updates cannot work."
+    say "no Sparkle.framework in the app; nothing to leave out"
+else
+    if [[ "$UNSIGNED" == 1 ]]; then
+        RESIGN=(codesign --force --sign - --preserve-metadata=identifier,entitlements,flags)
+    else
+        RESIGN=(codesign --force --sign "$SIGN_HASH" ${KEYCHAIN[@]+"${KEYCHAIN[@]}"} --options runtime --timestamp
+                --preserve-metadata=identifier,entitlements)
+    fi
+    run rm -rf "$SPARKLE/Versions/B/XPCServices" "$SPARKLE/XPCServices"
+    run "${RESIGN[@]}" "$SPARKLE/Versions/B/Autoupdate"
+    run "${RESIGN[@]}" "$SPARKLE/Versions/B/Updater.app"
+    run "${RESIGN[@]}" "$SPARKLE"
+    # The iCloud step below signs the app itself
+    [[ "$ICLOUD" == 1 ]] || run "${RESIGN[@]}" "$APP"
+fi
 
 if [[ "$ICLOUD" == 1 ]]; then
     step "Embed the provisioning profile and sign the app with the iCloud entitlements"
@@ -400,6 +483,7 @@ DR="$({ codesign -d -r- "$APP" 2>&1 || true; } | sed -n 's/^designated => //p')"
     echo "bundle_id=$PREFIX.mail"
     if [[ "$UNSIGNED" == 1 ]]; then echo "signing=ad-hoc"; else echo "signing=developer-id"; fi
     if [[ "$ICLOUD" == 1 ]]; then echo "icloud=yes"; else echo "icloud=no"; fi
+    if [[ "$ENABLE_UPDATES" == 1 ]]; then echo "updates=yes"; echo "update_feed=$FEED"; else echo "updates=no"; fi
     echo "team=${TEAM:-none}"
     if [[ "$SIGN_ONLY" == 0 && "$UNSIGNED" == 0 ]]; then echo "notarized=yes"; else echo "notarized=no"; fi
     echo "notary_app=$APP_SUBMISSION"
@@ -441,6 +525,10 @@ if [[ "$UNSIGNED" == 1 ]]; then
     say "NOT signed with a Developer ID and NOT notarized: macOS blocks it at first open until the person allows it."
 else
     say "next (yours): open it on another Mac first (RELEASE-HOWTO, 'Build the signed DMG without iCloud')."
+fi
+if [[ "$ENABLE_UPDATES" == 1 ]]; then
+    say "To offer it to installed copies once it is published, add it to the update feed (docs/release/SPARKLE.md):"
+    say "  Tools/release/update-appcast.py --dmg '$DMG' --version $VERSION --build $BUILD_NUMBER --notes-file '$OUT/release-notes.md' --download-url-prefix <where the DMG is published> --appcast <your appcast.xml>"
 fi
 say "To put it on a draft GitHub pre-release (every release is an early development build):"
 say "  Tools/release/publish-github.sh --dmg '$DMG' $VERSION"

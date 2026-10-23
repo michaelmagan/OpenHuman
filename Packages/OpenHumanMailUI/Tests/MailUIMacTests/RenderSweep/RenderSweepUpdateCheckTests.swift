@@ -24,6 +24,13 @@ private func sweepCenter(_ reply: UpdateFeedReply?) async -> UpdateCheckCenter {
     return center
 }
 
+@MainActor
+private final class SweepUpdater: SoftwareUpdater {
+    var automaticallyChecksForUpdates = true
+    var lastUpdateCheckDate: Date? = sweepUpdateNow.addingTimeInterval(-3 * 3600)
+    func checkForUpdates() {}
+}
+
 extension RenderSweepTests {
     @Test(arguments: SweepTheme.lightAndDark)
     func updateCheckSheetAndSettingsRow(_ theme: SweepTheme) async throws {
@@ -49,6 +56,16 @@ extension RenderSweepTests {
             try await sweepShoot(sheet, screen: "update-sheet-\(name)", theme: theme)
         }
         for (name, center) in states where ["checking", "available", "not-published", "offline"].contains(name) {
+            let row = sweepStandaloneWindow(SettingsPageScaffold(title: "General") { UpdateCheckSettingsSection(center: center) },
+                                            store: store, size: NSSize(width: Self.settingsPageWidth, height: 300))
+            defer { row.orderOut(nil) }
+            try await sweepShoot(row, screen: "settings-updates-\(name)", theme: theme)
+        }
+        let updating = UpdateCheckCenter(current: sweepEarlyBuild, fetch: { _ in UpdateFeedReply(status: 404) },
+                                         openURL: { _ in }, updater: SweepUpdater(), now: { sweepUpdateNow })
+        let unsigned = UpdateCheckCenter(current: sweepEarlyBuild, fetch: { _ in UpdateFeedReply(status: 404) },
+                                         openURL: { _ in }, updatesUnavailable: .notDeveloperIDSigned, now: { sweepUpdateNow })
+        for (name, center) in [("updater", updating), ("not-available", unsigned)] {
             let row = sweepStandaloneWindow(SettingsPageScaffold(title: "General") { UpdateCheckSettingsSection(center: center) },
                                             store: store, size: NSSize(width: Self.settingsPageWidth, height: 300))
             defer { row.orderOut(nil) }

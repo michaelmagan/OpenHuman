@@ -10,6 +10,11 @@ the route without a provisioning profile; the optional iCloud route is below.
 Unsigned builds remain available for development, with different first-open
 requirements. Do not commit binaries, archives, OAuth clients, or credentials.
 
+A release that installed copies should update to automatically is built with
+`--no-icloud --enable-updates` and then added to the update feed; see
+[In-app updates](SPARKLE.md). Without `--enable-updates` the build never checks
+for updates.
+
 ## Prerequisites
 
 - The app requires Apple silicon and macOS 26.0 or later. Build with full
@@ -188,6 +193,11 @@ submits an app ZIP to Apple, staples the app, packages/signs the DMG, submits
 the DMG to Apple, staples it and performs the final checks. These are real
 Apple submissions. It does not push, tag, upload to GitHub or publish a release.
 
+For a release that updates itself, add `--enable-updates` (with the feed and key
+settings in [In-app updates](SPARKLE.md#one-time-setup)). Every build, with or
+without it, leaves Sparkle's XPC services out of the app and signs Sparkle again
+before the checks.
+
 `--dry-run` prints commands and can enumerate signing identities, but proves no
 real build/sign/notary result. `--sign-only` and `--allow-dirty` are rehearsals,
 not distributable releases. `--from-archive` still makes a fresh archive; it
@@ -211,7 +221,8 @@ The folder contains the DMG, its `.sha256`, `release-info.txt`, starter
 The temporary `work/` app is removed on success; keep the archive and dSYMs for
 crash reports. Check both Apple answers are `Accepted`, the checksum matches
 both sidecar and record, the record names the intended commit/version/build,
-and it says `signing=developer-id`, `notarized=yes`, `icloud=no` for this route.
+and it says `signing=developer-id`, `notarized=yes`, `icloud=no` for this route,
+and `updates=yes` with the intended `update_feed=` when built with `--enable-updates`.
 The checks cover signatures, hardened runtime, entitlements, stapled tickets,
 Gatekeeper and absence of bundled OAuth clients/developer switches. A record
 alone does not prove another Mac can install and launch the app.
@@ -372,9 +383,11 @@ signed-out browser before sending people to
 [Releases](https://github.com/michaelmagan/OpenHuman/releases).
 See [GitHub's release access documentation](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases).
 
-The app's Check for Updates… reads published releases from GitHub's public API.
-It ignores drafts, compares version/build, and opens the release page in a
-browser; it does not download or install updates. A private or unpublished
+A build made with `--enable-updates` updates itself from the update feed once the
+release is added to it ([In-app updates](SPARKLE.md#add-a-release-to-the-feed)).
+In every other build, Check for Updates… reads published releases from GitHub's
+public API. It ignores drafts, compares version/build, and opens the release page
+in a browser; it does not download or install updates. A private or unpublished
 release is not an anonymous update/download channel.
 
 ## Unsigned development builds

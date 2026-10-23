@@ -7,9 +7,12 @@ import SwiftUI
 @MainActor
 enum UpdateCheckSupport {
     static func makeCenter(environment: [String: String] = ProcessInfo.processInfo.environment,
-                           label: BuildLabel = .main) -> UpdateCheckCenter {
+                           label: BuildLabel = .main,
+                           info: [String: Any] = Bundle.main.infoDictionary ?? [:]) -> UpdateCheckCenter {
+        let updates = SparkleUpdater.startIfAllowed(environment: environment, info: info)
         let center = UpdateCheckCenter(current: label, feed: .openHuman, fetch: fetch(environment: environment),
-                                       openURL: { NSWorkspace.shared.open($0) })
+                                       openURL: { NSWorkspace.shared.open($0) }, updater: updates.updater,
+                                       updatesUnavailable: updates.unavailable)
         center.showWindow = { MainWindowPresenter.show() }
         return center
     }
