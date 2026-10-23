@@ -28,6 +28,16 @@ enum BuildFlavor {
         #endif
     }
 
+    static func isDevelopmentLaunch(arguments: [String], environment: [String: String]) -> Bool {
+        #if DEBUG || OH_DEV_TOOLS
+        home(environment) != nil || arguments.contains {
+            ["-UseFakeData", "-UseFixtureStore", "-UseFakeGmail", "-UseFakeCalendar"].contains($0)
+        }
+        #else
+        false
+        #endif
+    }
+
     static func oauthClientFile(_ environment: [String: String]) -> String? {
         #if DEBUG || OH_DEV_TOOLS
         nonEmpty(environment["OPENHUMAN_OAUTH_CLIENT_JSON"])

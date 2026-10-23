@@ -28,6 +28,7 @@ struct SettingsRoot: View {
         .themed(by: AppThemes.store)
         .frame(minWidth: SettingsMetrics.windowWidth, idealWidth: SettingsMetrics.windowWidth,
                minHeight: SettingsMetrics.windowHeight, idealHeight: SettingsMetrics.windowHeight)
+        .background(SettingsWindowHook())
     }
 
     static func showsDeveloperItems(_ options: DeveloperOptions) -> Bool { options.showsDeveloperItems }

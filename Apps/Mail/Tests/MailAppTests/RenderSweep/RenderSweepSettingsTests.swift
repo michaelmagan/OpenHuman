@@ -90,6 +90,12 @@ struct RenderSweepSettingsTests {
             try await Task.sleep(for: .milliseconds(600)) // flake-ok: opt-in render sweep; layout settles before the shot
             try Self.shoot(window, screen: "settings-ai-\(tab.rawValue)-full", theme: theme, in: directory)
         }
+        environment.settingsNavigator.openPrompt(PromptName.classify.rawValue)
+        let triage = Self.window(SettingsShellView(environment: environment, hosting: hosting()), themes: themes,
+                                 size: Self.fullHeightSize)
+        defer { triage.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(600)) // flake-ok: opt-in render sweep; layout settles before the shot
+        try Self.shoot(triage, screen: "settings-ai-prompt-triage-full", theme: theme, in: directory)
     }
 
     static func aiCenter() -> AICenter {
@@ -127,12 +133,51 @@ struct RenderSweepSettingsTests {
         let root = try #require(window.contentView)
         root.layoutSubtreeIfNeeded()
         root.displayIfNeeded()
+        let sidebar = sidebarCapture(in: root)
         let rep = try #require(root.bitmapImageRepForCachingDisplay(in: root.bounds))
         root.cacheDisplay(in: root.bounds, to: rep)
-        let png = try #require(rep.representation(using: .png, properties: [:]))
+        var png = try #require(rep.representation(using: .png, properties: [:]))
+        if let sidebar {
+            let image = NSImage(size: root.bounds.size)
+            image.addRepresentation(rep)
+            let composed = NSImage(size: root.bounds.size)
+            composed.lockFocus()
+            root.effectiveAppearance.performAsCurrentDrawingAppearance {
+                NSColor.windowBackgroundColor.setFill()
+                sidebar.rect.fill()
+            }
+            sidebar.image.draw(in: sidebar.rect)
+            image.draw(in: root.bounds)
+            composed.unlockFocus()
+            let tiff = try #require(composed.tiffRepresentation)
+            png = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+        }
         let file = "\(screen)--\(theme.slug).png"
         try png.write(to: directory.appendingPathComponent(file))
         try RenderSweepIndex.record(screen: screen, theme: theme.name, file: file, in: directory)
+    }
+}
+
+extension RenderSweepSettingsTests {
+    // The system draws the settings sidebar through its glass, which `cacheDisplay` leaves transparent, so the
+    // sidebar's list is captured on its own and drawn flat on the window background under the window capture
+    static func sidebarCapture(in root: NSView) -> (rect: NSRect, image: NSImage)? {
+        func all<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
+            ((view as? T).map { [$0] } ?? []) + view.subviews.flatMap { all(type, in: $0) }
+        }
+        for split in all(NSSplitView.self, in: root) where split.isVertical && split.arrangedSubviews.count >= 2 {
+            let pane = split.arrangedSubviews[0]
+            guard !pane.isHiddenOrHasHiddenAncestor, pane.bounds.width > 1,
+                  let list = all(NSScrollView.self, in: pane).first(where: { !$0.isHiddenOrHasHiddenAncestor }),
+                  let rep = list.bitmapImageRepForCachingDisplay(in: list.bounds) else { continue }
+            list.cacheDisplay(in: list.bounds, to: rep)
+            let image = NSImage(size: list.bounds.size)
+            image.addRepresentation(rep)
+            var rect = root.convert(list.bounds, from: list)
+            if root.isFlipped { rect.origin.y = root.bounds.height - rect.maxY }
+            return (rect, image)
+        }
+        return nil
     }
 }
 

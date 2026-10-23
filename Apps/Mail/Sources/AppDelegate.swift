@@ -27,10 +27,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MailApp.app.router?.environment.actions.shortcutHints?.flush()
         let compose = MailApp.app.router?.environment.composeIfStarted
         let review = MailApp.app.router?.environment.reviewIfStarted
+        let calendar = MailApp.app.router?.environment.calendarSidebarIfStarted
+        let calendarWindow = MailApp.app.router?.environment.calendarWindowIfStarted
+        let invites = MailApp.app.router?.environment.invitesIfStarted
         let composerWork = compose?.hasQuitWork == true || review?.hasQuitWork == true
+            || calendar?.hasQuitWork == true || calendarWindow?.hasQuitWork == true || invites?.hasQuitWork == true
         guard composerWork || MailApp.app.session != nil else { return .terminateNow }
         Task { @MainActor in
-            if composerWork { await Self.finishComposers(compose, review: review) }
+            if composerWork {
+                await Self.finishComposers(compose, review: review, calendar: calendar, calendarWindow: calendarWindow, invites: invites)
+            }
             guard MailApp.app.session != nil else {
                 sender.reply(toApplicationShouldTerminate: true)
                 return
@@ -41,11 +47,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     static func finishComposers(_ compose: ComposeManager?, review: ReviewQueueModel? = nil,
-                                limit: Duration = .seconds(5)) async {
+                                calendar: CalendarSidebarModel? = nil, calendarWindow: CalendarWindowModel? = nil,
+                                invites: InviteCenter? = nil, limit: Duration = .seconds(5)) async {
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
-                await compose?.prepareForQuit()
-                await review?.prepareForQuit()
+                await withTaskGroup(of: Void.self) { work in
+                    work.addTask {
+                        await compose?.prepareForQuit()
+                        await review?.prepareForQuit()
+                    }
+                    work.addTask { await invites?.prepareForQuit() }
+                    work.addTask {
+                        await calendarWindow?.prepareForQuit()
+                        await calendar?.prepareForQuit()
+                    }
+                }
             }
             group.addTask { try? await Task.sleep(for: limit) }
             await group.next()
