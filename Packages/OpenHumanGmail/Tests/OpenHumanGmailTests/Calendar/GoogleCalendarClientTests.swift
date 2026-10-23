@@ -178,6 +178,21 @@ private func at(_ month: Int, _ day: Int, _ hour: Int = 0, _ minute: Int = 0, _ 
         #expect((conference["conferenceSolutionKey"] as? [String: String]) == ["type": "hangoutsMeet"])
     }
 
+    @Test func anInsertWithGuestsAsksGoogleToEmailTheirInvitations() async throws {
+        let http = FakeHTTPTransport()
+        http.on("POST", Self.eventsPath) { _ in
+            FakeHTTPTransport.json(200, ["id": "new3", "start": ["dateTime": "2026-10-15T16:30:00Z"],
+                                         "end": ["dateTime": "2026-10-15T17:00:00Z"]])
+        }
+        _ = try await client(http, scopes: CalendarScopes.request.write).insertEvent(
+            GoogleEventInsert(title: "Lunch", start: at(10, 15, 12, 30), end: at(10, 15, 13), timeZone: "America/New_York",
+                              attendees: ["alice@example.com"]),
+            sendUpdates: .all, addMeet: false)
+        let request = try #require(http.requests.first)
+        #expect(request.url.query(percentEncoded: true)?.contains("sendUpdates=all") == true)
+        #expect((body(request)["attendees"] as? [[String: String]]) == [["email": "alice@example.com"]])
+    }
+
     @Test func withoutMeetThereIsNoConferenceRequest() async throws {
         let http = FakeHTTPTransport()
         http.on("POST", Self.eventsPath) { _ in

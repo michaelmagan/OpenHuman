@@ -22,6 +22,8 @@ public struct CalendarEventCard: Sendable, Hashable {
     public var sendUpdatesChoice: CalendarSendUpdates?
     public var pendingMove: CalendarPendingMove?
     public var defaultZone: String = ""
+    public var pendingGuest = "" { didSet { if pendingGuest != oldValue { pendingGuestNote = nil } } }
+    public var pendingGuestNote: String?
 
     public var formPatch: CalendarEventPatch {
         form?.patch(from: event, defaultZone: defaultZone) ?? CalendarEventPatch()
@@ -34,7 +36,24 @@ public struct CalendarEventCard: Sendable, Hashable {
     }
 
     public var timesChanged: Bool { start != event.start || end != event.end }
-    public var hasChanges: Bool { form != nil ? !formPatch.isEmpty : (timesChanged || !changes.isEmpty) }
+    public var hasChanges: Bool {
+        guard form != nil else { return timesChanged || !changes.isEmpty }
+        return !formPatch.isEmpty || !pendingGuest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    // An address still in the guest field joins the guests on Save; other text stops the save and says why
+    mutating func commitPendingGuest() -> Bool {
+        guard var edited = form else { return true }
+        guard let typed = CalendarPendingGuest.addresses(in: pendingGuest) else {
+            pendingGuestNote = CalendarPendingGuest.notAnAddress
+            return false
+        }
+        guard !typed.isEmpty else { return true }
+        for address in typed { edited.addGuest(address) }
+        form = edited
+        pendingGuest = ""
+        return true
+    }
     public var emailsPeople: Bool { !event.attendees.isEmpty }
 }
 
@@ -87,6 +106,7 @@ extension CalendarWindowModel {
     }
 
     public func openEvent(_ event: CalendarEvent) {
+        noteUnsavedMove(keeping: event.id)
         scopeQuestion = nil
         removeQuestion = nil
         selectedEventID = event.id
@@ -129,6 +149,11 @@ extension CalendarWindowModel {
 
     public func saveCard() async {
         guard var current = card else { return }
+        if current.form != nil {
+            let committed = current.commitPendingGuest()
+            card = current
+            guard committed else { return }
+        }
         guard current.hasChanges else {
             closeCard()
             return
@@ -396,11 +421,19 @@ extension CalendarWindowModel {
         let window = holdWindow
         let sleep = self.sleep
         held[id] = Task { [weak self] in
-            do { try await sleep(window) } catch { return }
+            try? await sleep(window)
             guard let self, self.held.removeValue(forKey: id) != nil else { return }
             await perform()
         }
         pushUndo(id, title: title)
+    }
+
+    public var hasQuitWork: Bool { !held.isEmpty }
+
+    public func prepareForQuit() async {
+        let pending = Array(held.values)
+        for task in pending { task.cancel() }
+        for task in pending { await task.value }
     }
 
     func offerUndo(_ title: String, revert: @escaping @MainActor () async throws -> Void) {

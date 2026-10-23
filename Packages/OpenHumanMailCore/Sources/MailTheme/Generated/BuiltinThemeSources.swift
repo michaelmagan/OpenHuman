@@ -354,8 +354,8 @@ enum BuiltinThemeSources {
   "border": { "hairline": 1, "control": 1, "focus": 2, "focusOffset": 2, "cursorBar": 2 },
   "density": {
     "compact":     { "row": 32, "splitRow": 48 },
-    "default":     { "row": 36, "splitRow": 52 },
-    "comfortable": { "row": 44, "splitRow": 60 }
+    "default":     { "row": 40, "splitRow": 52 },
+    "comfortable": { "row": 48, "splitRow": 60 }
   },
   "motion": {
     "instant":    { "duration": 0 },
@@ -913,7 +913,7 @@ enum BuiltinThemeSources {
       "bg.sidebar": "{side.40}",
       "bg.elevated": "{elev.44}",
       "bg.sunken": "{sunk.24}",
-      "bg.canvas": "{sunk.24}",
+      "bg.canvas": "{win.30}",
       "bg.card": "{side.40}",
       "bg.row.hover": "{hov.35}",
       "bg.row.selected": "{sel.63}",
@@ -1074,7 +1074,7 @@ enum BuiltinThemeSources {
       "bg.sidebar": "{win.925}",
       "bg.elevated": "{white}",
       "bg.sunken": "{sunk.906}",
-      "bg.canvas": "{win.925}",
+      "bg.canvas": "{white}",
       "bg.card": "{white}",
       "bg.row.hover": "{hov.949}",
       "bg.row.selected": "{sel.863}",

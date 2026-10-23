@@ -216,6 +216,25 @@ private func message(_ id: Int64, from: String, to: [String], cc: [String] = [],
         field.text = "DAN@x.io,"
         #expect(field.tokens.count == 2)
     }
+
+    @MainActor
+    @Test func escapeClosesTheSuggestionsAndAPointerChoosesARow() async {
+        let field = RecipientFieldModel(kind: .to, debounce: .zero) { _ in
+            [EmailAddress(name: "Dana Ruiz", email: "dana@acme.example"), EmailAddress(email: "dan@x.io")]
+        }
+        field.text = "da"
+        await field.settle()
+        field.selectSuggestion(1)
+        #expect(field.suggestionCursor == 1)
+        field.selectSuggestion(7)
+        #expect(field.suggestionCursor == 1, "a row that isn't there changes nothing")
+        field.dismissSuggestions()
+        #expect(field.suggestions.isEmpty && field.suggestionCursor == 0 && field.text == "da")
+        #expect(field.commit() && field.tokens.map(\.email) == ["da"], "Return after Escape adds the typed text")
+        field.text = "d"
+        await field.settle()
+        #expect(field.suggestions.count == 2, "typing again looks people up again")
+    }
 }
 
 @Suite struct QuoteSplitTests {

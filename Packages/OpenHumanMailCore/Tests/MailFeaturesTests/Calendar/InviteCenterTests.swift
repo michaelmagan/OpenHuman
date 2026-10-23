@@ -22,16 +22,19 @@ private let utc = TimeZone(identifier: "UTC")!
 private struct InviteFixture {
     let env: AppEnvironment
     let calendar: FakeCalendar?
+    let home: FakeCalendar
     let corpus: FakeCorpus
 
     init(events: [CalendarEvent]? = [], calendarRefusal: String? = nil) {
         corpus = .rich(threadCount: 12, now: fixedNow)
         let accounts = corpus.accounts
+        home = FakeCalendar(info: CalendarProviderInfo(name: "Google Calendar", account: accounts[1].email))
         if let events {
             let made = FakeCalendar(events: events, info: CalendarProviderInfo(name: "Google Calendar", account: accounts[0].email,
                                                                                createRefusal: calendarRefusal))
             calendar = made
-            let connections = FakeCalendarConnections(providers: [accounts[0].email: made])
+            let connections = FakeCalendarConnections(providers: [accounts[0].email: made, accounts[1].email: home],
+                                                      windowAccount: accounts[0].email)
             env = AppEnvironment.fake(corpus: corpus, options: .init(remoteAck: .immediate),
                                       featureFlags: FeatureFlags(), calendar: made, calendarConnections: connections)
         } else {
@@ -47,8 +50,8 @@ private struct InviteFixture {
     var center: InviteCenter { env.invites }
     var account: AccountID { corpus.accounts[0].id }
 
-    func invitation() async throws -> (ThreadKey, MessageSummary) {
-        let rows = try await env.data.threadPage(.system(.inbox), account: account, after: nil, limit: 500).rows
+    func invitation(account: AccountID? = nil) async throws -> (ThreadKey, MessageSummary) {
+        let rows = try await env.data.threadPage(.system(.inbox), account: account ?? self.account, after: nil, limit: 500).rows
         for row in rows {
             for try await detail in env.data.threadDetail(row.id) {
                 if let message = detail?.messages.first(where: \.hasCalendarInvite) { return (row.id, message) }
@@ -153,6 +156,72 @@ private struct InviteFixture {
         #expect(f.center.heldCount == 0 && f.center.card(for: message.id)?.response == nil)
         #expect(try await f.inInbox(thread), "back in the Inbox")
         #expect(f.answered().isEmpty && !f.lookedUp(), "undone inside the window: nothing reached the calendar")
+    }
+
+    @Test func aHeldAnswerIsSentOnQuitAndASecondFlushSendsNothing() async throws {
+        let f = InviteFixture()
+        let (thread, message) = try await f.invitation()
+        let card = try await f.card(thread, message)
+        f.addInvitedEvent(card)
+        f.center.sleep = holdUntilCancelled
+        await f.center.respond(.accepted, to: message.id)
+        #expect(f.answered().isEmpty && f.center.hasQuitWork)
+        let held = f.center.heldTasks
+        await f.center.prepareForQuit()
+        for task in held { await task.value }
+        #expect(f.answered() == [.respond(id: "ev", response: .accepted, sendUpdates: .all)])
+        #expect(!f.center.hasQuitWork)
+        await f.center.prepareForQuit()
+        #expect(f.answered() == [.respond(id: "ev", response: .accepted, sendUpdates: .all)])
+    }
+
+    @Test func anUndoneAnswerIsNotSentOnQuit() async throws {
+        let f = InviteFixture()
+        let (thread, message) = try await f.invitation()
+        let card = try await f.card(thread, message)
+        f.addInvitedEvent(card)
+        f.center.sleep = holdUntilCancelled
+        await f.center.respond(.accepted, to: message.id)
+        let held = f.center.heldTasks
+        await f.env.undo?.undoLast()
+        for task in held { await task.value }
+        await f.center.prepareForQuit()
+        #expect(f.answered().isEmpty && !f.center.hasQuitWork)
+    }
+
+    @Test func twoHeldAnswersAreBothSentOnQuit() async throws {
+        let f = InviteFixture()
+        let (thread, message) = try await f.invitation()
+        let card = try await f.card(thread, message)
+        f.addInvitedEvent(card)
+        let (homeThread, homeMessage) = try await f.invitation(account: f.corpus.accounts[1].id)
+        #expect(homeMessage.id != message.id)
+        let homeCard = try await f.card(homeThread, homeMessage)
+        f.home.add(CalendarEvent(id: "home-ev", title: homeCard.title, start: homeCard.invite.start,
+                                 end: homeCard.invite.end, attendees: [FakeCorpus.personalMe],
+                                 organizerIsMe: false, myResponse: .needsAction))
+        f.home.setICalUID(homeCard.invite.uid, for: "home-ev")
+        f.center.sleep = holdUntilCancelled
+        await f.center.respond(.accepted, to: message.id)
+        await f.center.respond(.declined, to: homeMessage.id)
+        #expect(f.center.heldCount == 2 && f.center.hasQuitWork)
+        #expect(f.answered().isEmpty && !f.home.calls.contains { if case .respond = $0 { true } else { false } })
+        let held = f.center.heldTasks
+        await f.center.prepareForQuit()
+        for task in held { await task.value }
+        #expect(f.answered() == [.respond(id: "ev", response: .accepted, sendUpdates: .all)])
+        let homeAnswers = f.home.calls.filter { if case .respond = $0 { true } else { false } }
+        #expect(homeAnswers == [.respond(id: "home-ev", response: .declined, sendUpdates: .all)])
+        #expect(!f.center.hasQuitWork)
+    }
+
+    @Test func quittingWithNoHeldAnswersDoesNothingAndPostsNoNotice() async {
+        let f = InviteFixture()
+        #expect(!f.center.hasQuitWork)
+        #expect(f.env.notices.toasts.isEmpty)
+        await f.center.prepareForQuit()
+        #expect(!f.center.hasQuitWork && f.answered().isEmpty)
+        #expect(f.env.notices.toasts.isEmpty)
     }
 
     @Test func afterTheWindowTheEventIsFoundByUIDAndAnsweredWithTheOrganizerTold() async throws {
@@ -357,5 +426,131 @@ private struct InviteFixture {
             let descriptor = try #require(ActionCatalog.descriptor(id))
             #expect(descriptor.scopes == [.reader] && descriptor.effect == .external && descriptor.defaultBindings.count == 1)
         }
+    }
+
+    @Test func anEventMovedAfterTheInvitationIsFoundByItsUIDAndAnswered() async throws {
+        let f = InviteFixture()
+        let (thread, message) = try await f.invitation()
+        let card = try await f.card(thread, message)
+        let later = 2 * 86_400.0
+        f.calendar?.add(CalendarEvent(id: "ev", title: "Moved and renamed", start: card.invite.start.addingTimeInterval(later),
+                                      end: card.invite.end.addingTimeInterval(later), attendees: [FakeCorpus.me],
+                                      organizerIsMe: false, myResponse: .needsAction))
+        f.calendar?.setICalUID(card.invite.uid, for: "ev")
+        let gate = TestGate()
+        f.center.sleep = { _ in await gate.wait() }
+        await f.center.respond(.accepted, to: message.id)
+        await f.endWindows(gate)
+        #expect(f.answered() == [.respond(id: "ev", response: .accepted, sendUpdates: .all)],
+                "two days later and under a new title, its UID still names it")
+        #expect(f.env.notices.toasts.contains { $0.message.hasPrefix("Answered Yes") })
+    }
+
+    @Test func anEventFoundNowhereSaysWhereMailLookedAndOffersCalendar() async throws {
+        let f = InviteFixture()
+        let (thread, message) = try await f.invitation()
+        _ = try await f.card(thread, message)
+        let gate = TestGate()
+        f.center.sleep = { _ in await gate.wait() }
+        await f.center.respond(.accepted, to: message.id)
+        await f.endWindows(gate)
+        let toast = try #require(f.env.notices.toasts.first { $0.message.hasPrefix("Couldn't answer") })
+        #expect(toast.message.contains("couldn't find it on the calendar of \(f.corpus.accounts[0].email)"))
+        #expect(toast.message.contains("it may have moved") && !toast.message.contains("yet"))
+        #expect(toast.actionTitle == "Open in Calendar")
+        #expect(f.answered().isEmpty && f.center.card(for: message.id)?.response == nil)
+    }
+
+    @Test func anInvitationOnlyOnAnotherAccountsCalendarIsAnsweredThereByItsUIDOnly() async throws {
+        let homeAddress = FakeCorpus.personalMe.email
+        for withUID in [true, false] {
+            let f = InviteFixture()
+            let (thread, message) = try await f.invitation()
+            let text = try await f.original(message)
+            f.center.readFile = { _ in
+                text.replacingOccurrences(of: "ATTENDEE;CN=Sam Lee",
+                                          with: "ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:\(homeAddress)\r\nATTENDEE;CN=Sam Lee")
+            }
+            let card = try await f.card(thread, message)
+            #expect(card.isInvited && card.invite.attendees.contains { $0.email == homeAddress })
+            f.home.add(CalendarEvent(id: "home-ev", title: card.title, start: card.invite.start, end: card.invite.end,
+                                     attendees: [FakeCorpus.personalMe], organizerIsMe: false, myResponse: .needsAction))
+            if withUID { f.home.setICalUID(card.invite.uid, for: "home-ev") }
+            let gate = TestGate()
+            f.center.sleep = { _ in await gate.wait() }
+            await f.center.respond(.accepted, to: message.id)
+            await f.endWindows(gate)
+            #expect(f.answered().isEmpty, "nothing on the inbox's own calendar")
+            let answeredHome = f.home.calls.contains(.respond(id: "home-ev", response: .accepted, sendUpdates: .all))
+            if withUID {
+                #expect(answeredHome, "found on the other account's calendar by its UID")
+                let key = CalendarEventStore.key(for: f.home)
+                #expect(f.env.calendarEvents.record(key, id: "home-ev")?.event.myResponse == .accepted)
+            } else {
+                #expect(!answeredHome, "another calendar's look-alike is never answered")
+                #expect(f.env.notices.toasts.contains { $0.message.contains("couldn't find it") })
+            }
+        }
+    }
+
+    @Test func anAnswerToTheWholeSeriesShowsOnTheStoredOccurrencesAtOnce() async throws {
+        let f = InviteFixture()
+        let (thread, message) = try await f.invitation()
+        let text = try await f.original(message)
+        f.center.readFile = { _ in text.replacingOccurrences(of: "SEQUENCE:0", with: "SEQUENCE:0\r\nRRULE:FREQ=WEEKLY") }
+        let card = try await f.card(thread, message)
+        let calendar = try #require(f.calendar)
+        let length = card.invite.end.timeIntervalSince(card.invite.start)
+        var master = CalendarEvent(id: "s", title: card.title, start: card.invite.start, end: card.invite.end,
+                                   attendees: [FakeCorpus.me], organizerIsMe: false, myResponse: .needsAction)
+        master.extras.recurrence = ["RRULE:FREQ=WEEKLY"]
+        calendar.add(master)
+        for week in 0..<2 {
+            let start = card.invite.start.addingTimeInterval(Double(week) * 7 * 86_400)
+            calendar.add(CalendarEvent(id: "s_\(week)", title: card.title, start: start, end: start.addingTimeInterval(length),
+                                       attendees: [FakeCorpus.me], organizerIsMe: false, myResponse: .needsAction,
+                                       recurringEventID: "s"))
+        }
+        calendar.setICalUID(card.invite.uid, for: "s_0")
+        let key = CalendarEventStore.key(for: calendar)
+        let span = DateInterval(start: card.invite.start, end: card.invite.start.addingTimeInterval(8 * 86_400))
+        await f.env.calendarEvents.revalidate(key, provider: calendar, visible: span, today: fixedNow,
+                                               calendar: Calendar(identifier: .gregorian), now: fixedNow, force: true)
+        let gate = TestGate()
+        f.center.sleep = { _ in await gate.wait() }
+        await f.center.respond(.accepted, to: message.id, wholeSeries: true)
+        await f.endWindows(gate)
+        #expect(f.answered() == [.respond(id: "s", response: .accepted, sendUpdates: .all)])
+        let occurrences = (f.env.calendarEvents.events(key, from: span.start, to: span.end, includeDeclined: true) ?? [])
+            .filter { $0.recurringEventID == "s" }
+        #expect(occurrences.map(\.id) == ["s_0", "s_1"])
+        #expect(occurrences.allSatisfy { $0.myResponse == .accepted }, "shown before the next sync")
+    }
+
+    @Test func anInvitationSentToAnAliasIsAnsweredAsThatAddress() async throws {
+        let f = InviteFixture()
+        let (thread, message) = try await f.invitation()
+        let text = try await f.original(message)
+        let alias = "robin@team.example"
+        let mine = f.corpus.accounts[0].email
+        f.center.readFile = { _ in text.replacingOccurrences(of: "RSVP=TRUE:mailto:\(mine)", with: "RSVP=TRUE:mailto:\(alias)") }
+        let card = try await f.card(thread, message)
+        #expect(card.isInvited, "the alias is one of the account's send-as addresses")
+        var event = CalendarEvent(id: "ev", title: card.title, start: card.invite.start, end: card.invite.end,
+                                  attendees: [EmailAddress(name: nil, email: alias)])
+        event.extras.guests = [CalendarGuest(email: alias, response: .needsAction)]
+        f.calendar?.add(event)
+        f.calendar?.setICalUID(card.invite.uid, for: "ev")
+        let gate = TestGate()
+        f.center.sleep = { _ in await gate.wait() }
+        await f.center.respond(.tentative, to: message.id)
+        await f.endWindows(gate)
+        #expect(f.answered() == [.respond(id: "ev", response: .tentative, sendUpdates: .all)])
+        let stored = f.calendar?.allEvents.first { $0.id == "ev" }
+        #expect(stored?.myResponse == nil && stored?.extras.guests.first?.response == .tentative, "on the alias's own entry")
+        let key = CalendarEventStore.key(for: try #require(f.calendar))
+        let shown = f.env.calendarEvents.events(key, from: card.invite.start, to: card.invite.end, includeDeclined: true)?
+            .first { $0.id == "ev" }
+        #expect(shown?.myResponse == .tentative && shown?.respondsAs == alias)
     }
 }

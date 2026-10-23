@@ -57,6 +57,7 @@ extension ComposeManager {
             session.notice = ComposeSession.Notice(.warning, String(localized: "\(names) may still need filling in. Press ⌘↵ again to send anyway."))
             return
         }
+        if warnsBeforeSending(session, .send) { return }
         if await asksSendConfirmation(session, .send) { return }
         guard await session.save(force: true), let key = session.draftKey else {
             session.notice = ComposeSession.Notice(.error, String(localized: "Couldn't save the draft, so it wasn't sent."),
@@ -252,6 +253,28 @@ extension ComposeManager {
         }
     }
 
+    func warnsBeforeSending(_ session: ComposeSession, _ kind: ComposeSession.SendConfirmation.Kind) -> Bool {
+        guard environment.isLiveAccount else { return false }
+        if session.preSendChecked {
+            session.preSendChecked = false
+            return false
+        }
+        guard let warning = PreSendWarning(issues: session.preSendIssues, kind: kind) else { return false }
+        session.preSendWarning = warning
+        return true
+    }
+
+    public func confirmPreSendWarning(_ warning: PreSendWarning, in session: ComposeSession) {
+        session.preSendWarning = nil
+        session.preSendChecked = true
+        switch warning.kind {
+        case .send:
+            perform(.send, in: session, source: .keyboard)
+        case .schedule(let date):
+            track(Task { [weak self] in await self?.schedule(session, at: date) })
+        }
+    }
+
     func sendLater(_ session: ComposeSession) -> ActionPerformance {
         guard session.isOpen else { return .notHandled }
         guard canSend else {
@@ -264,6 +287,7 @@ extension ComposeManager {
             return .done
         }
         environment.overlays.presentSendLater(draftTargets: session.thread.map { [$0] } ?? [],
+                                              condition: session.sendAt == nil ? .always : session.sendCondition,
                                               scheduleWithCondition: { [weak self] date, condition in
             guard let self else { return }
             self.track(Task { await self.schedule(session, at: date, condition: condition) })
@@ -287,6 +311,16 @@ extension ComposeManager {
             session.notice = ComposeSession.Notice(.error, Self.tooSoonText)
             return
         }
+        if session.linkRecipients != nil, !session.linkConfirmed {
+            session.linkScheduleDate = date
+            session.linkScheduleCondition = condition
+            session.isLinkConfirmationShown = true
+            return
+        }
+        if warnsBeforeSending(session, .schedule(date)) {
+            pendingSendConditions[session.id] = condition
+            return
+        }
         if await asksSendConfirmation(session, .schedule(date)) {
             pendingSendConditions[session.id] = condition
             return
@@ -298,6 +332,7 @@ extension ComposeManager {
             return
         }
         let previous = session.sendAt
+        let previousCondition = session.sendCondition
         do {
             if condition == .always {
                 try await commands.scheduleSend(key, at: date)
@@ -314,11 +349,23 @@ extension ComposeManager {
         addSending(session, draft: key, state: .scheduled(at: date))
         let when = formatSendAt(date) + (condition == .ifNoReply ? Self.ifNoReplySuffix : "")
         if let previous {
-            push("Rescheduled for \(when)", .reschedule(draft: key.rawValue, to: previous), view: session.id)
+            push("Rescheduled for \(when)", .reschedule(draft: key.rawValue, to: previous, condition: previousCondition),
+                 view: session.id)
         } else {
             push("Scheduled for \(when)", .schedule(session: session.id, draft: key.rawValue), view: session.id)
         }
         setPendingReminderOnSchedule(session)
+    }
+
+    public func confirmLinkRecipients(in session: ComposeSession) {
+        session.confirmLinkRecipients()
+        guard let date = session.linkScheduleDate else {
+            perform(.send, in: session, source: .keyboard)
+            return
+        }
+        let condition = session.linkScheduleCondition
+        session.linkScheduleDate = nil
+        track(Task { [weak self] in await self?.schedule(session, at: date, condition: condition) })
     }
 
     private func bringBack(_ session: ComposeSession, _ text: String) {
@@ -331,11 +378,12 @@ extension ComposeManager {
         guard let key = session.draftKey, let at = session.sendAt, let commands = environment.commands else {
             return .notHandled
         }
+        let condition = session.sendCondition
         return .started(Task { [weak self] in
             do {
                 try await commands.cancelScheduledSend(key)
                 self?.forgetSending(draft: key)
-                self?.push("Send later canceled", .reschedule(draft: key.rawValue, to: at))
+                self?.push("Send later canceled", .reschedule(draft: key.rawValue, to: at, condition: condition))
             } catch {
                 let detail = (error as? MailPortError)?.description ?? String(localized: "Try again.")
                 session.notice = ComposeSession.Notice(.error, String(localized: "Couldn't cancel. \(detail)"))
@@ -352,13 +400,17 @@ extension ComposeManager {
         }
     }
 
-    func restoreSchedule(draft: DraftKey, at date: Date) async throws {
+    func restoreSchedule(draft: DraftKey, at date: Date, condition: SendLaterCondition = .always) async throws {
         guard date.timeIntervalSince(timing.now()) >= Self.restoreLead else {
             environment.notices.post(String(localized: "That time has passed, so the earlier schedule wasn't restored."),
                                      style: .info)
             return
         }
-        try await environment.commands?.scheduleSend(draft, at: date)
+        if condition == .always {
+            try await environment.commands?.scheduleSend(draft, at: date)
+        } else {
+            try await environment.commands?.scheduleSend(draft, at: date, condition: condition)
+        }
         if let index = sending.lastIndex(where: { $0.draft == draft }), case .scheduled = sending[index].state {
             sending[index].state = .scheduled(at: date)
         }
@@ -384,7 +436,8 @@ extension ComposeManager {
             do {
                 try await commands.cancelScheduledSend(row.id)
                 self.forgetSending(draft: row.id)
-                self.push("Send later canceled", .reschedule(draft: row.id.rawValue, to: at), threads: [thread])
+                self.push("Send later canceled", .reschedule(draft: row.id.rawValue, to: at, condition: row.sendCondition),
+                          threads: [thread])
             } catch {
                 let detail = (error as? MailPortError)?.description ?? String(localized: "Try again.")
                 self.environment.notices.post(String(localized: "Couldn't cancel the scheduled send. \(detail)"),
@@ -417,14 +470,20 @@ extension ComposeManager {
                 return
             }
             let draft = row.id
-            self.environment.overlays.presentSendLater(draftTargets: [thread]) { [weak self] date in
+            let current = row.sendCondition
+            self.environment.overlays.presentSendLater(draftTargets: [thread], condition: current,
+                                                       scheduleWithCondition: { [weak self] date, condition in
                 guard let self else { return }
-                self.track(Task { await self.reschedule(draft, at: date, previous: previous, thread: thread) })
-            }
+                self.track(Task {
+                    await self.reschedule(draft, at: date, condition: condition, previous: previous,
+                                          previousCondition: current, thread: thread)
+                })
+            })
         })
     }
 
-    func reschedule(_ key: DraftKey, at date: Date, previous: Date, thread: ThreadKey?) async {
+    func reschedule(_ key: DraftKey, at date: Date, condition: SendLaterCondition = .always, previous: Date,
+                    previousCondition: SendLaterCondition = .always, thread: ThreadKey?) async {
         guard canSend, let commands = environment.commands else {
             refuseRowAction(.rescheduleSend)
             return
@@ -434,13 +493,18 @@ extension ComposeManager {
             return
         }
         do {
-            try await commands.scheduleSend(key, at: date)
+            if condition == .always {
+                try await commands.scheduleSend(key, at: date)
+            } else {
+                try await commands.scheduleSend(key, at: date, condition: condition)
+            }
         } catch {
             let detail = (error as? MailPortError)?.description ?? String(localized: "Try again.")
             environment.notices.post(String(localized: "Couldn't reschedule. \(detail)"), style: .error)
             return
         }
-        push("Rescheduled for \(formatSendAt(date))", .reschedule(draft: key.rawValue, to: previous),
+        let when = formatSendAt(date) + (condition == .ifNoReply ? Self.ifNoReplySuffix : "")
+        push("Rescheduled for \(when)", .reschedule(draft: key.rawValue, to: previous, condition: previousCondition),
              threads: thread.map { [$0] } ?? [])
     }
 
@@ -548,7 +612,7 @@ extension ComposeManager {
 enum ComposeUndoAction: Codable, Sendable {
     case send(session: UUID, token: SendToken)
     case schedule(session: UUID, draft: String)
-    case reschedule(draft: String, to: Date)
+    case reschedule(draft: String, to: Date, condition: SendLaterCondition)
     case discard(session: UUID)
 }
 
@@ -571,7 +635,8 @@ final class ComposeUndoer: MailUndoing {
         switch action {
         case .send(let session, let token): try await manager.undoSend(session: session, token: token)
         case .schedule(let session, let draft): try await manager.undoSchedule(session: session, draft: DraftKey(draft))
-        case .reschedule(let draft, let date): try await manager.restoreSchedule(draft: DraftKey(draft), at: date)
+        case .reschedule(let draft, let date, let condition):
+            try await manager.restoreSchedule(draft: DraftKey(draft), at: date, condition: condition)
         case .discard(let session): try await manager.undoDiscard(session: session)
         }
     }

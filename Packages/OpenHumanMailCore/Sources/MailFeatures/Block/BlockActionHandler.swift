@@ -48,13 +48,28 @@ final class BlockActionHandler: ActionHandler {
         }
         guard let rule else { return .notHandled }
         let place = BlockedPlace(router: request.router, advances: request.source != .intent)
+        let sender = c.sender
         return .started(Task { [weak self] in
-            await self?.begin(rule, account: account, thread: thread, place: place)
+            guard let self, let chosen = await self.choose(rule, sender: sender) else { return }
+            await self.begin(chosen.rule, account: account, thread: thread, place: place,
+                             allowingCommonDomain: chosen.wholeDomain)
         })
     }
 
+    func choose(_ rule: BlockRule, sender: String?) async -> (rule: BlockRule, wholeDomain: Bool)? {
+        guard rule.kind == .domain, let environment else { return (rule, false) }
+        let address = sender.flatMap(BlockMatcher.normalizedAddress)
+        switch await DomainWideRules.resolve(domain: rule.value, address: address, effect: .block,
+                                             ask: environment.domainWideRuleAsking) {
+        case .entireDomain?: return (rule, true)
+        case .thisAddressOnly(let address)?:
+            return BlockRule(kind: .sender, value: address, createdAt: rule.createdAt).map { (rule: $0, wholeDomain: false) }
+        case nil: return nil
+        }
+    }
 
-    func begin(_ rule: BlockRule, account: AccountID, thread: ThreadKey, place: BlockedPlace) async {
+    func begin(_ rule: BlockRule, account: AccountID, thread: ThreadKey, place: BlockedPlace,
+               allowingCommonDomain: Bool = false) async {
         guard let environment, let center else { return }
         if await center.rules(account).contains(where: { $0.id == rule.id }) {
             environment.notices.post("Already blocked: \(rule.value)", style: .info, duration: NoticeCenter.infoDuration)
@@ -64,16 +79,18 @@ final class BlockActionHandler: ActionHandler {
             environment.notices.postChoice(
                 "You've written to \(rule.value). Block it anyway?",
                 NoticeCenter.Choice("Block anyway") { [weak self] in
-                    await self?.commit(rule, account: account, thread: thread, place: place)
+                    await self?.commit(rule, account: account, thread: thread, place: place,
+                                       allowingCommonDomain: allowingCommonDomain)
                 },
                 NoticeCenter.Choice("Cancel") {},
                 duration: nil)
             return
         }
-        await commit(rule, account: account, thread: thread, place: place)
+        await commit(rule, account: account, thread: thread, place: place, allowingCommonDomain: allowingCommonDomain)
     }
 
-    func commit(_ rule: BlockRule, account: AccountID, thread: ThreadKey, place: BlockedPlace) async {
+    func commit(_ rule: BlockRule, account: AccountID, thread: ThreadKey, place: BlockedPlace,
+                allowingCommonDomain: Bool = false) async {
         guard let environment, let center, let undoer, let undo = environment.undo,
               let commands = environment.commands else { return }
         let fallback = await center.defaultDisposition()
@@ -84,7 +101,7 @@ final class BlockActionHandler: ActionHandler {
         do {
             entry = try await undo.perform("Blocked \(rule.value)", threads: [thread], via: undoer,
                                            reopens: hidden.reopens) {
-                let ruleToken = try await center.add(rule, account: account)
+                let ruleToken = try await center.add(rule, account: account, allowingCommonDomain: allowingCommonDomain)
                 do {
                     let moved = try await commands.apply(move)
                     return undoer.begin(rule: ruleToken, moved: moved)

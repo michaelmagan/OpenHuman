@@ -1,6 +1,7 @@
 import Foundation
 import MailFakes
 import MailModel
+import OpenHumanCore
 
 public struct SystemPlatform {
     public var notifier: any SystemNotifying
@@ -19,6 +20,8 @@ public struct SystemPlatform {
     public var chooseDiagnosticsFile: @MainActor (_ suggestedName: String) -> URL?
     public var confirmConversationDebug: @MainActor () -> ConversationDebugOptions? = { ConversationDebugOptions() }
     public var chooseConversationDebugFile: @MainActor (_ suggestedName: String) -> URL? = { _ in nil }
+    // Without a window to ask in, a rule for a whole common domain is never made
+    public var confirmDomainWideRule: @MainActor (DomainWideRuleConfirmation) async -> DomainWideRuleChoice = { _ in .cancel }
     public var copyToClipboard: @MainActor (_ text: String) -> Void = { _ in }
     public var openNotificationSettings: @MainActor () -> Void
     // True while the user is mid-task in Mail, so a Focus change never moves the window under them

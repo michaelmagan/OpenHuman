@@ -64,7 +64,7 @@ public final class LiveAccountManager: AccountManaging {
 
     struct SessionLink: Sendable {
         let engine: MailEngine
-        let forgetInWindow: @MainActor @Sendable (AccountID) async -> Void
+        let forgetInWindow: @MainActor @Sendable (_ account: AccountID, _ email: String) async -> Void
         let removed: @MainActor @Sendable (AccountID) async -> Void
     }
 
@@ -689,7 +689,7 @@ public final class LiveAccountManager: AccountManaging {
             Log(.oauth).error("account \(account.rawValue): sign-out failed (\(String(describing: type(of: error))))")
             throw AccountSetupError(.failed, "Mail couldn't remove this account from this Mac. Try again.")
         }
-        if let session { await session.forgetInWindow(account) }
+        if let session { await session.forgetInWindow(account, item.email) }
         Log(.oauth).notice("account \(account.rawValue): signed out; local data removed, nothing changed in Gmail")
         if let session { await session.removed(account) }
     }

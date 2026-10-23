@@ -51,6 +51,21 @@ public struct BulkArchiveReceipt: Sendable, Hashable, Codable {
 
 public enum RemoteImagePolicy: String, Sendable, Hashable, Codable, CaseIterable { case block, ask, allow }
 
+public enum InlineImageSize: String, Sendable, Hashable, Codable, CaseIterable {
+    case small, medium, large, original
+
+    public static let pastedDefault = InlineImageSize.medium
+
+    public var title: String {
+        switch self {
+        case .small: "Small"
+        case .medium: "Medium"
+        case .large: "Large"
+        case .original: "Original"
+        }
+    }
+}
+
 public enum AppSettings {
     public static let undoSendSeconds = AppSettingKey(name: "undo_send_seconds", defaultValue: 10)
     public static let undoSendSecondsRange = 0...60

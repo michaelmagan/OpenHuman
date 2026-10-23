@@ -213,6 +213,176 @@ private struct GapsFixture {
 }
 
 @MainActor
+@Suite struct CalendarPickedTimeTests {
+    @Test func aClickedTimeOpensTheCalendarOnItsDayAsABlockAndDraftsNothing() async throws {
+        let f = GapsFixture(events: [CalendarEvent(id: "e14", title: "Standup", start: on(10, 14, 15),
+                                                   end: on(10, 14, 15, 30))])
+        let model = f.sidebar(f.text(["Can we meet on October 14, 2026 at 3:00 PM?"]))
+        let mention = CalendarDateMention(date: on(10, 14, 15), hasTime: true, duration: 3_600)
+        await model.reveal(mention, in: f.thread)
+        #expect(model.isVisible && model.draft == nil && model.thread == f.thread)
+        #expect(model.pickedTime?.start == on(10, 14, 15) && model.pickedTime?.end == on(10, 14, 16))
+        #expect(model.showsPickedTime && model.days.map(\.start) == [on(10, 14)])
+        let day = try #require(model.dayViewDay)
+        #expect(model.timeline(for: day).conflicts.map(\.id) == ["e14"], "the block shows what it overlaps")
+        await model.moveDay(by: 1)
+        #expect(model.days.map(\.start) == [on(10, 15)] && !model.showsPickedTime, "the block stays on its own day")
+        await model.moveDay(by: -1)
+        #expect(model.showsPickedTime)
+        await model.show(thread: f.thread)
+        #expect(model.days.map(\.start) == [on(10, 14)] && model.showsPickedTime, "the same conversation keeps it")
+
+        await model.createEventAtPickedTime()
+        let draft = try #require(model.draft)
+        #expect(draft.start == on(10, 14, 15) && draft.end == on(10, 14, 16))
+        #expect(!model.showsPickedTime, "the form takes over from the block")
+        model.cancelDraft()
+        #expect(model.draft == nil && model.showsPickedTime, "cancelling goes back to the block")
+        #expect(f.calendar.createCalls == 0)
+    }
+
+    @Test func anotherConversationOrHidingTheCalendarDropsTheBlockAndAnOpenFormMovesInstead() async throws {
+        let f = GapsFixture()
+        let model = f.sidebar(f.text(["Lunch on October 13, 2026?"]))
+        let lunch = CalendarDateMention(date: on(10, 13, 12), hasTime: true)
+        await model.reveal(lunch, in: f.thread)
+        #expect(model.pickedTime != nil)
+        await model.show(thread: f.corpus.threads[1].row.id)
+        #expect(model.pickedTime == nil && !model.showsPickedTime)
+
+        await model.reveal(lunch, in: f.thread)
+        model.setVisible(false)
+        #expect(model.pickedTime == nil)
+
+        await model.beginDraft(for: f.thread)
+        await model.reveal(CalendarDateMention(date: on(10, 16, 14), hasTime: true), in: f.thread)
+        #expect(model.pickedTime == nil && model.draft?.start == on(10, 16, 14), "an open form follows the click")
+        model.cancelDraft()
+        #expect(f.calendar.createCalls == 0)
+    }
+
+    @Test func aTimeInADraftShowsAsABlockFirstAndItsEventBelongsToTheDraft() async throws {
+        let f = GapsFixture(events: [CalendarEvent(id: "e15", title: "Review", start: on(10, 15, 10), end: on(10, 15, 11))])
+        let model = f.sidebar()
+        f.env.router.start()
+        await eventually { f.env.router.active != nil }
+        let session = try #require(f.env.compose.openNew(placement: .modal))
+        let mention = CalendarDateMention(date: on(10, 15, 11), hasTime: true, duration: 1_800)
+        f.env.compose.openEvent(at: mention, from: session)
+        await eventually { model.showsPickedTime }
+        #expect(model.isVisible && model.draft == nil, "the calendar opens on the day; no form yet")
+        #expect(model.pickedTime?.key == .draft(session.id) && model.pickedTime?.thread == nil)
+        #expect(model.days.map(\.start) == [on(10, 15)])
+
+        await model.createEventAtPickedTime()
+        let draft = try #require(model.draft)
+        #expect(draft.start == on(10, 15, 11) && draft.end == on(10, 15, 11, 30))
+        #expect(model.draftKey == .draft(session.id), "the event is the draft's, not the conversation's")
+        await model.reveal(CalendarDateMention(date: on(10, 16, 9), hasTime: true), in: nil, key: .draft(session.id))
+        #expect(model.draft?.start == on(10, 16, 9), "with the draft's form open, a click moves the form")
+        model.cancelDraft()
+        #expect(f.calendar.createCalls == 0)
+    }
+}
+
+@MainActor
+@Suite struct CalendarSuggestedTimesFollowTheDraftTests {
+    private let mondayMorning = CalendarEvent(id: "busy", title: "Standup", start: on(10, 12, 9), end: on(10, 12, 12))
+
+    private func composer(_ f: GapsFixture) async throws -> (ComposeSession, FakeEditor) {
+        f.env.router.start()
+        await eventually { f.env.router.active != nil }
+        let session = try #require(f.env.compose.openNew(placement: .modal))
+        return (session, FakeEditor(session: session, text: "Hi Sam,\n\n", selection: nil))
+    }
+
+    @Test func insertedTimesAreReplacedInPlaceAndRemovedAsOneEditEach() async throws {
+        let f = GapsFixture(events: [mondayMorning])
+        let model = f.sidebar()
+        let (session, editor) = try await composer(f)
+        #expect(await model.insertAvailability(into: session))
+        let block = try #require(model.insertedAvailability?.text)
+        #expect(editor.text == "Hi Sam,\n\n" + block && model.hasInsertedAvailability(in: session))
+        let reads = f.calendar.calls.count
+        #expect(await model.insertAvailability(into: session))
+        #expect(f.calendar.calls.count == reads, "the times shown are still fresh, so they go in as they are")
+        #expect(editor.text == "Hi Sam,\n\n" + block, "a second insert replaces the first block")
+        #expect(model.removeInsertedAvailability(from: session))
+        #expect(editor.text == "Hi Sam,\n\n" && !model.hasInsertedAvailability(in: session))
+        #expect(editor.replacements.count == 3, "insert, replace and remove are one edit each")
+        #expect(!model.removeInsertedAvailability(from: session), "nothing left to remove")
+        #expect(f.calendar.createCalls == 0)
+    }
+
+    @Test func editedTimesAreLeftAloneWithANote() async throws {
+        let f = GapsFixture(events: [mondayMorning])
+        let model = f.sidebar()
+        let (session, editor) = try await composer(f)
+        #expect(await model.insertAvailability(into: session))
+        editor.text = "Hi Sam,\n\nHow about Monday?"
+        #expect(!model.removeInsertedAvailability(from: session))
+        #expect(editor.text == "Hi Sam,\n\nHow about Monday?")
+        #expect(session.notice?.text == CalendarSidebarModel.timesWereEdited)
+    }
+
+    @Test func newRecipientsAnotherDraftOrANewDayMakeTheTimesStale() async throws {
+        let f = GapsFixture(events: [mondayMorning])
+        let model = f.sidebar()
+        let (session, _) = try await composer(f)
+        let before = model.availabilityContext(for: session)
+        #expect(await model.suggestTimes(for: before) != nil)
+        #expect(model.staleReason(for: before) == nil)
+        session.to.setTokens([EmailAddress(name: "Sam Lee", email: "sam@example.org")])
+        let after = model.availabilityContext(for: session)
+        #expect(model.staleReason(for: after) == .recipients)
+        #expect(model.staleReason(for: model.availabilityContext(for: nil)) != nil, "no draft open: another state")
+        model.now = { on(10, 13, 9) }
+        #expect(model.availabilityContext(for: session).firstDay == on(10, 13))
+        #expect(model.staleReason(for: model.availabilityContext(for: session)) == .recipients)
+        #expect(await model.suggestTimes(for: model.availabilityContext(for: session)) != nil)
+        #expect(model.staleReason(for: model.availabilityContext(for: session)) == nil, "found again for the new state")
+        model.clearSuggestion()
+        #expect(model.suggestion == nil && model.staleReason(for: after) == nil)
+    }
+
+    @Test func anotherConversationClearsTheTimesAndTheSameOneKeepsThem() async throws {
+        let f = GapsFixture(events: [mondayMorning])
+        let model = f.sidebar(f.text(["Lunch on October 13, 2026?"]))
+        await model.show(thread: f.thread)
+        let here = model.availabilityContext(for: nil)
+        #expect(await model.suggestTimes(for: here) != nil)
+        await model.show(thread: f.thread)
+        #expect(model.suggestion != nil, "the same conversation keeps its times")
+
+        let other = f.corpus.threads[1].row.id
+        let there = CalendarSidebarModel.AvailabilityContext(account: other.account, thread: other, draft: nil,
+                                                              recipients: [], firstDay: here.firstDay)
+        #expect(model.isForAnotherConversation(there) && model.staleReason(for: there) == nil, "not dimmed: cleared")
+        await model.show(thread: other)
+        #expect(model.suggestion == nil && model.suggestionNote == nil && model.suggestionContext == nil)
+
+        await model.show(thread: f.thread)
+        #expect(model.suggestion == nil, "coming back does not bring them back")
+        #expect(await model.suggestTimes(for: model.availabilityContext(for: nil)) != nil)
+        await model.followAvailability(there)
+        #expect(model.suggestion == nil, "a composer for another conversation clears them too")
+        #expect(f.calendar.createCalls == 0)
+    }
+
+    @Test func otherTimesSkipTheOnesShown() async throws {
+        let f = GapsFixture(events: [mondayMorning])
+        let model = f.sidebar()
+        let context = model.availabilityContext(for: nil)
+        let first = try #require(await model.suggestTimes(for: context))
+        let second = try #require(await model.suggestTimes(for: context, others: true))
+        #expect(Set(first.slots).isDisjoint(with: second.slots))
+        #expect(second.slots.map(\.start) == [on(10, 12, 12, 30), on(10, 13, 9, 30), on(10, 14, 9, 30)])
+        let again = try #require(await model.suggestTimes(for: context))
+        #expect(again.slots == first.slots, "a plain request starts over")
+    }
+}
+
+@MainActor
 @Suite struct AskCalendarEventsTests {
     @Test func aQuestionAboutMeetingsReadsTheCalendarAsExcerptsInsideEmailData() async throws {
         let provider = ScriptedProvider(capabilities: .fake(contextTokens: 32_000))

@@ -74,6 +74,72 @@ import Testing
         await engine.stop()
     }
 
+    @Test func aForwardCarriesTheOriginalFilesAndTheQuoteIntoTheSentMessage() async throws {
+        let h = try await EngineHarness(onDisk: true)
+        defer { h.cleanup() }
+        let pdf = Data("%PDF-1.4 synthetic forwarded document".utf8)
+        let delivered = await h.gmail.deliver(
+            from: "Carol Example <carol@example.com>", subject: "Quarterly report", body: "Synthetic report body.",
+            html: "<p>Synthetic report body.</p><img src=\"cid:chart-1\">",
+            attachments: [FakeGmailAttachment(filename: "report.pdf", mimeType: "application/pdf", data: pdf),
+                          FakeGmailAttachment(filename: "chart.png", mimeType: "image/png", data: FakeGmailAttachment.tinyPNG,
+                                              contentID: "chart-1")])
+        let engine = h.engine()
+        await engine.start()
+        try await h.waitForSyncs(engine)
+        let original = GmailMessageID(delivered.messageID)
+        let initial = DraftContent(to: [EmailAddress(email: "dave@example.com")], cc: [], bcc: [], subject: "",
+                                   bodyHTML: "", attachments: [])
+        let created = try await engine.newDraft(account: h.account, mode: .forward, replyTo: original, origin: .user,
+                                                initial: initial)
+        let draft = try #require(try h.store.draft(created.id))
+        let file = try #require(try h.store.message(account: h.account, gmailMessageID: original)?
+            .attachments.first { $0.filename == "report.pdf" })
+        #expect(draft.content.subject == "Fwd: Quarterly report")
+        #expect(draft.content.attachments == [DraftAttachment(sourceAttachmentID: file.id, filename: "report.pdf",
+                                                              mimeType: file.mimeType, size: file.size, isInline: false)],
+                "the file comes along; the chart the quoted body shows stays part of the quote")
+        #expect(occurrences("data-oh-quote", in: draft.content.bodyHTML) == 1)
+        #expect(draft.content.bodyHTML.contains("Forwarded message") && draft.content.bodyHTML.contains("Synthetic report body."))
+        #expect(draft.content.bodyText?.contains("Synthetic report body.") == true)
+
+        let preview = try #require(try DraftSkeleton.content(store: h.store, account: h.account, mode: .forward,
+                                                             replyTo: original))
+        #expect(preview.attachments == draft.content.attachments)
+        let reply = try #require(try DraftSkeleton.content(store: h.store, account: h.account, mode: .reply,
+                                                           replyTo: original))
+        #expect(reply.attachments.isEmpty, "a reply leaves the files out")
+
+        let outgoing = try await DrainContext(account: h.account, store: h.store, api: h.gmail, clock: h.clock)
+            .message(for: draft)
+        let raw = String(decoding: try outgoing.raw(forSend: true), as: UTF8.self)
+        #expect(raw.contains("multipart/mixed") && raw.contains("report.pdf"))
+        #expect(raw.contains(pdf.base64EncodedString()), "the file is fetched from the original message")
+        await engine.stop()
+    }
+
+    @Test func forwardedFilesLeaveOutPartsTheQuoteShowsAndAreAddedOnce() {
+        let shown = AttachmentItem(id: 7, messageRowID: MessageRowID(rawValue: 1), partID: "1", filename: "logo.png",
+                                   mimeType: "image/png", size: 10, contentID: "logo", isInline: true)
+        let inlinePDF = AttachmentItem(id: 8, messageRowID: MessageRowID(rawValue: 1), partID: "2", filename: "plan.pdf",
+                                       mimeType: "application/pdf", size: 20, isInline: true)
+        let unshown = AttachmentItem(id: 9, messageRowID: MessageRowID(rawValue: 1), partID: "3", filename: "map.png",
+                                     mimeType: "image/png", size: 30, contentID: "map", isInline: true)
+        let files = DraftSkeleton.forwardedAttachments([shown, inlinePDF, unshown], html: "<img src=\"CID:logo\">")
+        #expect(files.map(\.sourceAttachmentID) == [8, 9], "only a part the HTML shows stays out")
+        #expect(files.allSatisfy { !$0.isInline && $0.contentID == nil })
+        #expect(DraftSkeleton.forwardedAttachments([shown], html: nil).map(\.sourceAttachmentID) == [7])
+
+        let skeleton = ReplySkeleton(to: [], cc: [], subject: "Fwd: x", inReplyTo: nil, references: [],
+                                     quotedHTML: ComposeSupport.quoteMarker + "q</div>", quotedText: "q", gmailThreadID: nil)
+        let own = DraftAttachment(localPath: "Drafts/d/a.txt", filename: "a.txt", mimeType: "text/plain", size: 1,
+                                  isInline: false)
+        let initial = DraftContent(to: [], cc: [], bcc: [], subject: "", bodyHTML: "", attachments: [own, files[0]])
+        let merged = ComposeSupport.merge(initial, skeleton, forwarded: files)
+        #expect(merged.attachments == [own, files[0], files[1]])
+        #expect(ComposeSupport.merge(nil, nil, forwarded: files).attachments.isEmpty)
+    }
+
     @Test func remoteSavesAreDebouncedFiveSecondsAndFlushedAtOnce() async throws {
         let h = try await EngineHarness()
         let engine = h.engine()
@@ -100,6 +166,33 @@ import Testing
         let other = try await engine.newDraft(account: h.account, mode: .new, replyTo: nil, origin: .user)
         try await engine.flushDraft(other.id)
         #expect(try uploads(h, other.id).count == 1)
+        await engine.stop()
+    }
+
+    @Test func aSaveWithUnchangedContentSchedulesNoUpload() async throws {
+        let h = try await EngineHarness()
+        let engine = h.engine()
+        await engine.start()
+        try await h.waitForSyncs(engine)
+        let created = try await engine.newDraft(account: h.account, mode: .new, replyTo: nil, origin: .user,
+                                                initial: DraftContent(to: [EmailAddress(email: "bob@example.invalid")],
+                                                                      cc: [], bcc: [], subject: "Hello", bodyHTML: "",
+                                                                      attachments: []))
+        var content = try #require(try h.store.draft(created.id)).content
+        content.bodyHTML = "<p>Hi</p>"
+        #expect(try await engine.saveDraft(created.id, content: content, expectedVersion: nil) == 2)
+        h.clock.advance(by: .seconds(5))
+        try await eventually("uploaded") { try uploads(h, created.id).first?.status == .succeeded }
+
+        let saved = try #require(try h.store.draft(created.id))
+        #expect(!saved.isDirty)
+        let debouncer = try #require(await engine.draftDebouncer)
+        #expect(try await engine.saveDraft(created.id, content: saved.content, expectedVersion: nil) == saved.localVersion)
+        #expect(try await engine.saveDraft(created.id, content: saved.content, expectedVersion: saved.localVersion)
+                == saved.localVersion)
+        #expect(await debouncer.pending.isEmpty, "an unchanged save starts no upload timer")
+        #expect(try uploads(h, created.id).count == 1)
+        #expect(try #require(try h.store.draft(created.id)).localVersion == saved.localVersion)
         await engine.stop()
     }
 

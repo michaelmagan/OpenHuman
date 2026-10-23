@@ -263,6 +263,14 @@ public struct CSSSanitizer {
     private static let filterProperties: Set<String> = ["filter", "-webkit-filter", "backdrop-filter", "-webkit-backdrop-filter"]
     private static let absoluteUnits: Set<String> = ["px", "pt", "pc", "in", "cm", "mm", "q"]
 
+    // Lengths that follow the viewport's height are given at a fixed one. Why: the reader's viewport is as tall as the
+    // message, so `height: 100vh` with anything below it makes the message taller on every layout, without end.
+    // Container units are here too: without a sized container they follow the viewport.
+    static let fixedViewportHeight = 600.0
+    private static let viewportHeightUnits: Set<String> = ["vh", "svh", "lvh", "dvh", "vb", "svb", "lvb", "dvb", "cqh", "cqb"]
+    private static let viewportMinUnits: Set<String> = ["vmin", "svmin", "lvmin", "dvmin", "cqmin"]
+    private static let viewportMaxUnits: Set<String> = ["vmax", "svmax", "lvmax", "dvmax", "cqmax"]
+
     private mutating func sanitizedDeclarations(_ components: [CSSComponent]) -> [CSSDeclaration] {
         var out: [CSSDeclaration] = []
         var current: [CSSComponent] = []
@@ -335,7 +343,11 @@ public struct CSSSanitizer {
             case .token(.dimension(let n, let unit)):
                 guard let v = Double(n) else { return c }
                 let limit = Self.absoluteUnits.contains(unit.lowercased()) ? 10_000.0 : 1_000.0
-                guard !v.isFinite || abs(v) > limit else { return c }
+                let inRange = v.isFinite && abs(v) <= limit
+                if let fixed = Self.atFixedViewport(inRange ? v : (v.isFinite && v < 0 ? -limit : limit), unit: unit) {
+                    return fixed
+                }
+                guard !inRange else { return c }
                 return .token(.dimension(Self.number(v.isFinite ? (v < 0 ? -limit : limit) : limit), unit: unit))
             case .token(.percentage(let n)):
                 guard let v = Double(n), !v.isFinite || abs(v) > 10_000 else { return c }
@@ -354,6 +366,21 @@ public struct CSSSanitizer {
     }
 
     private static func number(_ v: Double) -> String { String(Int(v)) }
+
+    static func atFixedViewport(_ v: Double, unit: String) -> CSSComponent? {
+        let lower = unit.lowercased()
+        let height = CSSToken.dimension(decimal(v * fixedViewportHeight / 100), unit: "px")
+        if viewportHeightUnits.contains(lower) { return .token(height) }
+        let isMin = viewportMinUnits.contains(lower)
+        guard isMin || viewportMaxUnits.contains(lower) else { return nil }
+        let width = CSSToken.dimension(decimal(v), unit: lower.hasPrefix("cq") ? "cqi" : "vw")
+        return .function(isMin ? "min" : "max", [.token(width), .token(.comma), .token(height)])
+    }
+
+    private static func decimal(_ v: Double) -> String {
+        let rounded = (v * 100).rounded() / 100
+        return rounded == rounded.rounded() ? String(Int(rounded)) : String(rounded)
+    }
 
     private mutating func rewriteURLs(_ components: [CSSComponent]) -> [CSSComponent]? {
         var out: [CSSComponent] = []

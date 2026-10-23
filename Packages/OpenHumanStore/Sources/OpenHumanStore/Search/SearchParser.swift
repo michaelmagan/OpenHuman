@@ -323,7 +323,9 @@ enum SearchOperators {
         case "smaller": return .smaller(try size(value, position: position))
         case "size":
             let n = try size(value, position: position)
-            return .and([.larger(n - 1), .smaller(n + 1)])
+            let (above, overflow) = n.addingReportingOverflow(1)
+            guard !overflow else { throw StoreError.invalidQuery("invalid size \(value)", position: position) }
+            return .and([.larger(n - 1), .smaller(above)])
         default: return nil
         }
     }
@@ -366,7 +368,9 @@ enum SearchOperators {
             digits.removeLast()
         }
         guard !digits.isEmpty, digits.count <= 10, digits.allSatisfy(\.isASCIIDigit), let n = Int(digits) else { throw bad }
-        return n * factor
+        let (bytes, overflow) = n.multipliedReportingOverflow(by: factor)
+        guard !overflow else { throw bad }
+        return bytes
     }
 }
 

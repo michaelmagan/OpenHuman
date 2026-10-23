@@ -13,6 +13,8 @@ public final class CalendarGuardTransport: HTTPTransport {
     public static let removalRuleValue = "organizer"
     public static let editRuleHeader = "X-OpenHuman-Calendar-Edit"
     public static let editRuleValue = "form"
+    // Names the account's other address an answer is given as, when the guest list has no entry of the calendar's own
+    public static let answerAsHeader = "X-OpenHuman-Answer-As"
     public let verifiesOwnedEventRemoval: Bool
     private let wrapped: any HTTPTransport
     private let clock: any OHClock
@@ -48,6 +50,7 @@ public final class CalendarGuardTransport: HTTPTransport {
         var forwarded = request
         forwarded.headers[Self.removalRuleHeader] = nil
         forwarded.headers[Self.editRuleHeader] = nil
+        forwarded.headers[Self.answerAsHeader] = nil
         let response = try await wrapped.send(forwarded)
         learn(from: request, response: response)
         return response
@@ -82,7 +85,8 @@ public final class CalendarGuardTransport: HTTPTransport {
             return allowsWrites ? nil : "creating events needs calendar.events"
         case "PATCH" where isEvent(rest):
             guard allowsWrites else { return "moving events needs calendar.events" }
-            guard Self.isTimeOnlyPatch(request.body) || Self.isResponsePatch(request.body, calendarID: calendarID)
+            guard Self.isTimeOnlyPatch(request.body)
+                    || Self.isResponsePatch(request.body, calendarID: calendarID, alias: request.headers[Self.answerAsHeader])
                     || (request.headers[Self.editRuleHeader] == Self.editRuleValue && Self.isDetailPatch(request.body)) else {
                 return "an event patch may change only fields on the edit list, or the account's own answer"
             }
@@ -175,17 +179,20 @@ public final class CalendarGuardTransport: HTTPTransport {
         return Set(object.keys) == ["start", "end"] && object["start"] is [String: Any] && object["end"] is [String: Any]
     }
 
-    static func isResponsePatch(_ body: Data?, calendarID: String) -> Bool {
+    static func isResponsePatch(_ body: Data?, calendarID: String, alias: String? = nil) -> Bool {
         guard let body, let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              Set(object.keys) == ["attendees"], let list = object["attendees"] as? [Any], !list.isEmpty else {
+              let list = object["attendees"] as? [Any], !list.isEmpty else {
             return false
         }
+        let keys = Set(object.keys)
+        guard keys == ["attendees"] || (keys == ["attendees", "attendeesOmitted"] && object["attendeesOmitted"] as? Bool == true)
+        else { return false }
         var own = 0
         for item in list {
             guard let entry = item as? [String: Any], let email = entry["email"] as? String, !email.isEmpty else {
                 return false
             }
-            guard GoogleCalendarClient.isOwnEntry(entry, calendarID: calendarID) else { continue }
+            guard GoogleCalendarClient.isOwnEntry(entry, calendarID: calendarID, alias: alias) else { continue }
             own += 1
             guard let answer = entry["responseStatus"] as? String, GoogleCalendarClient.answers.contains(answer) else {
                 return false

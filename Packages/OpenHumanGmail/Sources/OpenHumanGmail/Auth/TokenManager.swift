@@ -239,9 +239,15 @@ public actor TokenManager: AccessTokenProvider {
         let scopesChanged = body.scope != nil && OAuthScopes.differ(stored.grantedScopes, body.grantedScopes)
         if body.scope != nil { updated.grantedScopes = body.grantedScopes }
         if let rotated = body.refreshToken, !rotated.isEmpty { updated.refreshToken = rotated }
+        // Why: the item can be deleted while the request is out (the account was removed); never write it back
         if let shared = store as? any SharedTokenStore {
-            try shared.saveRefreshed(updated, account: accountEmail, refreshedWith: stored.refreshToken)
+            do {
+                try shared.saveRefreshed(updated, account: accountEmail, refreshedWith: stored.refreshToken)
+            } catch TokenStoreError.missing {
+                throw enterReauth(.noToken, rejecting: nil)
+            }
         } else {
+            guard try store.load(account: accountEmail) != nil else { throw enterReauth(.noToken, rejecting: nil) }
             try store.save(updated, account: accountEmail)
         }
         cached = updated

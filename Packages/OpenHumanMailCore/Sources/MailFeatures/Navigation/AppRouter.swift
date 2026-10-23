@@ -16,7 +16,7 @@ public final class AppRouter {
     public private(set) var accountsError: String?
     public private(set) var accountsLoaded = false
     public let recentOpens = RecentOpens()
-    public var isLabelSidebarVisible = false {
+    public var isLabelSidebarVisible = true {
         didSet { if isLabelSidebarVisible != oldValue { setNeedsPersist() } }
     }
     public var windowPlace: WindowPlace?
@@ -146,6 +146,7 @@ public final class AppRouter {
         }
         for gone in accounts where !next.contains(where: { $0 === gone }) { gone.stop() }
         accounts = next
+        allInboxesFollowAccounts()
         if activeAccountID == nil || !next.contains(where: { $0.id == activeAccountID }) {
             let restored = snapshot?.activeAccount.flatMap { id in next.first { $0.id == id } }
             activate(restored ?? next.first)

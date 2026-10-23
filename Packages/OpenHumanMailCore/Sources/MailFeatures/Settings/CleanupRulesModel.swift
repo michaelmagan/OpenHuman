@@ -1,6 +1,7 @@
 import Foundation
 import MailModel
 import Observation
+import OpenHumanCore
 
 @MainActor @Observable
 public final class CleanupRulesModel {
@@ -14,9 +15,11 @@ public final class CleanupRulesModel {
 
     public let overrides: StoredSetting<[String: String]>
     public private(set) var addError: String?
+    @ObservationIgnored private let askDomainWide: DomainWideRuleAsking
 
-    public init(settings: (any SettingsPort)?) {
+    public init(settings: (any SettingsPort)?, askDomainWide: @escaping DomainWideRuleAsking = { _ in .cancel }) {
         overrides = StoredSetting(AppSettings.archiveSuggestionOverrides, port: settings)
+        self.askDomainWide = askDomainWide
     }
 
     public func start() { overrides.start() }
@@ -59,6 +62,11 @@ public final class CleanupRulesModel {
             return false
         }
         addError = nil
+        if choice == .always, target.hasPrefix("@"),
+           !(await DomainWideRules.allowsEntireDomain(String(target.dropFirst()), effect: .alwaysInCleanup,
+                                                       ask: askDomainWide)) {
+            return false
+        }
         await set(target, choice)
         return overrides.errorMessage == nil
     }

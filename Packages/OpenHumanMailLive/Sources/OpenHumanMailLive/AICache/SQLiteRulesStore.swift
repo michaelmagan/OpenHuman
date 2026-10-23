@@ -12,17 +12,16 @@ actor SQLiteRulesStore: ClassificationRulesStoring {
     private var db: OpaquePointer?
 
     init(url: URL) throws {
-        do {
-            db = try Self.open(url)
-        } catch {
-            let aside = url.deletingPathExtension().appendingPathExtension("damaged-\(Int(Date().timeIntervalSince1970)).sqlite")
-            try? FileManager.default.moveItem(at: url, to: aside)
-            db = try Self.open(url)
-        }
+        db = try SQLiteFileRecovery.open(url, status: Self.openStatus, Self.open)
     }
 
     isolated deinit {
         sqlite3_close_v2(db)
+    }
+
+    private static func openStatus(_ error: any Error) -> Int32? {
+        guard case .open(let status)? = error as? StoreError else { return nil }
+        return status
     }
 
     private static func open(_ url: URL) throws -> OpaquePointer? {
@@ -67,9 +66,10 @@ actor SQLiteRulesStore: ClassificationRulesStoring {
             PRAGMA secure_delete = ON;
             PRAGMA user_version = \(schemaVersion);
             """
-        guard sqlite3_exec(handle, "PRAGMA quick_check;", nil, nil, nil) == SQLITE_OK,
+        let check = SQLiteFileRecovery.quickCheck(handle)
+        guard check == SQLITE_OK,
               sqlite3_exec(handle, setup, nil, nil, nil) == SQLITE_OK else {
-            let code = sqlite3_errcode(handle)
+            let code = check == SQLITE_OK ? sqlite3_errcode(handle) : check
             sqlite3_close_v2(handle)
             throw StoreError.open(code)
         }

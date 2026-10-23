@@ -90,7 +90,8 @@ public struct CalendarEventRecord: Sendable, Hashable {
                                     timeZone: nil, attendees: event.attendees, calendarName: event.calendarName,
                                     meetLink: event.meetLink, organizerIsMe: event.organizerIsMe, account: event.account,
                                     location: event.location, notes: event.notes, myResponse: event.myResponse,
-                                    recurringEventID: event.recurringEventID)
+                                    recurringEventID: event.recurringEventID, extras: event.extras)
+        moved.event.respondsAs = event.respondsAs
         return moved
     }
 }
@@ -98,10 +99,12 @@ public struct CalendarEventRecord: Sendable, Hashable {
 public struct CalendarEventWindow: Sendable, Hashable {
     public var records: [CalendarEventRecord]
     public var syncToken: String?
+    public var isComplete: Bool
 
-    public init(records: [CalendarEventRecord], syncToken: String? = nil) {
+    public init(records: [CalendarEventRecord], syncToken: String? = nil, isComplete: Bool = true) {
         self.records = records
         self.syncToken = syncToken
+        self.isComplete = isComplete
     }
 }
 

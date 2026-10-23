@@ -93,6 +93,24 @@ import Testing
         #expect(state.location == origin, "the second Esc returns to the split")
     }
 
+    @Test func aPillSelectionBelongsToItsQueryAndAClickAsksForTheField() async throws {
+        let f = OverlayFixture()
+        await f.loaded()
+        let search = f.center.search
+        search.liveDelay = nil
+        #expect(await f.run(.search))
+        search.text = "from:dana has:attachment "
+        search.selectedPills = [1]
+        #expect(search.selectedPills == [1])
+        search.text = "from:dana has:attachment x"
+        #expect(search.selectedPills.isEmpty, "typing lets go of the pill")
+        search.text = "from:dana has:attachment "
+        #expect(search.selectedPills.isEmpty, "and an Undo back to the query does not select it again")
+        let request = search.focusRequest
+        search.focusField()
+        #expect(search.focusRequest == request + 1)
+    }
+
     @Test func enterHandsTheKeysToTheResultsAndEscInTheListClosesTheSearch() async throws {
         let f = OverlayFixture()
         await f.loaded()

@@ -120,6 +120,7 @@ import Testing
         let at = fixedNow.addingTimeInterval(3_600)
         let quiet = try #require(f.compose.openNew(placement: .modal))
         quiet.to.text = "dana@acme.example,"
+        quiet.subject = "Synthetic"
         quiet.updateBody(doc("Later"))
         await f.compose.schedule(quiet, at: at)
         #expect(quiet.sendConfirmation == nil && f.recorder.calls.contains("scheduleSend"))
@@ -128,6 +129,7 @@ import Testing
         try await f.store.set(SendSettings.confirmEverySend, true)
         let asked = try #require(f.compose.openNew(placement: .modal))
         asked.to.text = "sam@acme.example,"
+        asked.subject = "Synthetic"
         asked.updateBody(doc("Later too"))
         let schedules = f.recorder.calls.filter { $0 == "scheduleSend" }.count
         await f.compose.schedule(asked, at: at)

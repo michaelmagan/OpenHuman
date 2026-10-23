@@ -248,6 +248,21 @@ import Testing
         #expect(try await h.serverInbox().isEmpty)
     }
 
+    @Test func aMissingIDInALargeBatchDropsOnlyThatID() async throws {
+        let h = try await WriteHarness(threads: 130)
+        #expect(await h.syncer.runBackfill() == .complete, "all 130 threads are in the store")
+        await h.gmail.setBatchModifyRejectsMissingIDs(true)
+        let refs = try h.threads.map(h.ref)
+        let id = try h.store.apply(.archive(refs), origin: .app).operationIDs[0]
+        let gone = try #require(await h.gmail.messageIDs(inThread: h.threads[77]).first)
+        await h.gmail.deleteMessagePermanently(gone)
+        let report = await h.drainer(api: h.gmail).drainOnce()
+        #expect(report.succeeded == 1)
+        #expect(report.gmailCalls <= 1 + 2 * 8, "calls=\(report.gmailCalls)")
+        #expect(try h.store.operation(id)?.status == .succeeded)
+        #expect(try await h.serverInbox().isEmpty, "every message that still exists is archived")
+    }
+
     @Test func aGuardRefusalFailsPermanentlyAndIsNeverRetried() async throws {
         let h = try await WriteHarness()
         let id = try h.store.apply(.archive([try h.ref(h.threads[0])]), origin: .app).operationIDs[0]

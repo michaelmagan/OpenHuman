@@ -91,14 +91,19 @@ public final class SearchModel {
     public private(set) var focusRequest = 0
     public private(set) var focusTaken = 0
     public private(set) var resultsFocusRequest = 0
+    /// Whether the last request for the results' keys also puts the cursor on the first result (Return does; ↓ keeps
+    /// the cursor where it is).
+    public private(set) var resultsFocusStartsAtTop = false
     public private(set) var recents: [String]
     public private(set) var people: [SearchSuggestions.Person] = []
     public private(set) var savedSearchNameDraft: String?
 
     public let saved: SavedSearchesModel
     public let recentMail: RecentMailDetails
+    public let contactPreview: SearchContactPreview
     public let interpretation: SearchInterpretation
     private var gmailRequest: GmailRequest?
+    private var pillSelection: (query: String, pills: IndexSet)?
 
     @ObservationIgnored private weak var router: AppRouter?
     @ObservationIgnored private let store: any RecentSearchesStoring
@@ -106,6 +111,7 @@ public final class SearchModel {
     @ObservationIgnored private var liveTask: Task<Void, Never>?
     @ObservationIgnored private var detailAccount: AccountID?
     @ObservationIgnored public var liveDelay: Duration? = .milliseconds(250)
+    @ObservationIgnored private var highlighted: SearchSuggestion?
 
     public init(router: AppRouter, store: any RecentSearchesStoring = InMemoryRecentSearchesStore()) {
         self.router = router
@@ -113,6 +119,7 @@ public final class SearchModel {
         self.recents = store.load()
         self.saved = SavedSearchesModel(settings: router.environment.settings)
         self.recentMail = RecentMailDetails()
+        self.contactPreview = SearchContactPreview()
         self.interpretation = SearchInterpretation(source: SearchPlanSource.live(router.environment))
     }
 
@@ -127,8 +134,24 @@ public final class SearchModel {
         set {
             guard let state, state.searchText != newValue else { return }
             state.searchText = newValue
+            if pillSelection != nil { pillSelection = nil }
             queryChanged()
         }
+    }
+
+    /// The search field's pills shown selected, by position; ⌫ or ⌦ removes them. A selection belongs to the query it
+    /// was made in, so any edit of the query drops it.
+    public var selectedPills: IndexSet {
+        get { pillSelection?.query == text ? pillSelection?.pills ?? [] : [] }
+        set {
+            guard newValue != selectedPills else { return }
+            pillSelection = newValue.isEmpty ? nil : (text, newValue)
+        }
+    }
+
+    /// Asks the search field for the keys again, after a click on one of its pills.
+    public func focusField() {
+        focusRequest += 1
     }
 
     public var tokens: [SearchToken] { SearchSyntax.tokens(text) }
@@ -236,14 +259,23 @@ public final class SearchModel {
         record(query)
         gmailRequest = nil
         router.go(to: .search(query))
+        resultsFocusStartsAtTop = true
         resultsFocusRequest += 1
     }
 
     @discardableResult
     public func focusResults() -> Bool {
         guard let location = state?.location, Self.isSearch(location) else { return false }
+        resultsFocusStartsAtTop = false
         resultsFocusRequest += 1
         return true
+    }
+
+    /// Whether the suggestions offer to ask AI about the typed text (⌘J).
+    public var canAskAI: Bool {
+        guard let router, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        let registry = router.environment.actions
+        return registry.presenter != nil && registry.availability(.aiAskInbox, host: router).isEnabled
     }
 
     @discardableResult
@@ -276,6 +308,8 @@ public final class SearchModel {
         liveTask?.cancel()
         interpretation.reset()
         recentMail.reset()
+        contactPreview.reset()
+        highlighted = nil
         savedSearchNameDraft = nil
         guard let state, let router else { return }
         let wasSearching = state.location.map(Self.isSearch) ?? false
@@ -305,26 +339,71 @@ public final class SearchModel {
         return true
     }
 
+    /// What Tab completes the word being typed with: the highlighted suggestion, or with the suggestions closed the
+    /// first one that completes.
+    public var completion: SearchSuggestion? {
+        guard SearchSuggestions.currentWord(text) != nil else { return nil }
+        let suggestions = self.suggestions
+        if let highlighted, suggestions.contains(highlighted) {
+            return SearchSuggestions.completes(highlighted) ? highlighted : nil
+        }
+        return suggestions.first(where: SearchSuggestions.completes)
+    }
+
+    /// Tab: takes the interpretation when one is offered, otherwise the completion. False leaves Tab alone.
+    @discardableResult
+    public func acceptCompletion() -> Bool {
+        if acceptInterpretation() { return true }
+        guard let completion else { return false }
+        accept(completion)
+        return true
+    }
+
     public func refreshPeople() async {
-        guard let router, let state, let word = SearchSuggestions.currentWord(text) else {
+        guard let router, let state else {
+            people = []
+            return
+        }
+        // A lookup that was cancelled, or that finished after the text or the account changed, keeps what is there
+        let asked = text, account = state.id
+        func current() -> Bool { !Task.isCancelled && text == asked && self.state?.id == account }
+        if text.isEmpty {
+            let found = (try? await router.environment.data.contactSuggestions(state.id, prefix: "",
+                                                                             limit: SearchSuggestions.maxPeople)) ?? []
+            guard current() else { return }
+            people = found.map { SearchSuggestions.Person(name: $0.name, email: $0.email) }
+            return
+        }
+        guard let word = SearchSuggestions.currentWord(text) else {
             people = []
             return
         }
         var body = word.text
         if body.hasPrefix("-") { body.removeFirst() }
+        var addressed = false
         if let colon = body.firstIndex(of: ":") {
             guard ["from", "to"].contains(body[..<colon].lowercased()) else { people = []; return }
             body = String(body[body.index(after: colon)...])
+            addressed = true
         }
-        guard body.count >= 2 else { people = []; return }
+        if body.hasPrefix("\"") { body.removeFirst() }
+        // A bare from: or to: offers the people written to most, to arrow through
+        guard body.count >= 2 || (addressed && body.isEmpty) else { people = []; return }
         let found = (try? await router.environment.data.contactSuggestions(state.id, prefix: body, limit: 5)) ?? []
+        guard current() else { return }
         people = found.map { SearchSuggestions.Person(name: $0.name, email: $0.email) }
     }
 
+    /// The suggestion under the cursor. A person shows in the preview beside the suggestions; with Smart Search on,
+    /// their recent mail is looked up for it and for the row.
     public func highlight(_ suggestion: SearchSuggestion?) {
+        highlighted = suggestion
+        let person = suggestion?.kind == .person ? suggestion : nil
+        if smartSearchEnabled { followAccount() }
+        contactPreview.show(name: person.flatMap { $0.detail == nil ? nil : $0.title }, email: person?.email,
+                            looksUp: smartSearchEnabled)
         guard smartSearchEnabled else { return }
-        followAccount()
-        recentMail.highlight(suggestion?.kind == .person ? suggestion?.email : nil)
+        recentMail.highlight(person?.email)
     }
 
     public func personDetail(_ suggestion: SearchSuggestion) -> String? {
@@ -361,9 +440,13 @@ public final class SearchModel {
         guard detailAccount != state.id else { return }
         detailAccount = state.id
         recentMail.reset()
+        contactPreview.reset()
         let data = router.environment.data
         let account = state.id
         recentMail.lookup = { email in try? await data.recentThreads(involving: email, account: account, limit: 1).first }
+        contactPreview.lookup = { email in
+            (try? await data.recentThreads(involving: email, account: account, limit: SearchContactPreview.maxConversations)) ?? []
+        }
     }
 
     private func queryChanged() {

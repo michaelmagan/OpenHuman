@@ -126,13 +126,20 @@ final class ImportanceMover {
         let port = self.port
         let feedback = self.feedback
         let thread = move.thread
+        let ask = environment.domainWideRuleAsking
         func choice(_ title: String, _ kind: ImportanceRuleKind, _ value: String, _ done: LocalizedStringResource)
             -> NoticeCenter.Choice {
             NoticeCenter.Choice(title) {
-                let change = ImportanceChange(kind: kind, account: thread.account, value: value, thread: thread)
+                let proposed = ImportanceChange(kind: kind, account: thread.account, value: value, thread: thread)
+                guard let resolved = await ImportanceActionHandler.narrowed(proposed, title: done, sender: sender,
+                                                                            ask: ask) else { return }
+                let change = resolved.0
                 do {
-                    if let undo { try await undo.perform(done, threads: [thread], via: port) { try await port.apply(change) } }
-                    else { _ = try await port.apply(change) }
+                    if let undo {
+                        try await undo.perform(resolved.1, threads: [thread], via: port) { try await port.apply(change) }
+                    } else {
+                        _ = try await port.apply(change)
+                    }
                 } catch {
                     feedback.failed("Couldn't change the importance rule")
                 }

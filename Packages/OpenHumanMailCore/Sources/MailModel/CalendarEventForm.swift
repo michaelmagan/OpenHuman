@@ -267,7 +267,7 @@ public struct CalendarEventForm: Sendable, Hashable {
         made.end = end
         made.isAllDay = isAllDay
         made.timeZone = timeZone
-        made.attendees = guests.map(\.address)
+        made.setAttendees(guests.map(\.address))
         made.location = location
         made.notes = notes
         made.addMeetLink = wantsMeet
@@ -634,15 +634,62 @@ public enum CalendarRepeat {
         }
     }
 
-    public static func continuing(_ rules: [String]) -> [String] {
-        rules.compactMap { line in
-            guard line.uppercased().hasPrefix("RRULE:") else { return nil }
-            let parts = line.dropFirst(6).split(separator: ";").map(String.init).filter {
-                let key = $0.split(separator: "=").first.map { $0.uppercased() }
-                return key != "COUNT" && key != "UNTIL"
+    // nil when the rule ends after a number of times: the count left after the split is not known here
+    public static func continuing(_ rules: [String], from instantStart: Date, isAllDay: Bool, zone: TimeZone) -> [String]? {
+        var out: [String] = []
+        for line in rules {
+            let upper = line.uppercased()
+            if upper.hasPrefix("RRULE:") {
+                let parts = line.dropFirst(6).split(separator: ";")
+                if parts.contains(where: { $0.split(separator: "=").first?.uppercased() == "COUNT" }) { return nil }
+                out.append(line)
+            } else if upper.hasPrefix("EXDATE") || upper.hasPrefix("RDATE") {
+                if let kept = dates(line, onOrAfter: instantStart, isAllDay: isAllDay, zone: zone,
+                                    keepsUnreadable: upper.hasPrefix("EXDATE")) {
+                    out.append(kept)
+                }
             }
-            return "RRULE:" + parts.joined(separator: ";")
         }
+        return out
+    }
+
+    static func dates(_ line: String, onOrAfter instantStart: Date, isAllDay: Bool, zone: TimeZone,
+                      keepsUnreadable: Bool) -> String? {
+        guard let colon = line.firstIndex(of: ":") else { return keepsUnreadable ? line : nil }
+        let head = line[..<colon]
+        let params = head.split(separator: ";").dropFirst().map { $0.uppercased() }
+        let tzid = head.split(separator: ";").dropFirst().first { $0.uppercased().hasPrefix("TZID=") }
+            .map { String($0.dropFirst(5)).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
+        let valueZone = tzid.flatMap(TimeZone.init(identifier:)) ?? zone
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let firstDay = calendar.startOfDay(for: instantStart)
+        let values = line[line.index(after: colon)...].split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        let kept = values.filter { value in
+            let isDate = params.contains("VALUE=DATE") || value.count == 8
+            if isDate {
+                guard let day = parse(value, pattern: "yyyyMMdd", zone: zone) else { return keepsUnreadable }
+                return day >= firstDay
+            }
+            let date = value.uppercased().hasSuffix("Z")
+                ? parse(value.uppercased(), pattern: "yyyyMMdd'T'HHmmss'Z'", zone: TimeZone(identifier: "UTC")!)
+                : parse(value, pattern: "yyyyMMdd'T'HHmmss", zone: valueZone)
+            guard let date else { return keepsUnreadable }
+            return isAllDay ? calendar.startOfDay(for: date) >= firstDay : date >= instantStart
+        }
+        return kept.isEmpty ? nil : String(head) + ":" + kept.joined(separator: ",")
+    }
+
+    private static func parse(_ text: String, pattern: String, zone: TimeZone) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = zone
+        formatter.dateFormat = pattern
+        formatter.isLenient = false
+        return formatter.date(from: text)
     }
 
     private static func format(_ date: Date, pattern: String, zone: TimeZone) -> String {

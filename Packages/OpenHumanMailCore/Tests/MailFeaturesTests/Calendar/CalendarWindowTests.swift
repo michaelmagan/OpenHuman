@@ -156,17 +156,19 @@ private struct CalendarWindowFixture {
         #expect(abs(empty.scrollTarget - 8.0 / 24) < 0.0001)
     }
 
-    @Test func inPersonAndExternalEventsAreOutlined() {
-        let inPerson = event("p", la(10, 13, 9), la(10, 13, 10), location: "Corner cafe")
-        let inside = event("i", la(10, 13, 9), la(10, 13, 10), attendees: [EmailAddress(name: nil, email: "dana@example.com")])
-        let external = event("e", la(10, 13, 9), la(10, 13, 10), attendees: [sam])
-        #expect(CalendarTimeGrid.isOutlined(inPerson, owner: nil))
-        #expect(!CalendarTimeGrid.isOutlined(inside, owner: "robin@example.com"))
-        #expect(CalendarTimeGrid.isOutlined(external, owner: "robin@example.com"))
-        #expect(!CalendarTimeGrid.isOutlined(external, owner: nil), "without an owner only a place counts")
-        let declined = event("d", la(10, 13, 9), la(10, 13, 10), response: .declined)
-        let grid = CalendarTimeGrid(days: [la(10, 13)], events: [declined], timeZone: losAngeles, now: la(10, 12, 11))
-        #expect(grid.blocks.first?.isDeclined == true)
+    @Test func onlyAMaybeAnswerIsOutlined() {
+        func block(_ response: CalendarResponse?, location: String? = nil, attendees: [EmailAddress] = [],
+                   organizerIsMe: Bool? = nil) -> CalendarTimeGrid.Block? {
+            let item = event("b", la(10, 13, 9), la(10, 13, 10), attendees: attendees, organizerIsMe: organizerIsMe,
+                             location: location, response: response)
+            return CalendarTimeGrid(days: [la(10, 13)], events: [item], timeZone: losAngeles, now: la(10, 12, 11)).blocks.first
+        }
+        #expect(block(.accepted, location: "Corner cafe", attendees: [sam])?.isTentative == false,
+                "a place or an outside guest does not outline an accepted event")
+        #expect(block(nil, location: "Corner cafe", attendees: [sam], organizerIsMe: true)?.isTentative == false)
+        #expect(block(.tentative)?.isTentative == true)
+        #expect(block(.needsAction)?.isTentative == false)
+        #expect(block(.declined)?.isDeclined == true)
     }
 
     @Test func theMonthGridHoldsWholeWeeksAndSaysHowManyMore() {
@@ -375,6 +377,41 @@ private struct CalendarWindowFixture {
         #expect(model.events.first { $0.title == "Focus" }?.account == f.workEmail)
     }
 
+    @Test func draggingTheEventBeingPreparedMovesItToAnotherDayAndKeepsItsLength() async throws {
+        let f = CalendarWindowFixture()
+        let model = f.window()
+        let sidebar = model.sidebar
+        await model.open()
+        await model.newEvent(start: la(10, 14, 13), end: la(10, 14, 14))
+        sidebar.draft?.title = "Focus"
+        let key = try #require(sidebar.draftKey)
+        #expect(model.pendingPlacement?.dayIndex == 3)
+        model.movePending(to: la(10, 15, 15))
+        #expect(sidebar.draft?.start == la(10, 15, 15) && sidebar.draft?.end == la(10, 15, 16), "the same hour, a day later")
+        #expect(sidebar.draft?.title == "Focus")
+        #expect(model.pendingSlot == DateInterval(start: la(10, 15, 15), end: la(10, 15, 16)))
+        #expect(model.pendingPlacement?.dayIndex == 4 && model.showsPendingCard, "the editor stays with the moved event")
+        let saved = try #require(f.env.pendingEvents.pending(for: key))
+        #expect(saved.draft.start == la(10, 15, 15) && saved.draft.end == la(10, 15, 16) && saved.draft.title == "Focus")
+        #expect(f.work.createCalls == 0 && f.work.created.isEmpty, "moving the draft creates nothing")
+    }
+
+    @Test func theBottomEdgeOfTheEventBeingPreparedChangesOnlyItsEnd() async throws {
+        let f = CalendarWindowFixture()
+        let model = f.window()
+        let sidebar = model.sidebar
+        await model.open()
+        await model.newEvent(start: la(10, 14, 13), end: la(10, 14, 14))
+        let key = try #require(sidebar.draftKey)
+        model.resizePending(to: la(10, 14, 15, 30))
+        #expect(sidebar.draft?.start == la(10, 14, 13) && sidebar.draft?.end == la(10, 14, 15, 30))
+        #expect(model.pendingSlot == DateInterval(start: la(10, 14, 13), end: la(10, 14, 15, 30)) && model.showsPendingCard)
+        #expect(f.env.pendingEvents.pending(for: key)?.draft.end == la(10, 14, 15, 30))
+        model.resizePending(to: la(10, 14, 12))
+        #expect(sidebar.draft?.end == la(10, 14, 13, 15), "never shorter than a quarter hour")
+        #expect(f.work.createCalls == 0)
+    }
+
     @Test func meetFindsTheFirstFreeHalfHourWithThatPerson() async throws {
         let f = CalendarWindowFixture(work: [event("busy", la(10, 12, 11), la(10, 12, 12, 30))])
         let model = f.window()
@@ -384,6 +421,7 @@ private struct CalendarWindowFixture {
         #expect(await model.meet(with: "Sam Rivera <sam@example.org>") == nil)
         #expect(model.sidebar.draft?.start == la(10, 12, 12, 30), "after now and the busy block")
         #expect(model.sidebar.draft?.attendees.map(\.email) == ["sam@example.org"])
+        #expect(model.sidebar.draft?.sendUpdates == .all, "the person is invited by email")
     }
 
     @Test func draggingAnOwnEventMovesItAtOnceAndUndoPutsItBack() async throws {
@@ -888,6 +926,15 @@ private final class StoreChanges {
         #expect(cancelled.end(translation: CGSize(width: 0, height: 60), hourHeight: 44, columnWidth: 100) == nil)
     }
 
+    @Test func aMovedDraftKeepsItsLengthAndAResizedOneItsStart() {
+        let moved = CalendarDragMath.moved(from: la(10, 14, 13), until: la(10, 14, 14), to: la(10, 15, 15))
+        #expect(moved.start == la(10, 15, 15) && moved.end == la(10, 15, 16))
+        let tiny = CalendarDragMath.moved(from: la(10, 14, 13), until: la(10, 14, 13), to: la(10, 14, 9))
+        #expect(tiny.end == la(10, 14, 9, 15), "at least a quarter hour")
+        let resized = CalendarDragMath.resized(from: la(10, 14, 13), to: la(10, 14, 12))
+        #expect(resized.start == la(10, 14, 13) && resized.end == la(10, 14, 13, 15))
+    }
+
     @Test func aResizeNeverChangesTheDay() {
         let p = CalendarDragState.proposal(translation: CGSize(width: 250, height: -22), kind: .resize, hourHeight: 44, columnWidth: 100)
         #expect(p == .init(dayDelta: 0, quarterDelta: -2))
@@ -965,6 +1012,29 @@ private final class StoreChanges {
         gate.release()
         await eventually { !patches(f).isEmpty }
         #expect(patches(f).first?.updates == .all, "the explicit choice wins")
+    }
+
+    @Test func anAddressLeftInTheGuestFieldIsAddedWhenTheCardSaves() async throws {
+        let own = event("own", la(10, 13, 9), la(10, 13, 10), organizerIsMe: true)
+        let f = CalendarWindowFixture(work: [own], workAbilities: fullAbilities)
+        let model = f.window()
+        let gate = TestGate()
+        model.sleep = { _ in await gate.wait() }
+        await model.open()
+        model.openEvent(try #require(model.events.first))
+        model.card?.pendingGuest = "Sam"
+        #expect(model.card?.hasChanges == true, "typed text is something Save acts on")
+        await model.saveCard()
+        #expect(model.card?.pendingGuestNote == CalendarPendingGuest.notAnAddress && model.card?.pendingGuest == "Sam")
+        #expect(patches(f).isEmpty, "text that is not an address stops the save")
+        model.card?.pendingGuest = "sam@example.org"
+        #expect(model.card?.pendingGuestNote == nil)
+        await model.saveCard()
+        #expect(model.card == nil && model.heldCount == 1)
+        gate.release()
+        await eventually { !patches(f).isEmpty }
+        let sent = try #require(patches(f).first)
+        #expect(sent.patch.guestsAdded == ["sam@example.org"] && sent.updates == .all)
     }
 
     @Test func aRecurringEventAsksThisThisAndFollowingOrAllEvents() async throws {
@@ -1059,6 +1129,7 @@ private final class StoreChanges {
         await model.duplicateCardEvent()
         #expect(model.card == nil && model.sidebar.draft?.title == "Event own" && model.sidebar.draft?.location == "Room 4")
         #expect(model.sidebar.draft?.attendees == [sam] && f.work.created.isEmpty, "nothing is created until Save")
+        #expect(model.sidebar.draft?.sendUpdates == .all, "the copy's guests are invited by email")
     }
 
     @Test func decliningStandsInForDeletingSomeoneElsesEvent() async throws {

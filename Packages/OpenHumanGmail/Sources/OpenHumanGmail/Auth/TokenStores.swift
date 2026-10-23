@@ -7,6 +7,7 @@ public enum TokenStoreError: Error, Equatable, Sendable {
     case io(String)
     case keychain(Int32)
     case corrupt
+    case missing
     case notAppProcess
 }
 
