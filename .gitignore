@@ -57,7 +57,6 @@ __pycache__/
 /.codex/
 /.agents/
 /.gstack/
-/AGENTS.md
 *.p12
 *.p8
 .env
