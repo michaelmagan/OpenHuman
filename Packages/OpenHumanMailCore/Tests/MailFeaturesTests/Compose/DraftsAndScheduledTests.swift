@@ -157,6 +157,50 @@ import Testing
         #expect(await f.draftRow(scheduled.id)?.sendAt == before)
     }
 
+    @Test func rescheduleFromARowKeepsOnlyIfNoReplyAndUndoRestoresIt() async throws {
+        let f = ComposeFixture()
+        await f.loaded()
+        let (thread, original) = try await scheduledRow(f)
+        let before = try #require(original.sendAt)
+        try await f.store.scheduleSend(original.id, at: before, condition: .ifNoReply)
+        let scheduled = try #require(await f.draftRow(original.id))
+        #expect(scheduled.sendCondition == .ifNoReply)
+        #expect(await f.run(.rescheduleSend))
+        let picker = try #require(f.timePicker)
+        #expect(picker.targets == [thread] && picker.onlyIfNoReply, "the card starts from the current condition")
+        #expect(picker.chooseNumber(1))
+        await f.compose.settle()
+        let moved = ScheduleStamp.floorToMinute(fixedNow.addingTimeInterval(3_600))
+        #expect(await f.draftRow(scheduled.id)?.sendAt == moved)
+        #expect(f.store.sendCondition(scheduled.id) == .ifNoReply)
+        #expect(f.recorder.calls.contains("scheduleSend:ifNoReply"))
+        await f.toast("Rescheduled for ")
+        #expect(f.toasts.contains { $0.hasPrefix("Rescheduled for ") && $0.contains(" if no reply") })
+
+        #expect(await f.run(.undo))
+        #expect(await f.draftRow(scheduled.id)?.sendAt == before)
+        #expect(f.store.sendCondition(scheduled.id) == .ifNoReply, "undo puts back the earlier time and condition")
+
+        await f.compose.reschedule(scheduled.id, at: fixedNow.addingTimeInterval(7_200), condition: .always,
+                                   previous: before, previousCondition: .ifNoReply, thread: thread)
+        #expect(f.store.sendCondition(scheduled.id) == .always, "turning the box off is an explicit choice")
+    }
+
+    @Test func undoingACanceledIfNoReplySendRestoresTheCondition() async throws {
+        let f = ComposeFixture()
+        await f.loaded()
+        let (_, original) = try await scheduledRow(f)
+        let at = try #require(original.sendAt)
+        try await f.store.scheduleSend(original.id, at: at, condition: .ifNoReply)
+        #expect(await f.draftRow(original.id)?.sendCondition == .ifNoReply)
+        #expect(await f.run(.cancelScheduledSend))
+        await f.toast("Send later canceled")
+        #expect(f.store.sendCondition(original.id) == nil)
+        #expect(await f.run(.undo))
+        #expect(await f.draftRow(original.id)?.sendAt == at)
+        #expect(f.store.sendCondition(original.id) == .ifNoReply)
+    }
+
     @Test func theComposerRefusesASendLaterTimeLessThanAMinuteAhead() async throws {
         let f = ComposeFixture()
         await f.loaded()

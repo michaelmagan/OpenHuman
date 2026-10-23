@@ -180,7 +180,7 @@ private struct CalendarFixture {
         #expect(draft.title == "Quarterly planning")
         #expect(draft.start == at(10, 14, 14) && draft.end == at(10, 14, 16), "the mention's span")
         #expect(draft.attendees.map(\.email) == ["alice@example.com", "bob@example.org"], "never the user's own address")
-        #expect(draft.timeZone == "America/New_York" && draft.sendUpdates == .none)
+        #expect(draft.timeZone == "America/New_York" && draft.sendUpdates == .all, "guests are invited unless turned off")
         #expect(f.calendar.createCalls == 0, "opening a draft creates nothing")
         model.cancelDraft()
         #expect(model.draft == nil)
@@ -433,7 +433,9 @@ private final class WakeCounter: Sendable {
         let window = TestGate()
         model.sleep = { _ in await window.wait() }
         await model.beginDraft(for: f.thread)
-        #expect(model.draft?.sendUpdates == CalendarSendUpdates.none && model.draft?.mayEmailAttendees == true)
+        #expect(model.draft?.sendUpdates == .all, "a draft with guests invites them by default")
+        model.draft?.sendUpdates = CalendarSendUpdates.none
+        #expect(model.draft?.emailsAttendees == false && model.draft?.mayEmailAttendees == true)
         #expect(await model.createEvent())
         #expect(model.heldCreateCount == 1 && f.calendar.createCalls == 0, "held, invitations off")
         window.release()
@@ -442,6 +444,70 @@ private final class WakeCounter: Sendable {
         #expect(!f.env.notices.toasts.contains { $0.message == "Event created. Google emails the invitations." })
         await f.env.undo?.undoLast()
         #expect(f.calendar.deleteCalls == 0, "an event with attendees is never deleted by undo")
+    }
+
+    @Test func aGuestAddedToABlankDraftGetsAnInvitationByEmail() async throws {
+        let f = CalendarFixture()
+        let model = f.sidebar()
+        let window = TestGate()
+        model.sleep = { _ in await window.wait() }
+        await model.beginDraft(for: nil)
+        let blank = try #require(model.draft)
+        #expect(blank.attendees.isEmpty && blank.sendUpdates == CalendarSendUpdates.none)
+        var form = CalendarEventForm(draft: blank)
+        form.addGuest(alice)
+        model.draft = form.applying(to: blank)
+        #expect(model.draft?.sendUpdates == .all, "the first guest turns invitations on")
+        #expect(await model.createEvent())
+        #expect(model.heldCreateCount == 1 && f.calendar.createCalls == 0)
+        window.release()
+        await eventually { f.calendar.createCalls == 1 }
+        let sent = try #require(f.calendar.calls.compactMap { call -> CalendarEventDraft? in
+            if case .create(let draft) = call { draft } else { nil }
+        }.first)
+        #expect(sent.sendUpdates == .all && sent.attendees.map(\.email) == ["alice@example.com"])
+        await eventually { f.env.notices.toasts.contains { $0.message == "Event created. Google emails the invitations." } }
+    }
+
+    @Test func anAddressLeftInTheGuestFieldIsAddedOnSave() async throws {
+        let f = CalendarFixture()
+        let model = f.sidebar()
+        let window = TestGate()
+        model.sleep = { _ in await window.wait() }
+        await model.beginDraft(for: nil)
+        model.pendingGuest = "Alice <alice@example.com>"
+        #expect(model.draft?.attendees.isEmpty == true, "typed, not yet added with Return")
+        #expect(await model.createEvent())
+        #expect(model.pendingGuest.isEmpty && model.heldCreateCount == 1)
+        window.release()
+        await eventually { f.calendar.createCalls == 1 }
+        let sent = try #require(f.calendar.calls.compactMap { call -> CalendarEventDraft? in
+            if case .create(let draft) = call { draft } else { nil }
+        }.first)
+        #expect(sent.attendees == [alice] && sent.extras.guests.map(\.email) == ["alice@example.com"])
+        #expect(sent.sendUpdates == .all)
+    }
+
+    @Test func textInTheGuestFieldThatIsNotAnAddressStopsTheSave() async throws {
+        let f = CalendarFixture()
+        let model = f.sidebar()
+        await model.beginDraft(for: nil)
+        model.pendingGuest = "Alice"
+        #expect(await model.createEvent() == false)
+        #expect(model.pendingGuestNote == CalendarPendingGuest.notAnAddress && model.pendingGuest == "Alice", "kept, not dropped")
+        #expect(model.draft?.attendees.isEmpty == true && f.calendar.createCalls == 0)
+        model.pendingGuest = ""
+        #expect(model.pendingGuestNote == nil)
+        #expect(await model.createEvent())
+        #expect(f.calendar.createCalls == 1)
+    }
+
+    @Test func theGuestFieldTextIsReadAsAddressesOrRefusedWhole() {
+        #expect(CalendarPendingGuest.addresses(in: "  ") == [])
+        #expect(CalendarPendingGuest.addresses(in: "bob@example.org, Alice <alice@example.com>")?.map(\.email)
+                == ["bob@example.org", "alice@example.com"])
+        #expect(CalendarPendingGuest.addresses(in: "Alice") == nil)
+        #expect(CalendarPendingGuest.addresses(in: "bob@example.org, Alice") == nil, "nothing is added when part is not an address")
     }
 
     @Test func anUnclearCreateThatTheDayShowsCountsAsCreated() async throws {

@@ -1,0 +1,15 @@
+{
+  "id": "search.tab-completion",
+  "area": "Search",
+  "title": "Tab takes the dim completion after the caret",
+  "steps": [
+    "Press / and type fro, then press Tab",
+    "Type the first two letters of a person's name after from: and look at the field",
+    "Press Tab",
+    "Type su, press Escape once to close the suggestions, then press Tab"
+  ],
+  "deepLink": null,
+  "expected": "After fro the field shows a dim m: after the caret and Tab turns it into from:. After from: and two letters the field shows the rest of the person's name in dim text, a ⇥ and the address it will use; Tab puts the address in and it becomes a pill. With the suggestions closed, the dim completion is still shown and Tab still completes su into subject:. The caret stays in the field each time.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

@@ -181,7 +181,8 @@ struct FakeDraft: Sendable {
         }
         return DraftSummary(id: id, account: account, gmailDraftID: gmailDraftID, thread: thread, mode: mode,
                             replyToGmailMessageID: replyTo, fields: fields, source: source, review: review,
-                            status: status, sendAt: sendAt, version: version, isDirty: version > syncedVersion,
+                            status: status, sendAt: sendAt, sendCondition: sendAt == nil ? .always : sendCondition,
+                            version: version, isDirty: version > syncedVersion,
                             hasRemoteConflict: hasRemoteConflict, agentNote: agentNote, agentSnapshot: agentSnapshot,
                             lastError: lastError, updatedAt: updatedAt)
     }

@@ -187,7 +187,7 @@ struct ListPolishRow {
 struct ListPolishWindow {
     let window: NSWindow
 
-    init(rows: [ListPolishRow], theme: SweepTheme, width: CGFloat = 1000) {
+    init(rows: [ListPolishRow], theme: SweepTheme, width: CGFloat = 1000, emphasized: Bool = true) {
         let tokens = theme.makeStore().resolved.tokens
         let style = ThreadRowStyle(theme: tokens)
         let height = style.rowHeight * CGFloat(rows.count) + 2 * style.rowHeight
@@ -209,6 +209,7 @@ struct ListPolishWindow {
         ]
         for (index, item) in rows.enumerated() {
             let rowView = ThreadRowBackgroundView(style: style)
+            rowView.emphasisOverride = emphasized
             rowView.frame = NSRect(x: 0, y: height - style.rowHeight * CGFloat(index + 2), width: width, height: style.rowHeight)
             let cell = ThreadRowView(style: style)
             cell.frame = rowView.bounds
@@ -223,7 +224,7 @@ struct ListPolishWindow {
             let texts = style.texts(for: row, chips: item.chips, format: ThreadRowFormatting(), location: .system(.inbox),
                                     muted: muted)
             let checked = item.state == .checked || item.state == .cursorChecked
-            cell.configure(row, texts: texts, date: style.date("OCT 8", unread: item.unread && !muted, upcoming: false),
+            cell.configure(row, texts: texts, date: style.date("Oct 8", unread: item.unread && !muted, upcoming: false),
                            indicators: muted ? [.muted] : [], isChecked: checked, isMuted: muted)
             rowView.isChecked = checked
             rowView.addSubview(cell)

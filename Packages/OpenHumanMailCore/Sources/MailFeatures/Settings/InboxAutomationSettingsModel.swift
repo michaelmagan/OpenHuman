@@ -1,6 +1,7 @@
 import Foundation
 import MailModel
 import Observation
+import OpenHumanCore
 
 @MainActor @Observable
 public final class InboxAutomationSettingsModel {
@@ -21,10 +22,11 @@ public final class InboxAutomationSettingsModel {
 
     @ObservationIgnored private let followUps: FollowUpReminders?
 
-    public init(settings: (any SettingsPort)?, availability: SettingsAvailability, followUps: FollowUpReminders? = nil) {
+    public init(settings: (any SettingsPort)?, availability: SettingsAvailability, followUps: FollowUpReminders? = nil,
+                askDomainWide: @escaping DomainWideRuleAsking = { _ in .cancel }) {
         self.availability = availability
         self.followUps = followUps
-        cleanupRules = CleanupRulesModel(settings: settings)
+        cleanupRules = CleanupRulesModel(settings: settings, askDomainWide: askDomainWide)
         suggestCleanup = StoredSetting(AppSettings.archiveSuggestionEnabled, port: settings)
         cleanupThreshold = StoredSetting(AppSettings.archiveSuggestionInboxThreshold, port: settings)
         cleanupAgeDays = StoredSetting(AppSettings.archiveSuggestionAgeDays, port: settings)
@@ -37,7 +39,8 @@ public final class InboxAutomationSettingsModel {
 
     public convenience init(environment: AppEnvironment) {
         self.init(settings: environment.settings, availability: SettingsAvailability(environment: environment),
-                  followUps: environment.ai == nil ? nil : environment.followUps)
+                  followUps: environment.ai == nil ? nil : environment.followUps,
+                  askDomainWide: environment.domainWideRuleAsking)
     }
 
     public func start() {

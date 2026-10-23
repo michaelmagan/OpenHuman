@@ -9,6 +9,14 @@ extension View {
         #endif
     }
 
+    public func ohAccessoryBarButtonStyle() -> some View {
+        #if os(macOS)
+        buttonStyle(.accessoryBar)
+        #else
+        buttonStyle(.borderless)
+        #endif
+    }
+
     public func ohCheckboxToggleStyle() -> some View {
         #if os(macOS)
         toggleStyle(.checkbox)

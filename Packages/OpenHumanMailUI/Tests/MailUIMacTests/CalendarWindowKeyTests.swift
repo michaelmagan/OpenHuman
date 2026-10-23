@@ -30,3 +30,14 @@ import Testing
                 "nothing of the calendar's is global")
     }
 }
+
+@MainActor
+@Suite struct CalendarTimeGridDragTests {
+    @Test func aSidewaysDragMovesByWholeDaysInsideTheGrid() {
+        #expect(CalendarTimeGridView.dayIndex(3, shiftedBy: 140, columnWidth: 100, days: 7) == 4)
+        #expect(CalendarTimeGridView.dayIndex(3, shiftedBy: 40, columnWidth: 100, days: 7) == 3, "less than half a column stays")
+        #expect(CalendarTimeGridView.dayIndex(1, shiftedBy: -400, columnWidth: 100, days: 7) == 0, "never before the first day")
+        #expect(CalendarTimeGridView.dayIndex(5, shiftedBy: 900, columnWidth: 100, days: 7) == 6, "never after the last day")
+        #expect(CalendarTimeGridView.dayIndex(0, shiftedBy: 300, columnWidth: 0, days: 1) == 0)
+    }
+}

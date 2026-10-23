@@ -92,7 +92,7 @@ public struct CalendarTimeGrid: Sendable, Hashable {
         public let column: Int
         public let columns: Int
         public let colorIndex: Int
-        public let isOutlined: Bool
+        public let isTentative: Bool
         public let isDeclined: Bool
         public let startsBefore: Bool
         public let endsAfter: Bool
@@ -123,7 +123,7 @@ public struct CalendarTimeGrid: Sendable, Hashable {
     public let scrollTarget: Double
     public let openingHour: Int
 
-    public init(days: [Date], events: [CalendarEvent], timeZone: TimeZone, now: Date, owner: String? = nil,
+    public init(days: [Date], events: [CalendarEvent], timeZone: TimeZone, now: Date,
                 colorIndex: (CalendarEvent) -> Int = CalendarDayTimeline.colorIndex(for:)) {
         let calendar = CalendarDateMentions.calendar(timeZone)
         let midnights = days.map { calendar.startOfDay(for: $0) }
@@ -145,7 +145,7 @@ public struct CalendarTimeGrid: Sendable, Hashable {
                 placed.append(Block(event: event, dayIndex: index, top: top,
                                     height: max(bottom - top, Self.minimumHeight), column: item.column,
                                     columns: item.columns, colorIndex: colorIndex(event),
-                                    isOutlined: Self.isOutlined(event, owner: event.account ?? owner),
+                                    isTentative: event.myResponse == .tentative,
                                     isDeclined: event.myResponse == .declined,
                                     startsBefore: event.start < day, endsAfter: event.end > next,
                                     isPast: event.end <= now))
@@ -229,18 +229,6 @@ public struct CalendarTimeGrid: Sendable, Hashable {
         return min(max(seconds / 86_400, 0), 1)
     }
 
-    public static func isOutlined(_ event: CalendarEvent, owner: String?) -> Bool {
-        if let place = event.location?.trimmingCharacters(in: .whitespacesAndNewlines), !place.isEmpty { return true }
-        guard let domain = owner.flatMap(Self.domain) else { return false }
-        return event.attendees.contains { Self.domain($0.email) != domain }
-    }
-
-    static func domain(_ address: String) -> String? {
-        guard let at = address.lastIndex(of: "@") else { return nil }
-        let host = address[address.index(after: at)...].lowercased()
-        return host.isEmpty ? nil : host
-    }
-
     static func nextMidnight(after day: Date, calendar: Calendar) -> Date {
         calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: day) ?? day.addingTimeInterval(86_400))
     }
@@ -308,11 +296,19 @@ public enum CalendarDragMath {
     }
 
     public static func moved(_ event: CalendarEvent, to start: Date) -> (start: Date, end: Date) {
-        (start, start.addingTimeInterval(max(event.end.timeIntervalSince(event.start), step)))
+        moved(from: event.start, until: event.end, to: start)
     }
 
     public static func resized(_ event: CalendarEvent, to end: Date) -> (start: Date, end: Date) {
-        (event.start, max(end, event.start.addingTimeInterval(step)))
+        resized(from: event.start, to: end)
+    }
+
+    public static func moved(from start: Date, until end: Date, to newStart: Date) -> (start: Date, end: Date) {
+        (newStart, newStart.addingTimeInterval(max(end.timeIntervalSince(start), step)))
+    }
+
+    public static func resized(from start: Date, to end: Date) -> (start: Date, end: Date) {
+        (start, max(end, start.addingTimeInterval(step)))
     }
 
     public static func slot(from a: Date, to b: Date) -> (start: Date, end: Date) {

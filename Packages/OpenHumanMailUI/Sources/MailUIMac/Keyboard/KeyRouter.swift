@@ -75,6 +75,9 @@ public final class KeyRouter {
     public var didRoute: ((KeyChord, ActionID?) -> Void)?
     public var translation = KeyTranslation.system
     public var editingKeyHandler: ((NSEvent) -> Bool)?
+    /// Sees a key before the focused field editor does, in any window, so a field can answer keys its editor would
+    /// swallow, such as ⌫ at the search field's pills. Returning true consumes the key.
+    public var fieldEditorKeyHandler: ((NSEvent, NSTextView) -> Bool)?
     static let editingKeyCodes: Set<UInt16> = [51, 117]
 
     private var monitor: Any?
@@ -126,6 +129,12 @@ public final class KeyRouter {
     public func route(_ event: NSEvent) -> NSEvent? {
         guard event.type == .keyDown else { return event }
         if let window = event.window ?? NSApp.keyWindow {
+            if let editor = window.firstResponder as? NSTextView, editor.isFieldEditor, !editor.hasMarkedText(),
+               let fieldEditorKeyHandler, fieldEditorKeyHandler(event, editor) {
+                endSequence()
+                held = nil
+                return nil
+            }
             guard isMailWindow(window), window.attachedSheet == nil, !(window is NSPanel) else { return event }
             if Self.hasMarkedText(window.firstResponder) { return event }
             if event.isARepeat, event.keyCode == 36 || event.keyCode == 76,

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import MailUI
 
@@ -53,12 +54,86 @@ struct SearchQueryTokensTests {
         #expect(older.spokenLabel == "older than 2d, search filter")
     }
 
-    @Test func backspaceInAnEmptyFieldReopensTheLastPill() {
-        #expect(SearchQueryTokens.reopeningLast("from:dana to:theo ") == "from:dana to:theo")
-        #expect(SearchQueryTokens.split("from:dana to:theo").rest == "to:theo", "the last pill is text again")
-        #expect(SearchQueryTokens.reopeningLast("from:dana ") == "from:dana")
-        #expect(SearchQueryTokens.reopeningLast("from:dana x") == nil, "text after the pills: ⌫ edits it")
-        #expect(SearchQueryTokens.reopeningLast("hello") == nil, "no pill")
-        #expect(SearchQueryTokens.reopeningLast("") == nil)
+    static let start = NSRange(location: 0, length: 0)
+
+    static func edit(_ key: SearchFieldKey, _ text: String, selected: IndexSet = [],
+                     caret: NSRange = start) -> SearchPillEdit? {
+        SearchQueryTokens.edit(key, text: text, selected: selected, caret: caret)
+    }
+
+    static let kinds = ["from:matthew.walker@example.com", "to:theo", "-from:dana", "label:\"Team Notes\"",
+                        "before:2026/10/01", "after:2026/09/01", "older_than:2d", "has:attachment", "is:unread",
+                        "in:anywhere", "subject:(dinner movie)", "filename:pdf", "larger:5M"]
+
+    @Test(arguments: kinds)
+    func backspaceSelectsAnyPillThenRemovesIt(_ pill: String) throws {
+        let text = "subject:budget " + pill + " "
+        let first = try #require(Self.edit(.deleteBackward, text))
+        #expect(first == SearchPillEdit(text: text, selected: [1], caret: Self.start, consumesKey: true),
+                "the first ⌫ selects \(pill)")
+        let second = try #require(Self.edit(.deleteBackward, text, selected: first.selected))
+        #expect(second == SearchPillEdit(text: "subject:budget ", selected: [], caret: Self.start, consumesKey: true))
+        #expect(SearchQueryTokens.removing([1], from: text) == "subject:budget ", "the remove control does the same")
+    }
+
+    @Test func backspaceInTheTextIsTheText() {
+        #expect(Self.edit(.deleteBackward, "from:dana q4", caret: NSRange(location: 2, length: 0)) == nil)
+        #expect(Self.edit(.deleteBackward, "q4 from:dana ") == nil, "no pill")
+        #expect(Self.edit(.deleteBackward, "") == nil)
+        #expect(Self.edit(.deleteForward, "from:dana q4") == nil, "no pill after the caret")
+        #expect(Self.edit(.right, "from:dana q4") == nil)
+        #expect(Self.edit(.typing("x"), "from:dana ") == nil)
+    }
+
+    @Test func aClickIntoTheTextLetsGoOfTheSelectedPill() {
+        let moved = Self.edit(.deleteBackward, "from:dana q4", selected: [0], caret: NSRange(location: 2, length: 0))
+        #expect(moved == SearchPillEdit(text: "from:dana q4", selected: [], caret: nil, consumesKey: false),
+                "the caret left the pills: ⌫ edits the text")
+        #expect(Self.edit(.other, "from:dana ", selected: [0])
+                    == SearchPillEdit(text: "from:dana ", selected: [], caret: nil, consumesKey: false),
+                "↩ and the like let go and go on")
+        #expect(Self.edit(.escape, "from:dana ", selected: [0], caret: NSRange(location: 0, length: 0))
+                    == SearchPillEdit(text: "from:dana ", selected: [], caret: Self.start, consumesKey: true),
+                "Esc lets go of the pill and keeps it")
+        #expect(Self.edit(.escape, "from:dana ") == nil, "nothing selected: Esc is the field's")
+        #expect(Self.edit(.escape, "from:dana q4", selected: [0], caret: NSRange(location: 2, length: 0))?.consumesKey
+                    == false, "the caret left the pills: Esc lets go and goes on")
+        #expect(Self.edit(.deleteBackward, "from:dana ", selected: [4])?.selected == [0], "a stale position is ignored")
+    }
+
+    @Test func arrowsWalkAcrossThePills() throws {
+        let text = "from:dana to:theo q4"
+        let end = NSRange(location: 2, length: 0)
+        #expect(Self.edit(.left, text, caret: end) == nil, "← in the text moves the caret")
+        #expect(Self.edit(.left, text)?.selected == [1])
+        #expect(Self.edit(.left, text, selected: [1])?.selected == [0])
+        #expect(Self.edit(.left, text, selected: [0])?.selected == [0], "stays on the first pill")
+        #expect(Self.edit(.right, text, selected: [0])?.selected == [1])
+        let back = try #require(Self.edit(.right, text, selected: [1]))
+        #expect(back == SearchPillEdit(text: text, selected: [], caret: Self.start, consumesKey: true), "back to the text")
+        let deleted = try #require(Self.edit(.deleteForward, text, selected: [0]))
+        #expect(deleted.text == "to:theo q4" && deleted.selected.isEmpty, "⌦ removes the pill after the caret")
+    }
+
+    @Test func selectAllTakesThePillsWithTheText() throws {
+        let text = "from:dana to:theo q4"
+        let whole = NSRange(location: 0, length: 2)
+        let all = try #require(Self.edit(.selectAll, text, caret: NSRange(location: 1, length: 0)))
+        #expect(all == SearchPillEdit(text: text, selected: [0, 1], caret: whole, consumesKey: true))
+        #expect(Self.edit(.deleteBackward, text, selected: all.selected, caret: whole)?.text == "")
+        #expect(Self.edit(.deleteForward, text, selected: all.selected, caret: whole)?.text == "")
+        let typed = try #require(Self.edit(.typing("b"), text, selected: all.selected, caret: whole))
+        #expect(typed == SearchPillEdit(text: "b", selected: [], caret: NSRange(location: 1, length: 0), consumesKey: true),
+                "typing replaces everything")
+        #expect(Self.edit(.selectAll, "q4") == nil, "no pills: the field selects its text")
+    }
+
+    @Test func aRemoveControlNamesItsFilter() throws {
+        let from = try #require(SearchQueryTokens.split("from:dana ").tokens.first)
+        #expect(from.removeLabel == "Remove from filter")
+        let negated = try #require(SearchQueryTokens.split("-label:work ").tokens.first)
+        #expect(negated.removeLabel == "Remove not label filter")
+        let older = try #require(SearchQueryTokens.split("older_than:2d ").tokens.first)
+        #expect(older.removeLabel == "Remove older than filter")
     }
 }

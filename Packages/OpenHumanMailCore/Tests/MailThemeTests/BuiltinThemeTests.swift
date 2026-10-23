@@ -175,7 +175,7 @@ import Testing
         let t = ThemeTokens.light
         #expect(t.space == [0, 2, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64])
         #expect([t.radiusXS, t.radiusSM, t.radiusMD, t.radiusLG, t.radiusXL, t.radiusPill] == [3, 4, 6, 8, 12, 999])
-        #expect([t.densityCompactRow, t.densityDefaultRow, t.densityComfortableRow] == [32, 36, 44])
+        #expect([t.densityCompactRow, t.densityDefaultRow, t.densityComfortableRow] == [32, 40, 48])
         #expect(t.motionEnterFast == ThemeMotion(durationMs: 100, easing: .cubicBezier(0.2, 0, 0, 1)))
         #expect(t.motionReveal == ThemeMotion(durationMs: 80, easing: .linear))
         #expect(t.motionInstant == ThemeMotion(durationMs: 0))

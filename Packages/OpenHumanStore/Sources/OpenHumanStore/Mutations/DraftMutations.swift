@@ -117,6 +117,8 @@ enum DraftMutations {
         if let expectedVersion, expectedVersion != row.localVersion {
             throw StoreError.conflict("draft \(id.rawValue) is at version \(row.localVersion), not \(expectedVersion)")
         }
+        // Why: a save that repeats the stored content keeps the version, so it uploads nothing and starts no sync
+        if row.state != .failed, DraftRow.normalized(content) == DraftRow.normalized(row.content) { return row.localVersion }
         var sets = MailStore.contentColumns(content)
         if row.state == .failed { sets += unschedule(row) }
         return try bump(row, sets: sets, in: db)

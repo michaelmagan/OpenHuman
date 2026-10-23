@@ -3,9 +3,17 @@
 OpenHuman Mail is themed by plain JSON files. The built-in themes (Light, Dark, Paper, Midnight, System Light, System Dark) and accents
 (Blue, Iris, Pine, Graphite, System) are files in the same format as yours, and go through the same checks.
 
-System Light and System Dark use sRGB snapshots of macOS's semantic colors and system blue, the system font at AppKit's
-sizes, and the same dense rows as the other themes. They follow light/dark (Settings › Appearance picks them per
-appearance) but are snapshots, so a change of the user's accent in System Settings is not picked up live.
+Themes colour the content: the message list, the conversation and the composer. The window chrome (toolbar, sidebar,
+menus, controls) always uses the native macOS colours and materials, in every theme.
+
+System Light and System Dark are the default. They use sRGB snapshots of macOS's semantic colors, the system font at
+AppKit's sizes, a plain window-coloured canvas and the same rows as the other themes (32, 40 or 48 pt for Compact,
+Default and Comfortable). With the System accent, the accent tokens follow the accent chosen in System Settings, live;
+the app adjusts that colour where needed so accent text, fills and focus rings keep their contrast. Native controls
+are tinted with the accent only when you choose one other than System.
+
+Preferences saved before this default existed move once from the built-in Light and Dark themes to System Light and
+System Dark. Paper, Midnight and your own themes are kept, and so is a later choice of Light or Dark.
 
 ## Where themes live
 

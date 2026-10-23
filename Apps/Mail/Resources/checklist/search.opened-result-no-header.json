@@ -1,0 +1,14 @@
+{
+  "id": "search.opened-result-no-header",
+  "area": "Search",
+  "title": "An opened search result shows no search lines",
+  "steps": [
+    "Launch Mail with -UseFakeGmail, press /, type a word and press Return",
+    "Press Return to open the first result",
+    "Press Escape to go back"
+  ],
+  "deepLink": null,
+  "expected": "The open conversation shows no \"results in\" line, Save or Most relevant / Most recent switch above it. Back in the list, the results come back with the same query, count, sort and the opened row selected.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

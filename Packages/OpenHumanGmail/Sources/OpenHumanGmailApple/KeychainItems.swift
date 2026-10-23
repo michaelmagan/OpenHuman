@@ -24,7 +24,12 @@ public final class KeychainItems: Sendable {
 
     struct Item: Hashable, Sendable { var service: String; var account: String }
 
-    struct Entry: Sendable, Equatable { var data: Data; var modifiedAt: Date? }
+    struct Entry: Sendable, Equatable {
+        var data: Data
+        var modifiedAt: Date?
+        var label: String? = nil
+        var generic: Data? = nil
+    }
 
     private enum Cached: Sendable { case absent; case present(Entry); case refused(OSStatus) }
 
@@ -169,7 +174,9 @@ public final class KeychainItems: Sendable {
             guard let attributes = KeychainSharedGrantStore.single(result),
                   ours(attributes, service: item.service, account: item.account),
                   let data = attributes[kSecValueData as String] as? Data else { throw KeychainItemsError.notOurs }
-            let entry = Entry(data: data, modifiedAt: attributes[kSecAttrModificationDate as String] as? Date)
+            let entry = Entry(data: data, modifiedAt: attributes[kSecAttrModificationDate as String] as? Date,
+                              label: attributes[kSecAttrLabel as String] as? String,
+                              generic: attributes[kSecAttrGeneric as String] as? Data)
             remember(item, .present(entry))
             return entry
         }
@@ -196,9 +203,12 @@ public final class KeychainItems: Sendable {
                     }
                     status = backend.add(attributes)
                 }
-                guard status == errSecSuccess else { throw KeychainItemsError.status(status) }
+                guard status == errSecSuccess else {
+                    if case .present(let old)? = before { restore(item, old, label: label) }
+                    throw KeychainItemsError.status(status)
+                }
                 state.withLock { s in
-                    s.entries[item] = .present(Entry(data: data, modifiedAt: Date()))
+                    s.entries[item] = .present(Entry(data: data, modifiedAt: Date(), label: label, generic: generic))
                     if s.lists[item.service] != nil { s.lists[item.service]?.insert(item.account) }
                 }
             } catch {
@@ -209,6 +219,13 @@ public final class KeychainItems: Sendable {
                 throw error
             }
         }
+    }
+
+    // Why: the old item was deleted to give the new one this app's ACL; when the add fails, the old value goes back
+    private func restore(_ item: Item, _ old: Entry, label: String) {
+        let status = backend.add(addAttributes(item, data: old.data, label: old.label ?? label, generic: old.generic))
+        guard status != errSecSuccess else { return }
+        Log(.keychain).error("a Keychain item could not be put back after a failed replace (OSStatus \(status))")
     }
 
     func delete(_ item: Item) throws {

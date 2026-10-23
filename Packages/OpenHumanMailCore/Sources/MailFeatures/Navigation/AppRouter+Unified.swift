@@ -11,10 +11,33 @@ extension AppRouter {
     @discardableResult
     public func goToAllInboxes() -> Bool {
         guard showsAllInboxes else { return false }
-        if unifiedInbox != nil { return true }
         environment.calendarWindowIfStarted?.stepAside()
+        if unifiedInbox != nil { return true }
+        startAllInboxes()
+        return true
+    }
+
+    // An open All Inboxes reads the accounts it started with, so it starts again, with the same text, when one is
+    // added, removed or renamed
+    func allInboxesFollowAccounts() {
+        guard let model = unifiedInbox, !model.reads(accounts.map(\.account)) else { return }
+        let query = model.query, everywhere = model.searchAllAccounts
+        leaveAllInboxes()
+        guard showsAllInboxes else { return }
+        startAllInboxes()
+        unifiedInbox?.setSearchAllAccounts(everywhere)
+        unifiedInbox?.setQuery(query)
+    }
+
+    private func startAllInboxes() {
         let model = AllInboxesModel(accounts: accounts.map(\.account), open: { [weak self] key in
             guard let self else { return }
+            // A row of an account removed since: opening it would open the key in the active account
+            guard self.accounts.contains(where: { $0.id == key.account }) else {
+                self.leaveAllInboxes()
+                self.goToAllInboxes()
+                return
+            }
             self.switchAccount(to: key.account)
             self.open(key)
         }, done: { [weak self] keys in
@@ -27,7 +50,6 @@ extension AppRouter {
         }, localReads: accounts.reduce(into: [:]) { $0.merge($1.localReads) { max($0, $1) } })
         unifiedInbox = model
         model.start(data: environment.data)
-        return true
     }
 
     public func leaveAllInboxes() {

@@ -26,12 +26,12 @@ public enum CalendarPalette {
 
     public static let pastFillStrength = 0.5
 
-    public static func state(isSelected: Bool, isDeclined: Bool, needsAnswer: Bool, isOutlined: Bool,
+    public static func state(isSelected: Bool, isDeclined: Bool, needsAnswer: Bool, isTentative: Bool,
                              isPast: Bool) -> BlockState {
         if isSelected { return .selected }
         if isDeclined { return .declined }
         if needsAnswer { return .invited }
-        if isOutlined { return .outlined }
+        if isTentative { return .outlined }
         return isPast ? .past : .normal
     }
 

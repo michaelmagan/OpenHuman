@@ -25,6 +25,10 @@ public final class MainContentViewController: NSViewController {
     private var wakeObserver: (any NSObjectProtocol)?
     private var seenFieldFocus = 0
     private var seenResultsFocus = 0
+    /// Waiting for the results to load before they take the keys; true when the first result is to be selected.
+    private var pendingResultsFocus: Bool?
+    private var shownSearchOpen = false
+    private var shownPillSelection = IndexSet()
     private lazy var printer = ConversationPrinter { [weak self] in self?.view.window }
     private(set) lazy var overlayFocus = OverlayFocusKeeper { [weak self] in self?.view.window }
 
@@ -85,6 +89,9 @@ public final class MainContentViewController: NSViewController {
         }
         keyRouter.perform = { [weak self] action, _ in self?.router.perform(action) ?? false }
         keyRouter.editingKeyHandler = { [weak self] event in self?.editSearchQuery(with: event) ?? false }
+        keyRouter.fieldEditorKeyHandler = { [weak self] event, editor in
+            self?.editSearchField(with: event, in: editor) ?? false
+        }
         keyRouter.isMailWindow = { [weak self] window in window === self?.view.window }
         keyRouter.onPendingSequence = { [weak self] prefix in
             self?.router.sequenceHint = prefix.map { Self.hint(for: $0) }
@@ -190,6 +197,7 @@ public final class MainContentViewController: NSViewController {
         let list = active?.list
         let reader = active?.reader
         _ = list?.revision
+        _ = list?.state
         if active !== boundAccount {
             captureScroll(into: boundAccount)
             boundAccount = active
@@ -213,9 +221,23 @@ public final class MainContentViewController: NSViewController {
         let search = router.environment.overlays.search
         let fieldTakesFocus = search.focusRequest != seenFieldFocus
         seenFieldFocus = search.focusRequest
+        if fieldTakesFocus, mode == .list, search.isOpen { focusSearchField(request: search.focusRequest) }
         if search.resultsFocusRequest != seenResultsFocus {
             seenResultsFocus = search.resultsFocusRequest
-            if mode == .list { view.window?.makeFirstResponder(listController.tableView) }
+            pendingResultsFocus = mode == .list ? search.resultsFocusStartsAtTop : nil
+        }
+        if pendingResultsFocus != nil { focusResultsOnceShown() }
+        if search.isOpen != shownSearchOpen {
+            let closed = shownSearchOpen
+            shownSearchOpen = search.isOpen
+            if closed, mode == .list, !router.environment.overlays.isShowing, router.unifiedInbox == nil {
+                focusListAfterSearch()
+            }
+        }
+        let selectedPills = search.selectedPills
+        if selectedPills != shownPillSelection {
+            shownPillSelection = selectedPills
+            if !selectedPills.isEmpty, mode == .list, search.isOpen { placeCaretAtPills() }
         }
 
         let unified = router.unifiedInbox != nil
@@ -233,6 +255,7 @@ public final class MainContentViewController: NSViewController {
         listController.view.isHidden = mode == .reader
         readerController.view.isHidden = mode == .list
         guard !(mode == .list && fieldTakesFocus) else { return }
+        guard !(mode == .list && searchFieldHasTheKeys()) else { return }
         view.window?.makeFirstResponder(mode == .reader ? readerController.focusView : listController.tableView)
     }
 
@@ -274,29 +297,168 @@ public final class MainContentViewController: NSViewController {
         scroll.reflectScrolledClipView(scroll.contentView)
     }
 
+    /// Return in the search field, or ↓ from it: the results take the keys once they have loaded, Return's with the
+    /// first result selected. With no results the field keeps the keys.
+    private func focusResultsOnceShown() {
+        guard let startsAtTop = pendingResultsFocus else { return }
+        let search = router.environment.overlays.search
+        guard router.mode == .list, search.isOpen, let query = search.shownQuery, let list = router.active?.list,
+              startsAtTop ? search.text.trimmingCharacters(in: .whitespacesAndNewlines) == query
+                          : list.location == .search(query) else {
+            pendingResultsFocus = nil
+            return
+        }
+        // Typing on drops the request above; until then this waits for the query's list to load
+        guard list.location == .search(query), list.state != .loading else { return }
+        pendingResultsFocus = nil
+        guard let first = list.rows.first?.id else { return }
+        if startsAtTop { list.setCursor(first) }
+        view.window?.makeFirstResponder(listController.tableView)
+    }
+
+    /// Search closed: the list takes the keys from the search field or from nowhere in particular. Another field and
+    /// another list (the sidebar) keep theirs.
+    private func focusListAfterSearch() {
+        guard let window = view.window else { return }
+        let responder = window.firstResponder
+        let table = listController.tableView
+        guard responder !== table else { return }
+        if let editor = responder as? NSTextView, editor.isFieldEditor, let field = editor.delegate as? NSTextField,
+           Self.isSearchField(field) {
+            window.makeFirstResponder(table)
+            return
+        }
+        if KeyRouter.isTextInput(responder) || responder is NSTableView || responder is NSCollectionView { return }
+        window.makeFirstResponder(table)
+    }
+
+    /// Keys the toolbar's search field answers before its editor: Tab takes the completion (or the interpretation),
+    /// and ⌫, ⌦, ← →, Esc and ⌘A edit the pills.
+    func editSearchField(with event: NSEvent, in editor: NSTextView) -> Bool {
+        if event.keyCode == KeyChord.NamedKey.tab.rawValue,
+           event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty {
+            return completeSearch(in: editor)
+        }
+        return editSearchPills(with: event, in: editor)
+    }
+
+    private func completeSearch(in editor: NSTextView) -> Bool {
+        let search = router.environment.overlays.search
+        guard router.mode == .list, search.isOpen, let window = view.window,
+              let field = editor.delegate as? NSTextField, field === searchField(in: window),
+              search.acceptCompletion() else { return false }
+        let rest = SearchQueryTokens.rest(of: search.text)
+        if editor.string != rest { editor.string = rest }
+        editor.setSelectedRange(NSRange(location: (rest as NSString).length, length: 0))
+        return true
+    }
+
     func editSearchQuery(with event: NSEvent) -> Bool {
         let search = router.environment.overlays.search
         guard router.mode == .list, search.isOpen, search.shownQuery != nil, !router.environment.overlays.isShowing,
-              let window = view.window, let field = searchField(in: window), window.makeFirstResponder(field),
+              let window = view.window, let field = searchField(in: window),
+              (field.window ?? window).makeFirstResponder(field),
               let editor = field.currentEditor() as? NSTextView else { return false }
-        if editor.string.isEmpty, event.keyCode == 51, let reopened = SearchQueryTokens.reopeningLast(search.text) {
-            search.text = reopened
-            return true
-        }
-        editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+        let end = (editor.string as NSString).length
+        editor.setSelectedRange(NSRange(location: search.selectedPills.isEmpty ? end : 0, length: 0))
+        if editSearchPills(with: event, in: editor) { return true }
         editor.keyDown(with: event)
         return true
     }
 
-    func searchField(in window: NSWindow) -> NSTextField? {
-        guard let root = window.contentView else { return nil }
-        let band = CGFloat(theme.component.toolbar.height)
-        return OverlayFocusKeeper.editableFields(in: window).first { field in
-            guard !field.isHiddenOrHasHiddenAncestor, !field.isDescendant(of: view) else { return false }
-            let frame = root.convert(field.bounds, from: field)
-            let top = root.isFlipped ? frame.minY : root.bounds.height - frame.maxY
-            return top >= 0 && top < band
+    /// The search field's pills answer ⌫, ⌦, ← →, Esc and ⌘A at their edge before the field editor sees them; the editor
+    /// alone would beep at ⌫ with no text before the caret. See `SearchQueryTokens.edit`.
+    func editSearchPills(with event: NSEvent, in editor: NSTextView) -> Bool {
+        let search = router.environment.overlays.search
+        guard router.mode == .list, search.isOpen, let window = view.window,
+              let field = editor.delegate as? NSTextField, field === searchField(in: window),
+              let edit = SearchQueryTokens.edit(SearchFieldKey(event: event), text: search.text,
+                                                selected: search.selectedPills, caret: editor.selectedRange()) else {
+            return false
         }
+        if edit.text != search.text {
+            SearchPills.setText(edit.text, of: search, undoManager: editor.undoManager)
+            let rest = SearchQueryTokens.rest(of: edit.text)
+            if editor.string != rest { editor.string = rest }
+        }
+        search.selectedPills = edit.selected
+        if let caret = edit.caret { editor.setSelectedRange(caret) }
+        return edit.consumesKey
+    }
+
+    /// A theme change or reload must leave the keys in the toolbar's search field.
+    private func searchFieldHasTheKeys() -> Bool {
+        guard let window = view.window, let field = searchField(in: window) else { return false }
+        return OverlayFocusKeeper.control(of: (field.window ?? window).firstResponder) === field
+    }
+
+    /// A pill selected with a click: the field takes the keys with the caret at the pills, where ⌫ removes it.
+    private func placeCaretAtPills() {
+        let search = router.environment.overlays.search
+        guard let window = view.window, let field = searchField(in: window) else { return }
+        let target = field.window ?? window
+        if OverlayFocusKeeper.control(of: target.firstResponder) !== field { target.makeFirstResponder(field) }
+        guard let editor = field.currentEditor() as? NSTextView else { return }
+        let start = NSRange(location: 0, length: 0)
+        let whole = NSRange(location: 0, length: (editor.string as NSString).length)
+        let allSelected = search.selectedPills.count == SearchQueryTokens.pillCount(search.text)
+        let caret = editor.selectedRange()
+        if caret != start, !(allSelected && caret == whole) { editor.setSelectedRange(start) }
+    }
+
+    static let searchFocusAttempts = 50
+
+    /// Gives the toolbar's search field the keys. SwiftUI's focus request does not reach a field inside a toolbar
+    /// item, and the item arrives a moment after search opens, so this waits for the field, a few frames at most.
+    private func focusSearchField(request: Int, attempt: Int = 0) {
+        let search = router.environment.overlays.search
+        guard search.isOpen, search.focusRequest == request, router.mode == .list, let window = view.window else { return }
+        if let field = searchField(in: window) {
+            let target = field.window ?? window
+            if OverlayFocusKeeper.control(of: target.firstResponder) !== field { target.makeFirstResponder(field) }
+            // A toolbar that is still laying out its items can refuse the field; the next frame tries again
+            if OverlayFocusKeeper.control(of: target.firstResponder) === field { return }
+        }
+        guard attempt < Self.searchFocusAttempts else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(20)) { [weak self] in
+            MainActor.assumeIsolated { self?.focusSearchField(request: request, attempt: attempt + 1) }
+        }
+    }
+
+    /// The toolbar's search field. It lives in the window's toolbar, which in full screen AppKit moves into a
+    /// window of its own, so the lookup starts from the toolbar's items rather than from the content view.
+    func searchField(in window: NSWindow) -> NSTextField? {
+        // A field in the toolbar's overflow has no window and cannot take the keys
+        let fields = Self.toolbarFields(of: window).filter {
+            $0.window != nil && !$0.isHiddenOrHasHiddenAncestor && !$0.isDescendant(of: view)
+        }
+        return fields.first(where: Self.isSearchField) ?? fields.first
+    }
+
+    static func toolbarFields(of window: NSWindow) -> [NSTextField] {
+        var roots: [NSView] = window.toolbar?.items.compactMap(\.view) ?? []
+        if let frame = window.contentView?.superview { roots.append(frame) }
+        var seen = Set<ObjectIdentifier>()
+        var result: [NSTextField] = []
+        func walk(_ view: NSView) {
+            if view === window.contentView { return }
+            if let field = view as? NSTextField, field.isEditable, seen.insert(ObjectIdentifier(field)).inserted {
+                result.append(field)
+            }
+            for child in view.subviews { walk(child) }
+        }
+        for root in roots { walk(root) }
+        return result
+    }
+
+    static func isSearchField(_ field: NSTextField) -> Bool {
+        var view: NSView? = field
+        while let current = view {
+            if current.accessibilityIdentifier() == ShellToolbar.searchFieldIdentifier
+                || current.identifier?.rawValue == ShellToolbar.searchFieldIdentifier { return true }
+            view = current.superview
+        }
+        return false
     }
 
     static func hint(for chord: KeyChord) -> String {
@@ -304,5 +466,32 @@ public final class MainContentViewController: NSViewController {
         case .character(let c): c.uppercased() + "…"
         case .named: "…"
         }
+    }
+}
+
+extension SearchFieldKey {
+    init(event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        let characters = event.characters ?? ""
+        switch event.keyCode {
+        case 51 where !modifiers.contains(.control): self = .deleteBackward
+        case 117 where modifiers.isEmpty: self = .deleteForward
+        case 123 where modifiers.isEmpty: self = .left
+        case 124 where modifiers.isEmpty: self = .right
+        case 53 where modifiers.isEmpty: self = .escape
+        default:
+            if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "a" {
+                self = .selectAll
+            } else if modifiers.intersection([.command, .control]).isEmpty, !characters.isEmpty,
+                      characters.unicodeScalars.allSatisfy(Self.isTyped) {
+                self = .typing(characters)
+            } else {
+                self = .other
+            }
+        }
+    }
+
+    private static func isTyped(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.value >= 0x20 && scalar.value != 0x7F && !(0xF700...0xF8FF).contains(scalar.value)
     }
 }

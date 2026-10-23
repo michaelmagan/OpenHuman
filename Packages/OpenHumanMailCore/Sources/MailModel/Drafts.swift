@@ -90,6 +90,7 @@ public struct DraftSummary: Identifiable, Sendable, Hashable {
     public let review: DraftReview
     public let status: DraftStatus
     public let sendAt: Date?
+    public let sendCondition: SendLaterCondition
     public let version: Int
     public let isDirty: Bool
     public let hasRemoteConflict: Bool
@@ -101,7 +102,8 @@ public struct DraftSummary: Identifiable, Sendable, Hashable {
     public init(id: DraftKey, account: AccountID, gmailDraftID: GmailDraftID? = nil, thread: ThreadKey? = nil,
                 mode: DraftMode, replyToGmailMessageID: GmailMessageID? = nil, fields: DraftFields,
                 source: DraftSource = .user, review: DraftReview = .none, status: DraftStatus = .editing,
-                sendAt: Date? = nil, version: Int = 1, isDirty: Bool = false, hasRemoteConflict: Bool = false,
+                sendAt: Date? = nil, sendCondition: SendLaterCondition = .always, version: Int = 1, isDirty: Bool = false,
+                hasRemoteConflict: Bool = false,
                 agentNote: String? = nil, agentSnapshot: DraftFields? = nil, lastError: String? = nil,
                 updatedAt: Date) {
         self.id = id
@@ -115,6 +117,7 @@ public struct DraftSummary: Identifiable, Sendable, Hashable {
         self.review = review
         self.status = status
         self.sendAt = sendAt
+        self.sendCondition = sendCondition
         self.version = version
         self.isDirty = isDirty
         self.hasRemoteConflict = hasRemoteConflict

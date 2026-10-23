@@ -1,0 +1,15 @@
+{
+  "id": "shell.native-toolbar",
+  "area": "Window",
+  "title": "Native window: sidebar, unified toolbar, inspector and floating banners",
+  "steps": [
+    "Launch Mail with -UseFakeData. Press Control-Command-S twice, then click the sidebar button in the toolbar",
+    "On the Important tab, click the other split segments; open a conversation and use Done, Remind, Label, Trash, Previous, Next and More in the toolbar, then Back",
+    "Press / and type a search; turn Wi-Fi off (or wait for the offline banner) and open the contact panel on a conversation",
+    "Choose View > Customize Toolbar, then enter full screen and press / again; repeat once with -NativeFeatures 26"
+  ],
+  "deepLink": null,
+  "expected": "Title is the mailbox, subtitle the account and its size; no empty band above the toolbar. The sidebar toggles with the shortcut and button. Splits are a segmented control (tabs on macOS 27), More past six. Search sits in the toolbar and takes the keys. Banners float without moving the list; the contact panel opens on the right. Full screen and Customize Toolbar work.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

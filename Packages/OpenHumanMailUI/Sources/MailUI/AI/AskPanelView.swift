@@ -23,7 +23,6 @@ public struct AskPanelView: View {
     @Bindable var model: AskModel
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var contrast
     #if os(macOS)
     @Environment(\.openSettings) private var openSettings
     #endif
@@ -35,19 +34,10 @@ public struct AskPanelView: View {
     }
 
     public var body: some View {
-        GeometryReader { proxy in
-            let maxHeight = min(AskPanelMetrics.maxHeight, max(proxy.size.height - AskPanelMetrics.verticalMargin, 240))
-            ZStack(alignment: .top) {
-                theme.bgScrim.color
-                    .contentShape(Rectangle())
-                    .onTapGesture { model.close() }
-                    .accessibilityHidden(true)
-                card(maxHeight: maxHeight)
-                    .frame(width: min(AskPanelMetrics.width, max(proxy.size.width - OverlayMetrics.windowMargin, 280)))
-                    .padding(.top, AskPanelMetrics.top)
-            }
+        OverlayPanel(width: AskPanelMetrics.width, top: AskPanelMetrics.top, label: AskWording.title,
+                     dismiss: { model.close() }) { size in
+            card(maxHeight: min(AskPanelMetrics.maxHeight, max(size.height - AskPanelMetrics.verticalMargin, 240)))
         }
-        .transaction { $0.disablesAnimations = true }
         .task(id: model.phase) {
             showsSearchingLine = false
             guard model.phase == .retrieving else { return }
@@ -59,32 +49,24 @@ public struct AskPanelView: View {
         }
     }
 
-    private var divider: Color { (contrast == .increased ? theme.borderControl : theme.borderHairline).color }
-
     private func card(maxHeight: CGFloat) -> some View {
         let rowsHeight = rowsListHeight
         let chrome = AskPanelMetrics.inputHeight + AskPanelMetrics.planLineHeight + AskPanelMetrics.footerHeight + 48
         let answerMax = max(80, min(AskPanelMetrics.answerMaxHeight, maxHeight - chrome - rowsHeight))
         return VStack(alignment: .leading, spacing: 0) {
             input
-            Divider().overlay(divider)
+            Divider()
             planArea
             content(answerMax: answerMax)
+            if showsExamples { examples }
             if !model.rows.isEmpty {
-                Divider().overlay(divider)
+                Divider()
                 rowsList(height: rowsHeight)
             }
-            Divider().overlay(divider)
+            Divider()
             footer
         }
         .frame(maxHeight: maxHeight, alignment: .top)
-        .background(RoundedRectangle(cornerRadius: theme.radiusXL).fill(theme.bgElevated.color))
-        .overlay(RoundedRectangle(cornerRadius: theme.radiusXL).strokeBorder(theme.textAI.color, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: theme.radiusXL))
-        .themeShadow(theme.shadow3)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(AskWording.title)
-        .accessibilityAddTraits(.isModal)
         .onAppear {
             focused = true
             #if canImport(AppKit)
@@ -94,17 +76,9 @@ public struct AskPanelView: View {
     }
 
     private var input: some View {
-        HStack(spacing: theme.space4) {
-            Image(systemName: "sparkle")
-                .font(.system(size: OverlayMetrics.rowIconSize))
-                .foregroundStyle(theme.textAI.color)
-                .accessibilityHidden(true)
-            TextField(AskWording.title, text: $model.question,
-                      prompt: Text(AskWording.placeholder).foregroundStyle(theme.textTertiary.color))
-                .textFieldStyle(.plain)
-                .font(theme.typePaletteInput.swiftUIFont)
-                .foregroundStyle(theme.textPrimary.color)
-                .overlayInputLine(theme.typePaletteInput)
+        OverlayFieldRow(symbol: "sparkle", symbolColor: theme.textAI.color) {
+            TextField(AskWording.title, text: $model.question, prompt: Text(AskWording.placeholder))
+                .overlayField()
                 .focused($focused)
                 .onSubmit { model.submit() }
                 .onKeyPress(.return, phases: .down) { press in
@@ -139,12 +113,10 @@ public struct AskPanelView: View {
                     return .handled
                 }
                 .accessibilityLabel(AskWording.placeholder)
+        } trailing: {
             if !model.scopes.isEmpty { scopeChip }
-            KeycapView(text: "esc")
+            OverlayShortcutHint("esc")
         }
-        .padding(.horizontal, OverlayMetrics.rowIconX)
-        .frame(height: AskPanelMetrics.inputHeight)
-        .layoutPriority(1)
     }
 
     private var scopeChip: some View {
@@ -154,17 +126,13 @@ public struct AskPanelView: View {
             }
         } label: {
             Text(verbatim: model.scopeTitle)
-                .font(theme.typeCaption.swiftUIFont)
-                .foregroundStyle(theme.textSecondary.color)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .padding(.horizontal, theme.space3)
                 .frame(maxWidth: AskPanelMetrics.chipMaxWidth)
-                .frame(height: AskPanelMetrics.chipHeight)
-                .background(Capsule().fill(theme.bgSunken.color))
         }
-        .ohBorderlessMenuStyle()
-        .menuIndicator(.hidden)
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
         .fixedSize()
         .accessibilityLabel(String(localized: "Scope: \(model.scopeTitle)"))
         .accessibilityHint(String(localized: "Tab changes it"))
@@ -176,11 +144,11 @@ public struct AskPanelView: View {
         if !text.isEmpty || model.isWorking {
             VStack(alignment: .leading, spacing: 0) {
                 Text(verbatim: text)
-                    .font(theme.typeCaption.swiftUIFont)
-                    .foregroundStyle(theme.textTertiary.color)
+                    .font(.system(size: NativeMetrics.Text.caption))
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .padding(.horizontal, OverlayMetrics.rowIconX)
+                    .padding(.horizontal, OverlayMetrics.panelInsetX)
                     .frame(maxWidth: .infinity, minHeight: AskPanelMetrics.planLineHeight, alignment: .leading)
                 if model.isWorking { progress }
             }
@@ -200,14 +168,13 @@ public struct AskPanelView: View {
     private var progress: some View {
         if reduceMotion {
             VStack(alignment: .leading, spacing: theme.space1) {
-                GeometryReader { proxy in
-                    Capsule().fill(theme.textAI.color).frame(width: proxy.size.width * 0.3, height: 2)
-                }
-                .frame(height: 2)
+                ProgressView(value: 0.3)
+                    .progressViewStyle(.linear)
+                    .tint(theme.textAI.color)
                 Text(AskWording.working)
-                    .font(theme.typeCaption.swiftUIFont)
-                    .foregroundStyle(theme.textTertiary.color)
-                    .padding(.horizontal, OverlayMetrics.rowIconX)
+                    .font(.system(size: NativeMetrics.Text.caption))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, OverlayMetrics.panelInsetX)
             }
             .accessibilityElement(children: .combine)
         } else {
@@ -227,15 +194,14 @@ public struct AskPanelView: View {
                 AIConsentView(request: consent, center: model.aiCenter,
                               accept: { Task { await model.acceptConsent() } }, decline: { model.declineConsent() })
             }
-            if showsExamples { examples }
         }
-        .padding(.horizontal, OverlayMetrics.rowIconX)
+        .padding(.horizontal, OverlayMetrics.panelInsetX)
         .padding(.vertical, hasContent ? theme.space3 : 0)
     }
 
     private var hasContent: Bool {
         model.askedAtText != nil || model.isSuspicious || !model.answer.isEmpty || model.statusText != nil
-            || model.consent != nil || model.phase == .stopped || showsExamples
+            || model.consent != nil || model.phase == .stopped
     }
 
     private var showsExamples: Bool {
@@ -245,8 +211,8 @@ public struct AskPanelView: View {
     private func answer(maxHeight: CGFloat) -> some View {
         ScrollView {
             Text(verbatim: model.answer)
-                .font(theme.typeReader.swiftUIFont)
-                .foregroundStyle(answerColor)
+                .font(.system(size: NativeMetrics.Text.body))
+                .foregroundStyle(answerStyle)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -257,41 +223,39 @@ public struct AskPanelView: View {
         .accessibilityValue(model.answer)
     }
 
-    private var answerColor: Color {
-        if model.phase == .stopped { return theme.textTertiary.color }
-        if model.phase == .done, model.sources.isEmpty { return theme.textSecondary.color }
-        return theme.textPrimary.color
+    private var answerStyle: HierarchicalShapeStyle {
+        if model.phase == .stopped { return .tertiary }
+        if model.phase == .done, model.sources.isEmpty { return .secondary }
+        return .primary
     }
 
     private var suspiciousStrip: some View {
-        Label {
-            Text(AskWording.suspicious)
-                .font(theme.typeBody.swiftUIFont)
-                .foregroundStyle(theme.textPrimary.color)
-                .fixedSize(horizontal: false, vertical: true)
-        } icon: {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 14))
-                .foregroundStyle(theme.textWarning.color)
+        GroupBox {
+            Label {
+                Text(AskWording.suspicious)
+                    .font(.system(size: NativeMetrics.Text.body))
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(.orange)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, theme.space3)
-        .padding(.horizontal, theme.space4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: theme.radiusMD).fill(theme.bgWarningSubtle.color))
         .accessibilityElement(children: .combine)
     }
 
     private func caption(_ text: String) -> some View {
         Text(verbatim: text)
-            .font(theme.typeCaption.swiftUIFont)
-            .foregroundStyle(theme.textTertiary.color)
+            .font(.system(size: NativeMetrics.Text.caption))
+            .foregroundStyle(.secondary)
     }
 
     private func statusLine(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: theme.space2) {
             Text(verbatim: text)
-                .font(theme.typeBody.swiftUIFont)
-                .foregroundStyle((statusIsError ? theme.textDanger : theme.textSecondary).color)
+                .font(.system(size: NativeMetrics.Text.body))
+                .foregroundStyle(statusIsError ? AnyShapeStyle(Color.red) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
                 .fixedSize(horizontal: false, vertical: true)
             #if os(macOS)
             if model.phase == .failed(.aiOff) {
@@ -300,7 +264,7 @@ public struct AskPanelView: View {
                     openSettings()
                 }
                 .ohLinkButtonStyle()
-                .font(theme.typeBody.swiftUIFont)
+                .font(.system(size: NativeMetrics.Text.body))
             }
             #endif
         }
@@ -317,19 +281,18 @@ public struct AskPanelView: View {
     private var examples: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(AskWording.examples, id: \.self) { example in
-                Button {
+                OverlayRow(isSelected: false, height: AskPanelMetrics.exampleRowHeight) {
                     model.question = example
                     model.ask(followUp: false)
                 } label: {
                     Text(verbatim: example)
-                        .font(theme.typeBody.swiftUIFont)
-                        .foregroundStyle(theme.textSecondary.color)
-                        .frame(maxWidth: .infinity, minHeight: AskPanelMetrics.exampleRowHeight, alignment: .leading)
-                        .contentShape(Rectangle())
+                        .font(.system(size: NativeMetrics.Text.body))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .buttonStyle(.plain)
             }
         }
+        .padding(.bottom, OverlayMetrics.listPaddingY)
     }
 
     private enum Item: Identifiable {
@@ -366,7 +329,7 @@ public struct AskPanelView: View {
     private var rowsListHeight: CGFloat {
         let headers = items.filter { if case .header = $0 { true } else { false } }.count
         let content = CGFloat(model.rows.count) * AskPanelMetrics.rowHeight + CGFloat(headers) * AskPanelMetrics.groupHeight
-            + theme.space2 * 2
+            + OverlayMetrics.listPaddingY * 2
         return min(content, AskPanelMetrics.rowsMaxHeight)
     }
 
@@ -377,13 +340,13 @@ public struct AskPanelView: View {
                     ForEach(items) { item in
                         switch item {
                         case .header(let title):
-                            OverlayGroupHeader(title: title, height: AskPanelMetrics.groupHeight)
+                            OverlaySectionHeader(title: title)
                         case .row(let index, let row):
                             rowView(row, index: index).id(row.id)
                         }
                     }
                 }
-                .padding(.vertical, theme.space2)
+                .padding(.vertical, OverlayMetrics.listPaddingY)
             }
             .frame(height: height)
             .onChange(of: model.cursor) { _, cursor in
@@ -395,81 +358,64 @@ public struct AskPanelView: View {
     private func rowView(_ row: AskModel.Row, index: Int) -> some View {
         let isCursor = model.cursor == index
         let enabled = row != .olderMail || model.olderMailEnabled
-        return Button {
+        return OverlayRow(isSelected: isCursor, height: AskPanelMetrics.rowHeight) {
             model.moveCursor(to: index)
             model.activate(row)
         } label: {
-            HStack(spacing: 0) {
+            HStack(spacing: OverlayMetrics.rowSpacing) {
                 switch row {
                 case .source(let source), .otherMatch(let source):
                     sourceLabel(source)
                 case .showMore(let count):
-                    plainRow(AskWording.showMore(count), symbol: "chevron.down", color: theme.accentText)
+                    plainRow(AskWording.showMore(count), symbol: "chevron.down", enabled: true)
                 case .olderMail:
-                    plainRow(model.olderMailText ?? "", symbol: "magnifyingglass",
-                             color: enabled ? theme.accentText : theme.textDisabled)
+                    plainRow(model.olderMailText ?? "", symbol: "magnifyingglass", enabled: enabled)
                 }
             }
-            .padding(.trailing, OverlayMetrics.rowIconX)
-            .frame(height: AskPanelMetrics.rowHeight)
-            .background(CursorRowBackground(isCursor: isCursor))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .disabled(!enabled)
         .accessibilityLabel(model.spokenLabel(row))
-        .accessibilityAddTraits(isCursor ? .isSelected : [])
     }
 
+    @ViewBuilder
     private func sourceLabel(_ source: AskSource) -> some View {
-        HStack(spacing: 0) {
-            Image(systemName: "envelope")
-                .font(.system(size: OverlayMetrics.rowIconSize))
-                .foregroundStyle(theme.textSecondary.color)
-                .frame(width: OverlayMetrics.rowLabelX - OverlayMetrics.rowIconX, alignment: .leading)
-                .padding(.leading, OverlayMetrics.rowIconX)
-            Text(verbatim: source.sender)
-                .font(theme.typeBody.swiftUIFont)
-                .foregroundStyle(theme.textPrimary.color)
-                .lineLimit(1)
-            Text(verbatim: source.subject)
-                .font(theme.typeBody.swiftUIFont)
-                .foregroundStyle(theme.textSecondary.color)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .padding(.leading, theme.space3)
-            Spacer(minLength: theme.space5)
-            Text(verbatim: model.dateText(source))
-                .font(theme.typeMeta.swiftUIFont)
-                .foregroundStyle(theme.textTertiary.color)
-        }
+        OverlayRowSymbol(symbol: "envelope")
+        Text(verbatim: source.sender)
+            .font(.system(size: NativeMetrics.Text.body))
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+        Text(verbatim: source.subject)
+            .font(.system(size: NativeMetrics.Text.body))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        Spacer(minLength: OverlayMetrics.rowSpacing)
+        Text(verbatim: model.dateText(source))
+            .font(.system(size: NativeMetrics.Text.secondary))
+            .foregroundStyle(.secondary)
     }
 
-    private func plainRow(_ text: String, symbol: String, color: ThemeColor) -> some View {
-        HStack(spacing: 0) {
-            Image(systemName: symbol)
-                .font(.system(size: OverlayMetrics.rowIconSize))
-                .foregroundStyle(color.color)
-                .frame(width: OverlayMetrics.rowLabelX - OverlayMetrics.rowIconX, alignment: .leading)
-                .padding(.leading, OverlayMetrics.rowIconX)
-            Text(verbatim: text)
-                .font(theme.typeBody.swiftUIFont)
-                .foregroundStyle(color.color)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
+    @ViewBuilder
+    private func plainRow(_ text: String, symbol: String, enabled: Bool) -> some View {
+        let style = enabled ? AnyShapeStyle(TintShapeStyle.tint) : AnyShapeStyle(HierarchicalShapeStyle.tertiary)
+        Image(systemName: symbol)
+            .font(.system(size: OverlayMetrics.rowSymbolSize))
+            .foregroundStyle(style)
+            .frame(width: OverlayMetrics.symbolColumn, height: OverlayMetrics.symbolColumn)
+            .accessibilityHidden(true)
+        Text(verbatim: text)
+            .font(.system(size: NativeMetrics.Text.body))
+            .foregroundStyle(style)
+            .lineLimit(1)
+        Spacer(minLength: 0)
     }
 
     private var footer: some View {
-        HStack(spacing: theme.space4) {
+        OverlayFooter {
             Text(verbatim: model.footer)
-                .font(theme.typeCaption.swiftUIFont)
-                .foregroundStyle(theme.textTertiary.color)
                 .lineLimit(1)
-            Spacer(minLength: theme.space3)
+            Spacer(minLength: OverlayMetrics.rowSpacing)
             if let badge = model.badge { AIWhyThisBadge(badge: badge, center: model.aiCenter) }
         }
-        .padding(.horizontal, OverlayMetrics.rowIconX)
-        .frame(height: AskPanelMetrics.footerHeight)
     }
 }

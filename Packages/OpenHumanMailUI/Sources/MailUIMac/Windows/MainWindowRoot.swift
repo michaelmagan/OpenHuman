@@ -8,7 +8,6 @@ public struct MainWindowRoot: View {
     let environment: AppEnvironment
     let themes: ThemeStore
     let onAttach: ((MainContentViewController) -> Void)?
-    @State private var titleBarInset: CGFloat = 0
 
     public init(environment: AppEnvironment, themes: ThemeStore, onAttach: ((MainContentViewController) -> Void)? = nil) {
         self.environment = environment
@@ -20,31 +19,41 @@ public struct MainWindowRoot: View {
     public var body: some View {
         let router = environment.router
         let resolved = themes.resolved
-        MailShellView(router: router) {
-            HStack(spacing: 0) {
-                MainContentRepresentable(router: router, theme: resolved.tokens,
-                                         hidesMail: environment.calendarWindow?.isOpen == true, onMake: onAttach)
-                    .overlay { ReviewHostView(environment: environment) }
-                    .overlay { ComposerHostView(manager: environment.compose) }
-                if let calendar = environment.calendarSidebar, calendar.isVisible {
-                    CalendarSidebarView(model: calendar, router: router)
-                } else if let contact = environment.actions.superhumanCore?.contextSidebar, contact.isVisible {
-                    ContextSidebarView(model: contact, router: router)
+        let calendarWindowOpen = environment.calendarWindow?.isOpen == true
+        MailShellView(router: router, inspectorShown: inspectorShown(hidden: calendarWindowOpen),
+                      inspectorWidth: CGFloat(resolved.tokens.component.sidebar.width)) {
+            MainContentRepresentable(router: router, theme: resolved.tokens, hidesMail: calendarWindowOpen, onMake: onAttach)
+                .overlay { ReviewHostView(environment: environment) }
+                .overlay { ComposerHostView(manager: environment.compose) }
+                .overlay {
+                    if let window = environment.calendarWindow, window.isOpen {
+                        CalendarWindowView(model: window, router: router)
+                            .transaction { $0.disablesAnimations = true }
+                    }
                 }
-            }
-            .overlay {
-                if let window = environment.calendarWindow, window.isOpen {
-                    CalendarWindowView(model: window, router: router)
-                        .transaction { $0.disablesAnimations = true }
-                }
+        } inspector: {
+            if let calendar = environment.calendarSidebar, calendar.isVisible {
+                CalendarSidebarView(model: calendar, router: router)
+            } else if let contact = environment.actions.superhumanCore?.contextSidebar, contact.isVisible {
+                ContextSidebarView(model: contact, router: router)
             }
         }
+        .floatsSearchDropdown()
         .themed(by: themes)
-        .environment(\.titleBarInset, titleBarInset)
-        .navigationTitle(router.windowTitle)
-        .background(WindowHooks(theme: resolved, router: router, titleBarInset: $titleBarInset))
+        .background(WindowHooks(theme: resolved, router: router))
         .task { await environment.status.run() }
         .task { await environment.failedOperationNotices.run() }
+    }
+
+    private func inspectorShown(hidden: Bool) -> Binding<Bool> {
+        let calendar = environment.calendarSidebar
+        let contact = environment.actions.superhumanCore?.contextSidebar
+        return Binding(get: { !hidden && (calendar?.isVisible == true || contact?.isVisible == true) },
+                       set: { shown in
+                           guard !shown else { return }
+                           if calendar?.isVisible == true { calendar?.setVisible(false) }
+                           if contact?.isVisible == true { contact?.setVisible(false) }
+                       })
     }
 }
 
@@ -77,17 +86,13 @@ struct MainContentRepresentable: NSViewControllerRepresentable {
 struct WindowHooks: NSViewRepresentable {
     let theme: ResolvedTheme
     let router: AppRouter
-    @Binding var titleBarInset: CGFloat
 
     func makeNSView(context: Context) -> WindowHookView {
-        let view = WindowHookView(theme: theme, router: router)
-        view.onTitleBarInset = { value in DispatchQueue.main.async { if titleBarInset != value { titleBarInset = value } } }
-        return view
+        WindowHookView(theme: theme, router: router)
     }
 
     func updateNSView(_ view: WindowHookView, context: Context) {
         view.theme = theme
-        view.onTitleBarInset = { value in DispatchQueue.main.async { if titleBarInset != value { titleBarInset = value } } }
         view.applyToWindow()
     }
 }
@@ -96,9 +101,7 @@ final class WindowHookView: NSView {
     var theme: ResolvedTheme
     let router: AppRouter
     private var tracker: WindowPlaceTracker?
-    var onTitleBarInset: ((CGFloat) -> Void)? { didSet { reportTitleBarInset() } }
     private var chromeObservers: [any NSObjectProtocol] = []
-    private var layoutRectObservation: NSKeyValueObservation?
 
     init(theme: ResolvedTheme, router: AppRouter) {
         self.theme = theme
@@ -121,30 +124,21 @@ final class WindowHookView: NSView {
         MainWindowHooks.configure(window, theme: theme, restoreFrame: reachedWindow)
         if reachedWindow {
             tracker = WindowPlaceTracker(window: window, router: router)
-            observeChrome(of: window)
+            observeZoomState(of: window)
         }
-        reportTitleBarInset()
-    }
-
-    private func reportTitleBarInset() {
-        guard let window else { return }
-        onTitleBarInset?(TitleBarMetrics.stripHeight(of: window))
         WindowZoomMenuState.shared.refresh(from: window)
     }
 
-    private func observeChrome(of window: NSWindow) {
+    private func observeZoomState(of window: NSWindow) {
         for observer in chromeObservers { NotificationCenter.default.removeObserver(observer) }
         let names: [Notification.Name] = [
-            NSWindow.didResizeNotification, NSWindow.willEnterFullScreenNotification, NSWindow.didEnterFullScreenNotification,
-            NSWindow.willExitFullScreenNotification, NSWindow.didExitFullScreenNotification,
+            NSWindow.didResizeNotification, NSWindow.didMoveNotification, NSWindow.didEnterFullScreenNotification,
+            NSWindow.didExitFullScreenNotification,
         ]
         chromeObservers = names.map { name in
             NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.reportTitleBarInset() }
+                MainActor.assumeIsolated { WindowZoomMenuState.shared.refresh(from: self?.window) }
             }
-        }
-        layoutRectObservation = window.observe(\.contentLayoutRect, options: [.new]) { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.reportTitleBarInset() }
         }
     }
 
@@ -157,13 +151,10 @@ final class WindowHookView: NSView {
 public enum MainWindowHooks {
     public static let frameAutosaveName = "dev.openhuman.mail.main"
 
+    /// Follows the theme's light or dark appearance and remembers the frame. The title bar, toolbar and window
+    /// background stay the system's.
     public static func configure(_ window: NSWindow, theme: ResolvedTheme, restoreFrame: Bool = true) {
         window.applyThemeAppearance(theme)
-        window.styleMask.insert(.fullSizeContentView)
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        let background = theme.bgWindow.nsColor
-        if window.backgroundColor != background { window.backgroundColor = background }
         if restoreFrame, window.frameAutosaveName.isEmpty {
             window.setFrameUsingName(frameAutosaveName)
             window.setFrameAutosaveName(frameAutosaveName)

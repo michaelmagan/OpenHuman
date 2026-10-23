@@ -20,6 +20,7 @@ final class FakeKeychain: KeychainBackend {
         var queriesPinLegacyKeychain = true
         var answer: Item?
         var status: OSStatus?
+        var failingAdds: [OSStatus] = []
     }
     private let state = Mutex(State())
 
@@ -29,6 +30,7 @@ final class FakeKeychain: KeychainBackend {
 
     func plant(_ item: Item) { state.withLock { $0.items.append(item) } }
     func answerWith(_ item: Item?, status: OSStatus? = nil) { state.withLock { $0.answer = item; $0.status = status } }
+    func failNextAdd(with status: OSStatus) { state.withLock { $0.failingAdds.append(status) } }
 
     private func record(_ name: String, _ query: [String: Any]) {
         let sync = (query[kSecAttrSynchronizable as String] as? Bool) == false
@@ -49,6 +51,7 @@ final class FakeKeychain: KeychainBackend {
 
     func add(_ attributes: [String: Any]) -> OSStatus {
         record("add", attributes)
+        if let failure = state.withLock({ $0.failingAdds.isEmpty ? nil : $0.failingAdds.removeFirst() }) { return failure }
         guard let data = attributes[kSecValueData as String] as? Data,
               let service = attributes[kSecAttrService as String] as? String,
               let account = attributes[kSecAttrAccount as String] as? String else { return errSecParam }
@@ -128,6 +131,41 @@ final class FakeKeychain: KeychainBackend {
         #expect(stored.refreshToken == token.refreshToken && stored.clientID == token.clientID
                 && stored.grantedScopes == token.grantedScopes)
         #expect(stored.accessToken == nil && stored.accessTokenExpiry == nil)
+    }
+
+    @Test func aReplaceWhoseAddFailsPutsTheOldTokenBack() throws {
+        let keychain = FakeKeychain()
+        let tokens = store(keychain)
+        try tokens.save(token, account: "me@example.com")
+        #expect(try tokens.load(account: "me@example.com")?.refreshToken == token.refreshToken)
+        var rotated = token
+        rotated.refreshToken = "synthetic-refresh-rotated"
+        keychain.failNextAdd(with: errSecInteractionNotAllowed)
+        let before = keychain.calls.count
+        #expect(throws: TokenStoreError.keychain(errSecInteractionNotAllowed)) {
+            try tokens.save(rotated, account: "me@example.com")
+        }
+        #expect(Array(keychain.calls.dropFirst(before)) == ["delete", "add", "add"], "\(keychain.calls)")
+        #expect(keychain.items.count == 1, "items=\(keychain.items.count), \(keychain.calls)")
+        let kept = try JSONDecoder().decode(StoredToken.self, from: keychain.items[0].data)
+        #expect(kept.refreshToken == token.refreshToken && kept.clientID == token.clientID)
+        #expect(try store(keychain).load(account: "me@example.com")?.refreshToken == token.refreshToken)
+        try tokens.save(rotated, account: "me@example.com")
+        #expect(try store(keychain).load(account: "me@example.com")?.refreshToken == rotated.refreshToken)
+    }
+
+    @Test func aFailedReplaceOfAnyItemLeavesTheOldValueReadable() throws {
+        let keychain = FakeKeychain()
+        let items = KeychainItems(backend: keychain)
+        let item = KeychainItems.Item(service: "com.example.items", account: "a")
+        try items.write(item, data: Data("old".utf8), label: "Old", generic: Data("g".utf8))
+        keychain.failNextAdd(with: errSecAuthFailed)
+        #expect(throws: KeychainItemsError.status(errSecAuthFailed)) {
+            try items.write(item, data: Data("new".utf8), label: "New")
+        }
+        #expect(keychain.items.map(\.data) == [Data("old".utf8)])
+        #expect(try KeychainItems(backend: keychain).read(item)?.data == Data("old".utf8))
+        #expect(try items.read(item)?.data == Data("old".utf8))
     }
 
     @Test func aSaveStillReplacesAnItemItCannotRead() throws {

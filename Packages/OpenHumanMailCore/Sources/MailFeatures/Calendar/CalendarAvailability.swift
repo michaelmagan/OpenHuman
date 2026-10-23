@@ -45,7 +45,7 @@ public struct CalendarAvailability: Sendable, Hashable {
     }
 
     @MainActor public static func slots(days: [Date], busy: [CalendarBusyInterval], now: Date, calendar: Calendar,
-                             ignoreConflicts: Bool, count: Int = slotCount) -> [Slot] {
+                             ignoreConflicts: Bool, excluding: Set<Slot> = [], count: Int = slotCount) -> [Slot] {
         var perDay: [[Slot]] = []
         for day in days {
             guard let open = calendar.date(bySettingHour: CalendarSidebarModel.workdayHours.lowerBound, minute: 0,
@@ -57,7 +57,7 @@ public struct CalendarAvailability: Sendable, Hashable {
             while start.addingTimeInterval(slotLength) <= close {
                 let slot = Slot(start: start, end: start.addingTimeInterval(slotLength))
                 let clash = busy.contains { $0.start < slot.end && $0.end > slot.start }
-                if slot.start >= now, ignoreConflicts || !clash { free.append(slot) }
+                if slot.start >= now, ignoreConflicts || !clash, !excluding.contains(slot) { free.append(slot) }
                 start = start.addingTimeInterval(slotLength)
             }
             perDay.append(free)

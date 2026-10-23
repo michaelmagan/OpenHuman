@@ -153,7 +153,6 @@ struct ShellWindowTests {
         window.isReleasedWhenClosed = false
         MainWindowHooks.configure(window, theme: .dark)
         #expect(window.appearance?.name == .darkAqua)
-        #expect(window.backgroundColor == ResolvedTheme.dark.bgWindow.nsColor)
         #expect(window.frameAutosaveName == MainWindowHooks.frameAutosaveName,
                 "held by \(NSApp.windows.filter { $0 !== window && $0.frameAutosaveName == MainWindowHooks.frameAutosaveName }.map(\.frame))")
         MainWindowHooks.configure(window, theme: .light)

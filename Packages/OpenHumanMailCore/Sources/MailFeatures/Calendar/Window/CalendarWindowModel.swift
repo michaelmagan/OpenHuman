@@ -122,6 +122,7 @@ public final class CalendarWindowModel {
     public func stepAside() {
         guard isOpen else { return }
         isOpen = false
+        noteUnsavedMove()
         card = nil
         scopeQuestion = nil
         removeQuestion = nil
@@ -188,6 +189,7 @@ public final class CalendarWindowModel {
     func calendarSources() async -> [(key: String, title: String, provider: any CalendarProviding)] {
         if let connections = environment.calendarConnections, connections.routesByAccount {
             let accounts = await AIThreadLoader.first(environment.data.accounts()) ?? []
+            eventStore.learnAddresses(of: accounts)
             return accounts.compactMap { owner in
                 connections.calendarProvider(for: owner).map { (owner.email.lowercased(), owner.email, $0) }
             }
@@ -362,7 +364,6 @@ public final class CalendarWindowModel {
     public var timeGrid: CalendarTimeGrid {
         let sources = sources
         return CalendarTimeGrid(days: period.days, events: shownEvents, timeZone: timeZone, now: now(),
-                                owner: sidebar.provider.info.account,
                                 colorIndex: { Self.colorIndex(of: $0, in: sources) })
     }
 
@@ -416,6 +417,7 @@ public final class CalendarWindowModel {
     }
 
     public func newEvent(start: Date, end: Date) async {
+        noteUnsavedMove()
         card = nil
         selectedEventID = nil
         if sidebar.draft != nil {
@@ -426,6 +428,24 @@ public final class CalendarWindowModel {
         let key = PendingEventKey.draft(UUID())
         slotKeys.insert(key)
         await sidebar.beginDraft(start: start, end: end, key: key)
+    }
+
+    // Dragging the event being prepared keeps its length; only a timed draft moves on the grid
+    public func movePending(to start: Date) {
+        guard card == nil, var made = sidebar.draft, !made.isAllDay else { return }
+        let moved = CalendarDragMath.moved(from: made.start, until: made.end, to: start)
+        guard moved.start != made.start || moved.end != made.end else { return }
+        made.start = moved.start
+        made.end = moved.end
+        sidebar.draft = made
+    }
+
+    public func resizePending(to end: Date) {
+        guard card == nil, var made = sidebar.draft, !made.isAllDay else { return }
+        let resized = CalendarDragMath.resized(from: made.start, to: end)
+        guard resized.end != made.end else { return }
+        made.end = resized.end
+        sidebar.draft = made
     }
 
     public func newEvent() async {
@@ -468,8 +488,8 @@ public final class CalendarWindowModel {
             return meetNote
         }
         await newEvent(start: slot.start, end: slot.end)
-        if sidebar.draft?.attendees.contains(where: { $0.email.lowercased() == person.email.lowercased() }) == false {
-            sidebar.draft?.attendees.append(person)
+        if let people = sidebar.draft?.attendees, !people.contains(where: { $0.email.lowercased() == person.email.lowercased() }) {
+            sidebar.draft?.setAttendees(people + [person])
         }
         let accounts = await AIThreadLoader.first(environment.data.accounts()) ?? []
         let me = accounts.first { $0.id == environment.router.activeAccountID } ?? accounts.first
@@ -577,9 +597,11 @@ public struct CalendarRefreshSchedule: Sendable, Hashable {
 
 extension CalendarEvent {
     func with(start: Date, end: Date) -> CalendarEvent {
-        CalendarEvent(id: id, title: title, start: start, end: end, isAllDay: isAllDay, timeZone: timeZone,
-                      attendees: attendees, calendarName: calendarName, meetLink: meetLink, organizerIsMe: organizerIsMe,
-                      account: account, location: location, notes: notes, myResponse: myResponse,
-                      recurringEventID: recurringEventID, extras: extras)
+        var moved = CalendarEvent(id: id, title: title, start: start, end: end, isAllDay: isAllDay, timeZone: timeZone,
+                                  attendees: attendees, calendarName: calendarName, meetLink: meetLink,
+                                  organizerIsMe: organizerIsMe, account: account, location: location, notes: notes,
+                                  myResponse: myResponse, recurringEventID: recurringEventID, extras: extras)
+        moved.respondsAs = respondsAs
+        return moved
     }
 }

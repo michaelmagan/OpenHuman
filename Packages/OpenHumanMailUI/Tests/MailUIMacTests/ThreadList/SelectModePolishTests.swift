@@ -16,14 +16,14 @@ import Testing
     @Test func checkedRowsDrawTheirOwnFillApartFromTheCursor() {
         for (label, t) in RowBandTests.everyTheme() {
             let style = ThreadRowStyle(theme: t)
-            #expect(RenderReviewFixTests.same(style.checked, t.listCheckedFill.nsColor), "\(label)")
+            #expect(RenderReviewFixTests.same(style.checked, ThreadRowStyle.checkedFill(t).nsColor), "\(label)")
             #expect(!RenderReviewFixTests.same(style.checked, style.cursor), "\(label)")
-            #expect(ThemeTokens.standApart(t.component.row.chipBg, t.listCheckedFill, luminance: 1.1),
-                    "a neutral chip shows on a checked row: \(label)")
+            #expect(!RenderReviewFixTests.same(style.checked, style.inactiveCursor), "\(label)")
+            #expect(!RenderReviewFixTests.same(style.checked, style.hover), "\(label)")
         }
     }
 
-    @Test func checkedRowsDrawTheirChipsOnTheCheckedSurfaceWithoutMovingTheLine() {
+    @Test func aCheckedRowDrawsTheSameChipImagesWithoutMovingTheLine() throws {
         for theme in [ThemeTokens.light, ThemeTokens.dark] {
             let style = ThreadRowStyle(theme: theme)
             let row = RowActionsOverlapTests.shown(.long, style: style).row
@@ -32,42 +32,27 @@ import Testing
             let line = style.texts(for: row, chips: chips, format: ThreadRowFormatting(), location: .system(.inbox)).line
             let shown = LabelChipRenderer.shown(chips, maximum: ThreadRowStyle.maximumFilledChips)
             #expect(shown.map(\.title) == ["atlas", "vip", "+1"])
-            #expect(shown.contains { $0.hue != .neutral && !$0.muted }, "a tinted chip")
-            #expect(shown.contains { $0.hue == .neutral }, "a neutral chip")
-
-            let checked = style.chips.onChecked(line)
-            #expect(checked !== line)
-            #expect(style.chips.onChecked(line) === checked, "one variant per line")
-            #expect(checked.string == line.string)
-            let before = Self.attachments(line), after = Self.attachments(checked)
-            #expect(before.count == shown.count && after.count == shown.count)
-            let surface = style.chips.checkedFill
-            for (index, chip) in shown.enumerated() where index < before.count && index < after.count {
-                #expect(before[index].image === style.chips.image(chip.title, hue: chip.hue, muted: chip.muted).image)
-                #expect(after[index].image === style.chips.image(chip.title, hue: chip.hue, muted: chip.muted, checked: true).image)
-                #expect(after[index].bounds == before[index].bounds, "same size and baseline: \(chip.title)")
-                if surface.alpha == 1, let image = after[index].image {
-                    #expect(RowActionsOverlapTests.near(RowActionsOverlapTests.pixel(image), surface), "chip surface: \(chip.title)")
-                }
+            let texts = style.texts(for: row, chips: chips, format: ThreadRowFormatting(), location: .system(.inbox))
+            var drawn: [[NSTextAttachment]] = []
+            for checked in [false, true] {
+                let cell = ThreadRowView(style: style)
+                cell.frame = NSRect(x: 0, y: 0, width: 1200, height: style.rowHeight)
+                cell.configure(row, texts: texts, date: style.date("Oct 8", unread: false, upcoming: false), indicators: [],
+                               isChecked: checked)
+                drawn.append(Self.attachments(try #require(cell.drawnLine(cell.drawnFrames()))))
             }
-            let neutral = style.chips.colors(hue: .neutral, muted: false)
-            #expect(neutral.fill == theme.component.row.chipBg && neutral.ink == theme.component.row.chipText)
-
-            let plain = style.texts(for: row, chips: [], format: ThreadRowFormatting(), location: .system(.inbox)).line
-            #expect(style.chips.onChecked(plain) === plain, "a line without chips is drawn as it is")
+            let plain = Self.attachments(line)
+            #expect(plain.count == shown.count && drawn.allSatisfy { $0.count == shown.count })
+            for (index, chip) in shown.enumerated() where index < plain.count {
+                let image = style.chips.image(chip.title, hue: chip.hue, muted: chip.muted).image
+                #expect(plain[index].image === image)
+                #expect(drawn.allSatisfy { $0[index].image === image && $0[index].bounds == plain[index].bounds },
+                        "one translucent image on every plate: \(chip.title)")
+            }
         }
-        let light = ThreadRowStyle(theme: .light), dark = ThreadRowStyle(theme: .dark)
-        #expect(light.chips.checkedFill == ThemeTokens.light.bgWindow, "light: the chip is a white pill on the checked fill")
-        #expect(dark.chips.checkedFill == ThemeTokens.dark.component.row.chipBg, "dark keeps its neutral chip")
-        #expect(dark.chips.image("vip", hue: .neutral, muted: false, checked: true).image
-            === dark.chips.image("vip", hue: .neutral, muted: false).image)
-        let neutralOnly = dark.texts(for: RowActionsOverlapTests.shown(.long, style: dark).row,
-                                     chips: [ThreadRowChip(kind: .vip, title: "VIP")], format: ThreadRowFormatting(),
-                                     location: .system(.inbox)).line
-        #expect(dark.chips.onChecked(neutralOnly) === neutralOnly, "dark: a neutral chip already suits a checked row")
     }
 
-    @Test func checkedChipsStandOutAndReadInEveryTheme() {
+    @Test func chipTextReadsOnItsTintOverEveryPlateInEveryTheme() {
         var themes = RowBandTests.everyTheme()
         for themeID in RowActionsOverlapTests.themeIDs {
             let t = ThemeLibrary.builtIn.resolve(themeID: themeID,
@@ -77,29 +62,26 @@ import Testing
         }
         for (label, t) in themes {
             let renderer = LabelChipRenderer(theme: t)
-            let plate = t.listCheckedFill, surface = renderer.checkedFill
-            let light = t.bgWindow.relativeLuminance > plate.relativeLuminance
-            #expect(surface == t.bgWindow || surface == t.component.row.chipBg, "\(label)")
-            if light {
-                #expect(surface.composited(over: plate).contrastRatio(on: plate) >= 1.1, "the pill stands out: \(label)")
-            } else {
-                #expect(surface == t.component.row.chipBg, "dark keeps its neutral chip: \(label)")
+            let plates = [t.bgWindow, ThreadRowStyle.hoverFill(t), ThreadRowStyle.checkedFill(t), ThreadRowStyle.cursorFill(t),
+                          ThreadRowStyle.inactiveCursorFill(t)]
+            #expect(renderer.plates == plates, "\(label)")
+            for hue in LabelChipHue.allCases {
+                let colors = renderer.colors(hue: hue, muted: false)
+                #expect(colors.fill == LabelChipRenderer.tint(t.labelChip(hue).text), "\(hue) tint: \(label)")
+                for plate in plates {
+                    #expect(colors.ink.contrastRatio(on: colors.fill.composited(over: plate)) >= 4.5, "\(hue) chip text: \(label)")
+                }
             }
-            let onSurface = surface.composited(over: plate), onChip = t.component.row.chipBg.composited(over: plate)
-            let checked = renderer.colors(hue: .neutral, muted: false, checked: true)
-            #expect(checked.fill == surface && checked.ink.contrastRatio(on: onSurface) >= 4.5, "chip text: \(label)")
-            let muted = renderer.colors(hue: .neutral, muted: true, checked: true)
-            #expect(muted.ink.contrastRatio(on: onSurface) >= t.textTertiary.contrastRatio(on: onChip) - 0.01,
-                    "a muted chip reads at least as well as on an unchecked row: \(label)")
+            let muted = renderer.colors(hue: .neutral, muted: true)
+            #expect(muted == (LabelChipRenderer.tint(t.textTertiary), t.textTertiary), "a muted chip stays quiet: \(label)")
         }
-        #expect(ThemeTokens.light.bgWindow.contrastRatio(on: ThemeTokens.light.listCheckedFill) >= 1.2)
     }
 
     @Test func greyTextOnCheckedAndCursorRowsIsDrawnInTextSecondary() throws {
         for (label, t) in RowBandTests.everyTheme() {
             let style = ThreadRowStyle(theme: t)
-            #expect(t.textSecondary.contrastRatio(on: t.listCheckedFill) >= 4.5, "checked fill: \(label)")
-            #expect(t.textSecondary.contrastRatio(on: t.listCursorFill) >= 4.5, "cursor fill: \(label)")
+            #expect(t.textSecondary.contrastRatio(on: ThreadRowStyle.checkedFill(t)) >= 4.5, "checked fill: \(label)")
+            #expect(t.textSecondary.contrastRatio(on: ThreadRowStyle.cursorFill(t)) >= 4.5, "cursor fill: \(label)")
             for state in [Self.RowState.checked, .cursor, .idle] {
                 let cell = Self.cell(style, state: state)
                 let texts = try [#require(cell.drawnSender()), #require(cell.drawnLine(cell.drawnFrames())),
@@ -111,8 +93,11 @@ import Testing
                         dim += 1
                         let color = text.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
                         let expected: NSColor? = state == .idle ? nil : style.secondary
+                        let piece = text.attributedSubstring(from: range).string
                         if let expected {
-                            #expect(color == expected, "\(state) \(text.attributedSubstring(from: range).string): \(label)")
+                            #expect(color == expected, "\(state) \(piece): \(label)")
+                        } else if piece.contains("invented snippet") {
+                            #expect(color == style.snippet, "the snippet is secondary text: \(label)")
                         } else {
                             #expect(color != style.secondary || t.textTertiary == t.textSecondary,
                                     "an idle row keeps its quieter grey: \(label)")
@@ -137,7 +122,7 @@ import Testing
         let cell = ThreadRowView(style: style)
         cell.frame = rowView.bounds
         rowView.addSubview(cell)
-        cell.configure(row, texts: texts, date: style.date("OCT 8", unread: false, upcoming: false), indicators: [],
+        cell.configure(row, texts: texts, date: style.date("Oct 8", unread: false, upcoming: false), indicators: [],
                        isChecked: state == .checked)
         rowView.isChecked = state == .checked
         rowView.isSelected = state == .cursor
@@ -196,7 +181,7 @@ import Testing
         let shown = width()
         #expect(empty > 0)
         #expect(empty == shown)
-        #expect(empty == ShellMetrics.toolbarControlHeight + CGFloat(ThemeTokens.light.space3))
+        #expect(empty == ShellMetrics.toolbarControlHeight, "a toolbar item; the toolbar spaces it from the title")
     }
 
     @Test func thePanelCloseGlyphReadsOnTheSidebarInEveryTheme() {

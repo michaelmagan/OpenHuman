@@ -1,0 +1,15 @@
+{
+  "id": "search.suggestions-panel",
+  "area": "Search",
+  "title": "Search suggestions float under the field with tips and a contact preview",
+  "steps": [
+    "Launch Mail with -UseFakeGmail, press /, and look at the panel before typing",
+    "Type fro, then clear the field and type the first letters of a person's name; press Down and Up through the rows",
+    "Make the window narrow (about 640 points wide, sidebar hidden) and press / again",
+    "In System Settings > Accessibility > Display, turn on Reduce Transparency and press / again"
+  ],
+  "deepLink": null,
+  "expected": "A panel floats under the field without moving the list. Empty, it lists People, Recent searches and operators, with tips on the right. Typing fro shows Ask AI (if set up) and from:; a name shows matching people and, for the highlighted one, their details. The highlighted row uses the accent colour. Narrow, the tips go and the list fits. With Reduce Transparency the panel is opaque.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

@@ -433,10 +433,16 @@ public final class MailStoreAdapter: MailDataSource, Sendable {
         return DraftSummary(id: item.id, account: item.accountID, gmailDraftID: item.gmailDraftID,
                             thread: item.thread.map(threadKey), mode: mode(item.composeMode),
                             replyToGmailMessageID: item.replyToMessageID, fields: fields(item.content), source: source,
-                            review: review, status: status, sendAt: item.sendAt, version: item.localVersion,
+                            review: review, status: status, sendAt: item.sendAt,
+                            sendCondition: status == .scheduled && hasSendCondition(item.extraHeaders) ? .ifNoReply : .always,
+                            version: item.localVersion,
                             isDirty: item.isDirty, hasRemoteConflict: item.hasRemoteConflict, agentNote: item.agentNote,
                             agentSnapshot: item.agentSnapshot.map(fields), lastError: item.lastError,
                             updatedAt: item.updatedAt)
+    }
+
+    static func hasSendCondition(_ headers: [String: String]) -> Bool {
+        headers.keys.contains { $0.caseInsensitiveCompare(OHGmailLabels.sendAtConditionHeader) == .orderedSame }
     }
 
     static func mode(_ mode: ComposeMode) -> DraftMode {

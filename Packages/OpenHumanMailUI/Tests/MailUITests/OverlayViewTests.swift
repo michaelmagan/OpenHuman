@@ -16,8 +16,10 @@ private let fixedNow = Date(timeIntervalSince1970: 1_791_000_000)
 private func host<V: View>(_ view: V, size: NSSize = NSSize(width: 1000, height: 700), name: String,
                            theme: ResolvedTheme = .light) throws -> NSHostingView<some View> {
     let hosting = NSHostingView(rootView: view.environment(\.theme, theme).environment(\.colorScheme, theme.appearance == .dark ? .dark : .light)
+        .environment(\.nativeOverlaySurface, .material)
         .background(theme.bgWindow.color))
     hosting.frame = NSRect(origin: .zero, size: size)
+    hosting.appearance = NSAppearance(named: theme.appearance == .dark ? .darkAqua : .aqua)
     hosting.layoutSubtreeIfNeeded()
     if let dir = ProcessInfo.processInfo.environment["OH_SNAPSHOT_DIR"] {
         let rep = try #require(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
@@ -62,7 +64,7 @@ private struct Rig {
 }
 
 @MainActor
-@Test func paletteFieldTakesTheDarkAppearanceInLightThemes() async throws {
+@Test func paletteFieldFollowsTheAppAppearance() async throws {
     let rig = await Rig()
     rig.router.perform(.commandPalette)
     guard case .palette(let palette) = rig.center.overlay else { Issue.record("no palette"); return }
@@ -71,8 +73,11 @@ private struct Rig {
         let hosting = try host(OverlayHostView(center: rig.center), name: "palette-field-\(theme.themeID)", theme: theme)
         let fields = textFields(in: hosting)
         #expect(!fields.isEmpty, "the palette's query field is an NSTextField")
+        let expected: NSAppearance.Name = theme.appearance == .dark ? .darkAqua : .aqua
         for field in fields {
-            #expect(field.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua, "\(theme.themeID)")
+            #expect(field.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == expected, "\(theme.themeID)")
+            #expect(field.font?.pointSize == NativeMetrics.Overlay.paletteFieldTextSize)
+            #expect(field.font?.fontDescriptor.symbolicTraits.contains(.monoSpace) == false, "the system font")
         }
     }
 }
@@ -132,6 +137,18 @@ private func textFields(in view: NSView) -> [NSTextField] {
     let hosting = try host(SearchFieldView(search: search).padding(), size: NSSize(width: 700, height: 360), name: "search-invalid-date")
     #expect(search.tokens.contains { !$0.isValid })
     #expect(hosting.fittingSize.height > 0)
+}
+
+@MainActor
+@Test func searchPillsLayOutRestingSelectedAndWithTheirRemoveControl() throws {
+    let token = try #require(SearchQueryTokens.split("from:dana.sample@example.com ").tokens.first)
+    let resting = try host(SearchTokenPill(token: token).padding(), size: NSSize(width: 320, height: 40), name: "search-pill")
+    let removable = try host(SearchTokenPill(token: token, remove: {}).padding(), size: NSSize(width: 320, height: 40),
+                             name: "search-pill-removable")
+    let selected = try host(SearchTokenPill(token: token, isSelected: true, remove: {}).padding(),
+                            size: NSSize(width: 320, height: 40), name: "search-pill-selected")
+    #expect(removable.fittingSize.width == resting.fittingSize.width, "the remove control takes no room of its own")
+    #expect(selected.fittingSize.width == resting.fittingSize.width, "nor does showing it on a selected pill")
 }
 
 @MainActor

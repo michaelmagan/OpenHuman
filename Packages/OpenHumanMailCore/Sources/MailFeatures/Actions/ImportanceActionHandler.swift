@@ -74,14 +74,43 @@ public final class ImportanceActionHandler: ActionHandler {
         let pitchLabel = request.id == .notAPitch && c.targets.autoLabel == "Pitch"
             ? environment?.autoLabels : nil
         let (row, labels) = AutoLabelActionHandler.row(of: thread, router: request.router)
+        let ask: DomainWideRuleAsking = environment?.domainWideRuleAsking ?? { @Sendable _ in .cancel }
+        let sender = c.sender
         return .started(Task {
+            guard let resolved = await Self.narrowed(change, title: title, sender: sender, ask: ask) else { return }
+            let applied = resolved.0
             do {
-                try await undo.perform(title, threads: [thread], via: port) { try await port.apply(change) }
+                try await undo.perform(resolved.1, threads: [thread], via: port) { try await port.apply(applied) }
                 if let pitchLabel { _ = try? await pitchLabel.markWrong(thread, row: row, labels: labels) }
             } catch {
                 feedback.failed("Couldn't change the importance rule")
             }
         })
+    }
+
+    // A domain rule for a common domain asks first, and can narrow to the sender's own address
+    static func narrowed(_ change: ImportanceChange, title: LocalizedStringResource, sender: String?,
+                         ask: DomainWideRuleAsking) async -> (ImportanceChange, LocalizedStringResource)? {
+        guard let effect = domainWideEffect(change.kind) else { return (change, title) }
+        switch await DomainWideRules.resolve(domain: change.value, address: sender, effect: effect, ask: ask) {
+        case .entireDomain?:
+            return (change, title)
+        case .thisAddressOnly(let address)?:
+            let always = change.kind == .alwaysDomain
+            let narrow = ImportanceChange(kind: always ? .alwaysSender : .neverSender, account: change.account,
+                                          value: address, thread: change.thread)
+            return (narrow, always ? "Always important from \(address)" : "Never important from \(address)")
+        case nil:
+            return nil
+        }
+    }
+
+    nonisolated static func domainWideEffect(_ kind: ImportanceRuleKind) -> DomainWideRuleEffect? {
+        switch kind {
+        case .alwaysDomain: .alwaysImportant
+        case .neverDomain: .neverImportant
+        default: nil
+        }
     }
 
     private func explain(_ thread: ThreadKey, port: any ImportanceRulesPort) -> ActionPerformance {

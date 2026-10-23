@@ -13,7 +13,10 @@ Commits: git signs with the dedicated key through its key service, the key is lo
 temporary repository is signed and verifies, and pushing an unsigned commit of yours is refused.
 Builds: the signing keychain unlocks with its password file, the Developer ID identity is valid, a
 copy of /usr/bin/true is signed with the hardened runtime and a secure timestamp (needs the network)
-and verifies, and the notarytool profile answers (it lists past submissions only).
+and verifies, and the notarytool profile answers (it lists past submissions only). When the update
+settings for make-dmg.sh --enable-updates are set (OH_UPDATE_FEED_URL, OH_SPARKLE_PUBLIC_KEY), they
+are well formed, Sparkle's sign_update is installed and a Sparkle signing key is in your keychains
+(its secret is never read).
 
   --commits     only the commit checks
   --builds      only the build checks
@@ -206,9 +209,38 @@ check_builds() {
     if command -v caffeinate >/dev/null 2>&1; then pass "caffeinate is available (make-dmg.sh keeps the Mac awake)"; fi
 }
 
+check_updates() {
+    step "Update signing (make-dmg.sh --enable-updates)"
+    local feed="${OH_UPDATE_FEED_URL:-}" key="${OH_SPARKLE_PUBLIC_KEY:-}" account="${OH_SPARKLE_ACCOUNT:-openhuman-mail}" tools
+    if [[ -z "$feed" && -z "$key" ]]; then
+        printf 'verify: OH_UPDATE_FEED_URL and OH_SPARKLE_PUBLIC_KEY are not set: builds are made without updates\n'
+        return
+    fi
+    if [[ -z "$feed" || -z "$key" ]]; then fail "set both OH_UPDATE_FEED_URL and OH_SPARKLE_PUBLIC_KEY, or neither"; return; fi
+    case "$feed" in
+        https://?*) pass "OH_UPDATE_FEED_URL is an https:// feed ($feed)" ;;
+        http://127.0.0.1[:/]*|http://localhost[:/]*) warn "OH_UPDATE_FEED_URL is on this Mac ($feed): staged update tests only" ;;
+        *) fail "OH_UPDATE_FEED_URL '$feed' is not an https:// address" ;;
+    esac
+    if python3 -I -c 'import base64, sys; sys.exit(0 if len(base64.b64decode(sys.argv[1], validate=True)) == 32 else 1)' \
+        "$key" >/dev/null 2>&1; then pass "OH_SPARKLE_PUBLIC_KEY is a 32-byte EdDSA public key"
+    else fail "OH_SPARKLE_PUBLIC_KEY is not a base64 EdDSA public key of 32 bytes (generate_keys -p prints it)"; fi
+    # shellcheck disable=SC1091
+    if [[ -f "$ROOT/Tools/versions.env" ]]; then source "$ROOT/Tools/versions.env"; fi
+    tools="$ROOT/Tools/.bin/sparkle-${SPARKLE_VERSION:-unknown}/bin"
+    if [[ -x "$tools/sign_update" ]]; then pass "Sparkle ${SPARKLE_VERSION:-} sign_update is installed"
+    else warn "sign_update is not installed; run Tools/release/install-release-tools.sh"; fi
+    if with_timeout 20 security find-generic-password -s https://sparkle-project.org -a "$account" >/dev/null 2>&1; then
+        pass "a Sparkle signing key for account '$account' is in your keychains (not read)"
+    else
+        warn "no Sparkle signing key for account '$account' found (or its keychain is locked over SSH)"
+        hint "Make one once with generate_keys --account $account (docs/release/SPARKLE.md), or sign with --ed-key-file."
+    fi
+}
+
 context
 if [[ "$DO_COMMITS" == 1 ]]; then check_commits; fi
-if [[ "$DO_BUILDS" == 1 ]]; then check_builds; fi
+if [[ "$DO_BUILDS" == 1 ]]; then check_builds; check_updates; fi
 printf '\n'
 if [[ "$FAILED" == 0 ]]; then printf 'verify: all checks passed\n'; exit 0; fi
 printf 'verify: some checks failed (above); see docs/release/LOCAL-SIGNING.md, "When something fails"\n'

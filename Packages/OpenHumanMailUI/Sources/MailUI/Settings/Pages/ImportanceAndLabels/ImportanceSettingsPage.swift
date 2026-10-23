@@ -46,13 +46,16 @@ struct ImportanceSettingsPage: View {
 
     var body: some View {
         SettingsPageScaffold(title: "Importance & labels") {
-            Picker("Show", selection: $tab) {
-                ForEach(Tab.allCases, id: \.self) { Text($0.title).tag($0) }
+            Section {
+                Picker("Show", selection: $tab) {
+                    ForEach(Tab.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .frame(maxWidth: .infinity)
+                .accessibilityIdentifier("settings.importance.tabs")
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .accessibilityIdentifier("settings.importance.tabs")
             switch tab {
             case .rules:
                 RulesTab(ruleSet: ruleSet, environment: environment)
@@ -70,6 +73,11 @@ struct ImportanceSettingsPage: View {
         SettingsSection("Importance", footnote: "Important: your importance rules, then Gmail's Important mark. Change "
                         + "the Important split's rule in Split inbox.") {
             SettingsRow("Importance rules", detail: ImportanceSettingsModel.precedenceNote)
+                .task {
+                    model.start()
+                    vip?.start()
+                }
+                .onChange(of: model.account) { _, account in vip?.account = account }
             SettingsRow(ImportanceSettingsModel.sendsToGmailTitle, detail: ImportanceSettingsModel.sendsToGmailDetail,
                         isOn: Binding(get: { model.sendsToGmail.value },
                                       set: { on in Task { await model.sendsToGmail.set(on) } }))
@@ -106,21 +114,18 @@ struct ImportanceSettingsPage: View {
             }
             if let learning { LearnedBehaviourSection(center: learning) }
             if let change = model.lastChange, model.canUndoLastChange {
-                HStack(spacing: theme.space3) {
-                    Text(change.title).themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
-                    Button("Undo") { Task { await model.undoLastChange() } }
-                        .ohLinkButtonStyle()
-                        .accessibilityLabel("Undo \(change.title)")
+                Section {
+                    HStack(spacing: theme.space3) {
+                        Text(change.title).font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
+                        Button("Undo") { Task { await model.undoLastChange() } }
+                            .ohLinkButtonStyle()
+                            .accessibilityLabel("Undo \(change.title)")
+                    }
                 }
             }
             SettingsErrorLine(text: model.errorMessage)
             if let vip { vipSection(vip) }
         }
-        .task {
-            model.start()
-            vip?.start()
-        }
-        .onChange(of: model.account) { _, account in vip?.account = account }
     }
 
     @ViewBuilder private func vipSection(_ vip: VIPSettingsModel) -> some View {
@@ -154,7 +159,7 @@ struct ImportanceSettingsPage: View {
             }
             if let notice = vip.notice {
                 HStack(spacing: theme.space3) {
-                    Text(notice).themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
+                    Text(notice).font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
                     if vip.canUndo {
                         Button("Undo") { Task { await vip.undoLastChange() } }
                             .ohLinkButtonStyle()

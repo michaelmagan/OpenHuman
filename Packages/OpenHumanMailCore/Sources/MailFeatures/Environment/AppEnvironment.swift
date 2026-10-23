@@ -174,6 +174,7 @@ public final class AppEnvironment {
         return model
     }
 
+    public var calendarSidebarIfStarted: CalendarSidebarModel? { calendarStorage }
     private var calendarStorage: CalendarSidebarModel?
 
     public var scheduling: SchedulingAssistant? {

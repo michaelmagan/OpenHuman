@@ -85,6 +85,13 @@ struct DevSurfaceTests {
         #expect(!FileManager.default.fileExists(atPath: CompositionRoot.storeRebuildMarker(location).path))
     }
 
+    @Test func aBusyStoreExplainsHowToContinue() {
+        let problem = CompositionRoot.storeProblem(StoreError.busy)
+        #expect(problem.title == "Another copy of OpenHuman Mail is using your mail")
+        #expect(problem.message == "Quit the other copy, then open OpenHuman Mail again. Your Gmail is unchanged.")
+        #expect(problem.details == nil)
+    }
+
     @Test func noticesSayWhatToDoAndKeepOnlyACode() {
         #expect(CompositionRoot.storeNoticeTitle == "Mail couldn't open the mail on this Mac")
         let newer = CompositionRoot.storeProblem(StoreError.schemaTooNew(found: 2, supported: 1))

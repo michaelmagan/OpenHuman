@@ -30,7 +30,8 @@ public enum ActionRules {
         case .toggleMute: context.targets.allMuted ? "Unmute" : "Mute"
         case .toggleWaiting: context.location == .system(.sent) ? "Wait for reply" : "Not waiting"
         case .autoLabelWrong: context.targets.autoLabel.map { "Wrong label (not \($0))" } ?? descriptor.title
-        case .clearChecks: context.checkedCount == 0 && isSearch(context.location) ? "Close search" : descriptor.title
+        case .clearChecks:
+            context.checkedCount == 0 && (context.searchOpen || isSearch(context.location)) ? "Close search" : descriptor.title
         case .aiToggleInstantReply:
             context.togglesOn.contains(.aiToggleInstantReply) ? "Stop showing quick replies when replying"
                                                               : "Show quick replies when replying"
@@ -82,7 +83,7 @@ public enum ActionRules {
             return c.senderDomain == nil && c.focusedThread != nil ? .disabled(.other("No sender domain")) : nil
         case .alwaysImportantDomain, .neverImportantDomain:
             return c.senderDomain == nil && c.focusedThread != nil ? .disabled(.other("No sender domain")) : nil
-        case .clearChecks: return c.checkedCount > 0 || isSearch(c.location) ? nil : .hidden
+        case .clearChecks: return c.checkedCount > 0 || c.searchOpen || isSearch(c.location) ? nil : .hidden
         case .toggleCheck, .extendSelectionDown, .extendSelectionUp, .checkAll, .checkFromHere:
             return c.hasRows ? nil : .disabled(.noSelection)
         default:

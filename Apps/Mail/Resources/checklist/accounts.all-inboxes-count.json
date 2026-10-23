@@ -1,15 +1,15 @@
 {
   "id": "accounts.all-inboxes-count",
   "area": "Accounts",
-  "title": "The All Inboxes circle counts important unread, and account counts can be changed or hidden",
+  "title": "All Inboxes in the sidebar counts important unread, and account counts can be changed or hidden",
   "steps": [
-    "With two accounts (fake data has two), look at the tray circle before the account pictures, hover it, then press Control-Command-S to show the sidebar",
-    "In Settings › General › Window › Account counts choose All unread in Inbox, then Off, then Important unread; each time look at the circle, the other account's picture and the sidebar's All Inboxes row",
-    "Right-click the circle and choose Hide count, then right-click it again and choose Show count",
+    "With two accounts (fake data has two), show the sidebar with Control-Command-S and hover the All Inboxes row and each account's title",
+    "In Settings › General › Window › Account counts choose All unread in Inbox, then Off, then Important unread; each time look at the All Inboxes row and each account's Inbox row",
+    "Right-click All Inboxes and choose Hide count, then right-click it again and choose Show count",
     "Press G A for All mail, then open Done from the sidebar; hover each title"
   ],
   "deepLink": null,
-  "expected": "Important unread (default): the circle is the sum of each account's important unread (99+ above 99); its tooltip reads All Inboxes · N important unread ⌃0. All unread in Inbox: the whole-Inbox sum. Off: no number on any picture and the sidebar row shows ⌃0. Hide count turns counts off; Show count brings back Important unread. All mail and Done show no number; hovering gives the total.",
+  "expected": "Important unread (default): All Inboxes shows the sum of each account's important unread and its tooltip reads All Inboxes · N important unread ⌃0; each Inbox row shows its account's count. All unread in Inbox: the whole-Inbox numbers. Off: no badge on those rows. Hide count turns counts off; Show count brings back Important unread. All mail and Done show no number; hovering gives the total.",
   "requires": "fake",
   "addedIn": "2026-10-15"
 }

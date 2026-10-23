@@ -89,7 +89,7 @@ import Testing
         #expect(t.typeTab.size == 18 && t.typeTab.lineHeight == 24 && t.typeTab.weight == 400)
         #expect(t.typeTabActive.size == 19 && t.typeTabActive.lineHeight == 24 && t.typeTabActive.weight == 400)
         #expect(t.typeTabCount.size == 13 && t.typeTabCount.weight == 400 && t.typeTabCount.monospacedDigits)
-        #expect([t.densityCompactRow, t.densityDefaultRow, t.densityComfortableRow] == [32, 36, 44])
+        #expect([t.densityCompactRow, t.densityDefaultRow, t.densityComfortableRow] == [32, 40, 48])
         #expect(t.component.row.snippet == t.textTertiary && t.component.row.date == t.textTertiary)
         #expect(t.component.row.unreadWeight == 400)
         #expect(t.component.row.dateWidth == 72)

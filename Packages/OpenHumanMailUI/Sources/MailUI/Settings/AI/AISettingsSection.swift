@@ -7,6 +7,7 @@ import SwiftUI
 public struct AISettingsSection: View {
     @State private var model: AISettingsPageModel
     @State private var summarizeEvery: StoredSetting<Bool>?
+    @State private var refreshed = false
     private let offersQuickRepliesRow: Bool
     private weak var environment: AppEnvironment?
     @Environment(\.theme) private var theme
@@ -19,21 +20,23 @@ public struct AISettingsSection: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: theme.space7) {
-            providers
-            AIFeatureModelsSection(center: model.center, reloadKey: model.providers.hashValue,
-                                   onTriageChange: { [weak environment] in await environment?.autoLabels?.refreshAvailability() })
-            choices
-            personal
-            accounts
-            SettingsErrorLine(text: model.error)
-        }
-        .task { await model.refresh() }
+        providers
+        AIFeatureModelsSection(center: model.center, reloadKey: model.providers.hashValue,
+                               onTriageChange: { [weak environment] in await environment?.autoLabels?.refreshAvailability() })
+        choices
+        personal
+        accounts
+        SettingsErrorLine(text: model.error)
     }
 
+    // Why: the grouped form builds rows lazily, so the refresh rides on the footer, which shows before any model row
     private var providers: some View {
-        SettingsSection(String(localized: "Models"),
-                        footnote: String(localized: "The models Mail can use. Each feature's model is chosen below.")) {
+        Section {
+            if model.providers.isEmpty {
+                SettingsRow(String(localized: "Models"),
+                            detail: refreshed ? String(localized: "No model is set up on this Mac yet.")
+                                : String(localized: "Checking which models are on this Mac…"))
+            }
             ForEach(model.providers) { row in
                 SettingsRow(row.name, detail: row.status, status: row.warning, statusTone: .warning) {
                     HStack(spacing: theme.space3) {
@@ -64,23 +67,29 @@ public struct AISettingsSection: View {
                                   accept: { Task { await model.acceptConsent() } }, decline: { model.declineConsent() })
                 }
             }
+        } header: {
+            Text(String(localized: "Models")).accessibilityAddTraits(.isHeader)
+        } footer: {
+            SettingsFootnote(String(localized: "The models Mail can use. Each feature's model is chosen below."))
+                .task {
+                    await model.refresh()
+                    refreshed = true
+                }
         }
     }
 
     private var choices: some View {
         SettingsSection(String(localized: "Features")) {
             SettingsRow(String(localized: "Use AI"), isOn: $model.useAI)
-            SettingsRow(String(localized: "Draft replies"), alignment: .firstTextBaseline, labelsControl: true) {
-                Picker("Draft replies", selection: $model.draftReplies) {
-                    Text("Yes, when I open a conversation").tag(DraftRepliesChoice.onDeviceAuto)
-                    Text("Only when I ask (⌘J)").tag(DraftRepliesChoice.onDemand)
-                    Text("Not at all").tag(DraftRepliesChoice.off)
-                }
-                .ohRadioGroupPickerStyle()
-                .labelsHidden()
-                .fixedSize()
+            // Why: a radio group beside a title in the grouped form lays its options out as form-wide rows, and the row
+            // then widens the whole page past its pane; a menu keeps one definite width like the other choices
+            SettingsRow(String(localized: "Draft replies"), selection: $model.draftReplies) {
+                Text("Yes, when I open a conversation").tag(DraftRepliesChoice.onDeviceAuto)
+                Text("Only when I ask (⌘J)").tag(DraftRepliesChoice.onDemand)
+                Text("Not at all").tag(DraftRepliesChoice.off)
             }
             .disabled(!model.useAI)
+            .accessibilityIdentifier("settings.ai.draftReplies")
             if offersQuickRepliesRow {
                 SettingsRow(AISettingsPageModel.instantReplyStripTitle,
                             detail: AISettingsPageModel.instantReplyStripDetail,

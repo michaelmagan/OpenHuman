@@ -7,8 +7,8 @@ public struct AIComposerPanel: View {
     let center: AICenter?
     @FocusState private var focused: Bool
     @FocusState private var actionFocus: String?
-    @State private var boxWidth: CGFloat = 0
     @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(model: AIComposerModel, center: AICenter?) {
         self.model = model
@@ -20,8 +20,11 @@ public struct AIComposerPanel: View {
     static let previewMaxHeight: CGFloat = 240
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: theme.space2) {
-            if let version = model.currentVersion { versionText(version) }
+        VStack(alignment: .leading, spacing: theme.space3) {
+            if let version = model.currentVersion {
+                comparison(version)
+                    .transition(AnyTransition.opacity.combined(with: .offset(y: reduceMotion ? 0 : -4)))
+            }
             box
             if let consent = model.consent {
                 AIConsentView(request: consent, center: center,
@@ -35,10 +38,12 @@ public struct AIComposerPanel: View {
                     .accessibilityIdentifier("composer.ai.failure")
             }
             if model.showsExamples {
-                AIExamplesPopover(width: AIComposerMetrics.examplesWidth(boxWidth: boxWidth), use: { example in
-                    model.useExample(example)
-                    focused = true
-                }, close: { model.dismissExamples() })
+                AIExamplesColumn {
+                    AIExamplesPopover(use: { example in
+                        model.useExample(example)
+                        focused = true
+                    }, close: { model.dismissExamples() })
+                }
             }
             if model.currentVersion == nil, model.instruction.isEmpty, let replies = model.quickReplies,
                replies.isOffered || replies.phase != .idle {
@@ -46,6 +51,7 @@ public struct AIComposerPanel: View {
                     .padding(.top, theme.space1)
             }
         }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: model.currentVersion?.id)
         .frame(minWidth: Self.minWidth, idealWidth: Self.width, maxWidth: .infinity, alignment: .leading)
         .background(PanelShortcuts(model: model))
         .onAppear {
@@ -61,8 +67,70 @@ public struct AIComposerPanel: View {
 
     private var isEditBar: Bool { model.currentVersion != nil || model.scope != .notes }
 
+    // The original and the new text, one above the other, or side by side when the panel is wide enough. The
+    // arrangement comes from the width the panel is given in the same layout pass; see `AIComparisonLayout`.
+    @ViewBuilder
+    private func comparison(_ version: AIComposerModel.Version) -> some View {
+        if model.original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            versionText(version).fixedSize(horizontal: false, vertical: true)
+        } else {
+            AIComparisonLayout(columnSpacing: theme.space4, rowSpacing: theme.space3) {
+                originalText()
+                versionText(version)
+                originalCut
+            }
+        }
+    }
+
+    private func columnTitle(_ title: String) -> some View {
+        Text(verbatim: title)
+            .font(theme.typeCaption.swiftUIFont)
+            .fontWeight(.semibold)
+            .foregroundStyle(theme.textTertiary.color)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private var originalTitle: String {
+        model.scope == .selection ? String(localized: "Selected text") : String(localized: "Your draft")
+    }
+
+    // The original as many lines as the height it is given holds, the last one cut with an ellipsis
+    private func originalText() -> some View {
+        VStack(alignment: .leading, spacing: theme.space1) {
+            columnTitle(originalTitle)
+            Text(verbatim: model.original)
+                .font(theme.typeReader.swiftUIFont)
+                .foregroundStyle(theme.textSecondary.color)
+                .truncationMode(.tail)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .help(model.original)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(String(localized: "Original text"))
+        .accessibilityValue(model.original)
+        .accessibilityIdentifier("composer.ai.original")
+    }
+
+    // Not shown: the original cut to the lines it keeps one above the other, which gives that height
+    private var originalCut: some View {
+        VStack(alignment: .leading, spacing: theme.space1) {
+            columnTitle(originalTitle)
+            Text(verbatim: model.original)
+                .font(theme.typeReader.swiftUIFont)
+                .lineLimit(AIComposerMetrics.stackedOriginalLines)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .hidden()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
     private var box: some View {
-        let shape = RoundedRectangle(cornerRadius: theme.radiusMD, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: theme.radiusXL, style: .continuous)
         return VStack(alignment: .leading, spacing: theme.space2) {
             HStack(alignment: .center, spacing: theme.space3) {
                 if model.phase == .working {
@@ -87,11 +155,10 @@ public struct AIComposerPanel: View {
             }
         }
         .padding(.horizontal, theme.space4)
-        .padding(.vertical, theme.space2)
+        .padding(.vertical, theme.space3)
         .background(shape.fill(theme.bgElevated.color))
         .overlay(shape.strokeBorder((focused ? theme.borderControl : theme.borderHairline).color,
                                     lineWidth: CGFloat(theme.borderWidthHairline)))
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
     }
 
     private var canSend: Bool {
@@ -168,7 +235,27 @@ public struct AIComposerPanel: View {
     }
 
     private func versionText(_ version: AIComposerModel.Version) -> some View {
-        VStack(alignment: .leading, spacing: theme.space2) {
+        VStack(alignment: .leading, spacing: theme.space1) {
+            HStack(alignment: .firstTextBaseline, spacing: theme.space2) {
+                columnTitle(String(localized: "Suggestion"))
+                if let counter = model.counterText {
+                    Text(verbatim: counter)
+                        .font(theme.typeCaption.swiftUIFont)
+                        .monospacedDigit()
+                        .foregroundStyle(theme.textTertiary.color)
+                        .help(String(localized: "⇧⇥ the previous version, ⇥ another one"))
+                }
+                Spacer(minLength: 0)
+                if version.isComplete, !model.original.isEmpty {
+                    Button(model.showsDiff ? String(localized: "Hide changes") : String(localized: "Show changes")) {
+                        model.showsDiff.toggle()
+                    }
+                    .ohLinkButtonStyle()
+                    .font(theme.typeCaption.swiftUIFont)
+                    .help(String(localized: "Mark what the AI changed  ⌘D"))
+                    .accessibilityIdentifier("composer.ai.changes")
+                }
+            }
             ScrollView {
                 Group {
                     if model.showsDiff, version.isComplete {
@@ -180,26 +267,22 @@ public struct AIComposerPanel: View {
                 .font(theme.typeReader.swiftUIFont)
                 .foregroundStyle(theme.textPrimary.color)
                 .textSelection(.enabled)
-                .padding(.horizontal, theme.space1)
-                .background(RoundedRectangle(cornerRadius: theme.radiusXS).fill(theme.bgRowSelected.color))
+                .padding(.horizontal, theme.space2)
+                .padding(.vertical, theme.space1)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: theme.radiusSM, style: .continuous)
+                    .fill(theme.bgRowSelected.color))
                 .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxHeight: Self.previewMaxHeight)
-            .fixedSize(horizontal: false, vertical: true)
             if version.isSuspicious { AISuspiciousLine() }
             if version.isTruncated {
                 Text("The answer was cut at its length limit.")
                     .font(theme.typeCaption.swiftUIFont)
                     .foregroundStyle(theme.textTertiary.color)
             }
-            if let counter = model.counterText {
-                Text(verbatim: counter)
-                    .font(theme.typeCaption.swiftUIFont)
-                    .foregroundStyle(theme.textTertiary.color)
-                    .help(String(localized: "⇧⇥ the previous version, ⇥ another one"))
-            }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(String(localized: "Suggested text"))
         .accessibilityValue(version.text)
@@ -230,6 +313,8 @@ enum AIComposerMetrics {
     static let fieldHeight: CGFloat = 32
     static let sendButton: CGFloat = 22
     static let sendTarget: CGFloat = 28
+    static let sideBySideWidth: CGFloat = 620
+    static let stackedOriginalLines = 3
 
     static func examplesWidth(boxWidth: CGFloat) -> CGFloat {
         min(max(boxWidth * 0.5, 280), 360)

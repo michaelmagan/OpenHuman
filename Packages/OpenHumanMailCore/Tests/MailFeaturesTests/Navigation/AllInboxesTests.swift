@@ -240,6 +240,105 @@ import Testing
         #expect(perAccount == model.unreadCount, "the chips add up to the total")
     }
 
+    @Test func eInAllAccountsSearchMovesToTheNextResult() {
+        let model = AllInboxesModel(accounts: [Self.work, Self.home], open: { _ in }, done: { _ in true })
+        model.setSearchAllAccounts(true)
+        model.setQuery("plan")
+        model.finishSearch([Self.work.id: [row(Self.work.id, 1, minutesAgo: 1), row(Self.work.id, 2, minutesAgo: 3)],
+                            Self.home.id: [row(Self.home.id, 3, minutesAgo: 2), row(Self.home.id, 4, minutesAgo: 4)]],
+                           failed: [], generation: model.searchGeneration)
+        #expect(model.rows.map(\.id.rowID) == [1, 3, 2, 4])
+        #expect(model.cursor?.rowID == 1)
+        #expect(model.markDoneAtCursor())
+        #expect(model.rows.map(\.id.rowID) == [3, 2, 4] && model.cursor?.rowID == 3, "the next result, not the one after")
+        model.setCursor(model.rows[2].id)
+        #expect(model.markDoneAtCursor())
+        #expect(model.cursor?.rowID == 2, "after the last one, the one above it")
+    }
+
+    @Test func eInTheInboxMovesToTheNextRowBeforeTheListCatchesUp() {
+        let model = AllInboxesModel(accounts: [Self.work, Self.home], open: { _ in }, done: { _ in true })
+        model.apply([row(Self.work.id, 1, minutesAgo: 1), row(Self.work.id, 2, minutesAgo: 3)], for: Self.work.id)
+        model.apply([row(Self.home.id, 3, minutesAgo: 2)], for: Self.home.id)
+        #expect(model.markDoneAtCursor())
+        #expect(model.cursor?.rowID == 3, "the done row is still listed until its inbox changes")
+        model.apply([row(Self.work.id, 2, minutesAgo: 3)], for: Self.work.id)
+        #expect(model.cursor?.rowID == 3)
+    }
+
+    @Test func anAccountThatFailsAfterItsRowsCountsOnceWhileTheOthersLoad() {
+        let third = Account(id: AccountID(3), email: "me@club.example", displayName: nil, alias: nil, health: .active)
+        let model = AllInboxesModel(accounts: [Self.work, Self.home, third], open: { _ in }, done: { _ in true })
+        model.apply([row(Self.work.id, 1, minutesAgo: 1)], for: Self.work.id)
+        model.failed(Self.work.id)
+        model.apply([], for: Self.home.id)
+        #expect(model.isLoading, "the third account has not answered")
+        model.apply([], for: third.id)
+        #expect(!model.isLoading)
+    }
+
+    @Test func anOpenAllInboxesFollowsAddedRemovedAndRenamedAccounts() async throws {
+        let f = OverlayFixture(corpus: .rich(threadCount: 20, now: fixedNow))
+        await f.loaded()
+        await eventually { f.router.accounts.count == 2 }
+        #expect(f.router.goToAllInboxes())
+        let first = try #require(f.router.unifiedInbox)
+        first.setQuery("plan")
+        let list = f.router.accounts.map(\.account)
+        #expect(first.reads(list))
+        f.router.apply(list)
+        #expect(f.router.unifiedInbox === first, "the same accounts keep the list")
+
+        let renamed = list.map {
+            Account(id: $0.id, email: $0.email, displayName: $0.displayName, alias: $0.id == list[0].id ? "Renamed" : $0.alias,
+                    health: $0.health, sendAs: $0.sendAs)
+        }
+        f.router.apply(renamed)
+        let second = try #require(f.router.unifiedInbox)
+        #expect(second !== first && first.isClosed, "a renamed account starts the list again")
+        #expect(second.query == "plan", "with the same text")
+        #expect(second.reads(renamed))
+        second.setQuery("")
+        await eventually { !second.isLoading && second.rows.contains { $0.id.account == list[0].id } }
+        #expect(second.rows.filter { $0.id.account == list[0].id }.allSatisfy { $0.account == "Renamed" })
+
+        f.router.apply([renamed[0]])
+        #expect(f.router.unifiedInbox == nil && second.isClosed, "one account left: no All Inboxes")
+    }
+
+    @Test func aRowOfARemovedAccountDoesNotOpenInAnother() async throws {
+        let f = OverlayFixture(corpus: .rich(threadCount: 20, now: fixedNow))
+        await f.loaded()
+        await eventually { f.router.accounts.count == 2 }
+        #expect(f.router.goToAllInboxes())
+        let model = try #require(f.router.unifiedInbox)
+        await eventually { !model.isLoading && Set(model.rows.map(\.id.account)).count == 2 }
+        let target = try #require(model.rows.first { $0.id.account != f.router.activeAccountID })
+        let active = f.router.activeAccountID
+        let list = f.router.accounts.map(\.account)
+        let third = Account(id: AccountID(99), email: "me@club.example", displayName: nil, alias: nil, health: .active)
+        f.router.apply(list.filter { $0.id != target.id.account } + [third])
+        #expect(f.router.unifiedInbox !== model && model.isClosed, "the list starts again without the removed account")
+        model.setCursor(target.id)
+        model.openCursor()
+        #expect(f.router.activeAccountID == active)
+        #expect(f.router.active?.reader?.thread != target.id, "nothing opens in the active account")
+    }
+
+    @Test func searchInAllInboxesFocusesItsFieldAndLeavesTheAccountsSearchClosed() async throws {
+        let f = OverlayFixture(corpus: .rich(threadCount: 20, now: fixedNow))
+        await f.loaded()
+        await eventually { f.router.accounts.count == 2 }
+        #expect(f.router.goToAllInboxes())
+        let model = try #require(f.router.unifiedInbox)
+        #expect(await f.run(.search))
+        #expect(!f.center.search.isOpen, "the account's search would open out of sight")
+        #expect(model.searchFocusRequest == 1, "the field above the list takes the keys")
+        f.router.leaveAllInboxes()
+        #expect(await f.run(.search))
+        #expect(f.center.search.isOpen, "elsewhere / opens the search as before")
+    }
+
     @Test func gUIsBoundBesideControlZeroWithoutCollisions() {
         let descriptor = ActionCatalog.descriptor(.goAllInboxes)
         #expect(descriptor?.defaultBindings.contains(.sequence("g", "u")) == true)

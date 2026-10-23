@@ -22,6 +22,9 @@ packages:
   OpenHumanAIMLX: { path: ../../Packages/OpenHumanAIMLX }
   OpenHumanSemanticIndex: { path: ../../Packages/OpenHumanSemanticIndex }
   OpenHumanMailLive: { path: ../../Packages/OpenHumanMailLive }
+  # In-app updates for Developer ID builds (docs/release/SPARKLE.md). The commit of the 2.10.0 tag; keep it equal to
+  # SPARKLE_REVISION in Tools/versions.env
+  Sparkle: { url: https://github.com/sparkle-project/Sparkle, revision: eef1a539a373c1f1a320624b1130fc5de7b2e100 }
 targets:
   Mail:
     type: application
@@ -31,6 +34,12 @@ targets:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_ENTITLEMENTS: $(OH_ENTITLEMENTS)
+      configs:
+        # Debug compiles the updater out, so this leaves Sparkle out of the app's load commands. Xcode's run and test
+        # actions point DYLD_FRAMEWORK_PATH at the build folder, and loading Sparkle's copy there, outside the app,
+        # waits for a file access approval when that folder is on an external disk: the test host then never starts
+        Debug:
+          OTHER_LDFLAGS: $(inherited) -Wl,-dead_strip_dylibs
     info:
       path: Resources/Info.generated.plist
       properties:
@@ -61,6 +70,9 @@ targets:
         OHReleaseChannel: $(OH_RELEASE_CHANNEL)
         # Used only once the signature grants the group; ad hoc and CI builds keep the default group
         OHKeychainAccessGroup: $(AppIdentifierPrefix)dev.openhuman.shared
+        # Empty in every build (Base.xcconfig) except a Developer ID build made with make-dmg.sh --enable-updates
+        SUFeedURL: $(OH_UPDATE_FEED_URL)
+        SUPublicEDKey: $(OH_SPARKLE_PUBLIC_KEY)
     postBuildScripts:
       - name: Stamp git commit
         basedOnDependencyAnalysis: false
@@ -91,6 +103,7 @@ targets:
       - { package: OpenHumanSemanticIndex, product: OpenHumanSemanticIndex }
       - { package: OpenHumanMailLive, product: OpenHumanMailLive }
       - { package: OpenHumanMailLive, product: MailSystem }
+      - { package: Sparkle, product: Sparkle }
   MailAppTests:
     type: bundle.unit-test
     platform: macOS

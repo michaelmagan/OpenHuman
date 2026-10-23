@@ -2,6 +2,7 @@ import Foundation
 import MailModel
 import OpenHumanAI
 import OpenHumanAITesting
+import OpenHumanCore
 import Testing
 
 @testable import MailFeatures
@@ -80,6 +81,22 @@ import Testing
         let kept = try await store.recent(limit: 10)
         #expect(!kept.isEmpty && kept.allSatisfy { $0.accountKeys == [key] })
         await f.center.forgetTraces(for: session.account.id)
+        #expect(try await store.recent(limit: 10).isEmpty)
+    }
+
+    @Test func signingOutForgetsTracesByEmailOnceTheAccountHasLeftTheList() async throws {
+        let store = InMemoryAITraceStore()
+        let f = AIFixture(providers: [ScriptedProvider()], traces: store)
+        await f.loaded()
+        let (session, _) = try f.newMessage("thx for the notes")
+        let panel = try #require(f.center.togglePanel(session))
+        panel.run(try #require(AIComposerModel.presets.first { $0.id == "shorter" }))
+        await panel.settle()
+        let email = try #require(f.center.account(session.account.id)).email
+        #expect(try await store.recent(limit: 10).allSatisfy { $0.accountKeys == [AICenter.policyKey(email: email)] })
+        await f.center.forgetTraces(for: AccountID(9_999))
+        #expect(try await store.recent(limit: 10).isEmpty == false, "an account that is not listed resolves to no key")
+        await f.center.forgetTraces(email: email.uppercased())
         #expect(try await store.recent(limit: 10).isEmpty)
     }
 }

@@ -1,6 +1,7 @@
 import AppKit
 import MailActions
 import MailFeatures
+import MailModel
 import MailRender
 
 @MainActor
@@ -21,6 +22,7 @@ public final class ComposerTextView: NSTextView {
     public var inlineImageProvider: ((InlineImageRef) -> InlineImageContent?)?
     public var onPasteCleaned: ((ComposePaste.Report) -> Void)?
     public var onReload: (() -> Void)?
+    public var pastedImageSize: InlineImageSize = .pastedDefault
 
     public enum PickerKey { case up, down, choose, close }
 
@@ -49,6 +51,9 @@ public final class ComposerTextView: NSTextView {
     }
 
     let hintView = ComposerHintView()
+    let imageOverlay = InlineImageOverlay()
+    var imageOverlayScheduled = false
+    weak var announcedImage: NSTextAttachment?
 
     public var spokenPlaceholder: String?
 
@@ -80,6 +85,7 @@ public final class ComposerTextView: NSTextView {
         registerForDraggedTypes([.fileURL, .png, .tiff])
         setAccessibilityLabel("Message body")
         addSubview(hintView, positioned: .below, relativeTo: nil)
+        configureImageOverlay()
         NotificationCenter.default.addObserver(self, selector: #selector(textStorageDidEdit(_:)),
                                                name: NSTextStorage.didProcessEditingNotification, object: textStorage)
         updateHint()
@@ -193,7 +199,7 @@ public final class ComposerTextView: NSTextView {
             guard let start = content.location(content.documentRange.location, offsetBy: span.range.location),
                   let end = content.location(start, offsetBy: span.range.length),
                   let range = NSTextRange(location: start, end: end) else { continue }
-            layout.addRenderingAttribute(.underlineStyle, value: NSUnderlineStyle.single.union(.patternDot).rawValue,
+            layout.addRenderingAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue,
                                          for: range)
         }
     }
@@ -213,7 +219,12 @@ public final class ComposerTextView: NSTextView {
 
     public override func mouseDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        let point = convert(event.locationInWindow, from: nil)
         super.mouseDown(with: event)
+        if event.clickCount == 1, modifiers.isEmpty, selectedRange().length == 0, let image = imageIndex(at: point) {
+            setSelectedRange(NSRange(location: image, length: 1))
+            return
+        }
         guard event.clickCount == 1, modifiers.isEmpty, onDateClicked != nil else { return }
         let selection = selectedRange()
         guard selection.length == 0,
@@ -246,14 +257,38 @@ public final class ComposerTextView: NSTextView {
         if hintView.frame != frame { hintView.frame = frame }
     }
 
+    public override func becomeFirstResponder() -> Bool {
+        let became = super.becomeFirstResponder()
+        scheduleImageOverlay()
+        return became
+    }
+
+    public override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        scheduleImageOverlay()
+        return resigned
+    }
+
+    public override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event)
+        guard let index = imageIndex(at: convert(event.locationInWindow, from: nil)) else { return menu }
+        setSelectedRange(NSRange(location: index, length: 1))
+        let out = menu ?? NSMenu()
+        out.insertItem(imageSizeMenuItem(at: index), at: 0)
+        out.insertItem(.separator(), at: 1)
+        return out
+    }
+
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         layoutHint(ghost: !hintView.isHidden && ghostText?.isEmpty == false)
+        scheduleImageOverlay()
     }
 
     public override func didChangeText() {
         super.didChangeText()
         updateHint()
+        scheduleImageOverlay()
     }
 
     public func contentHeight(forWidth width: CGFloat) -> CGFloat {
@@ -327,7 +362,10 @@ public final class ComposerTextView: NSTextView {
 
     public override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
-        if !stillSelecting { keepTheLastEmptyLineOutOfLists() }
+        if !stillSelecting {
+            keepTheLastEmptyLineOutOfLists()
+            scheduleImageOverlay()
+        }
     }
 
     public override func moveUp(_ sender: Any?) {
@@ -349,6 +387,7 @@ public final class ComposerTextView: NSTextView {
 
     public override func insertTab(_ sender: Any?) {
         if pickerKeys?(.choose) == true { return }
+        if focusImageSizes() { return }
         if suggestionKeys?(.next) == true { return }
         if autoListTab(outdent: false) { return }
         super.insertTab(sender)
@@ -906,6 +945,7 @@ public final class ComposerTextView: NSTextView {
     }
 
     func insertPasted(_ document: RichTextDocument) {
+        let document = sizingNewImages(document)
         let piece = NSMutableAttributedString(attributedString: bridge.attributedString(document,
                                                                                        images: { inlineImageProvider?($0) }))
         guard piece.length > 0 else { return }

@@ -77,6 +77,15 @@ struct ComposeSheet: View {
         .background(theme.card.ignoresSafeArea())
         .presentationBackground(theme.card)
         .presentationDetents([.large])
+        .alert(session.preSendWarning?.title ?? "",
+               isPresented: Binding(get: { session.preSendWarning != nil },
+                                    set: { if !$0 { session.preSendWarning = nil } }),
+               presenting: session.preSendWarning) { warning in
+            Button(PreSendWarning.keepWritingTitle, role: .cancel) { session.cancelPreSendWarning() }
+            Button(warning.confirmTitle) { phone.compose.confirmPreSendWarning(warning, in: session) }
+        } message: { warning in
+            Text(warning.message)
+        }
         .onAppear {
             loadText()
             guard !phone.isRendering else { return }

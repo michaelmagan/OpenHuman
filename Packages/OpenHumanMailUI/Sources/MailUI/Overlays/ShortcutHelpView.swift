@@ -6,72 +6,69 @@ import SwiftUI
 struct ShortcutHelpView: View {
     let model: ShortcutHelpModel
     let dismiss: () -> Void
-    @Environment(\.theme) private var theme
     @FocusState private var focused: Bool
 
     var body: some View {
-        OverlayCard(width: 880, top: theme.space10, radius: theme.radiusXL, dismiss: dismiss) {
+        OverlayPanel(width: OverlayMetrics.shortcutHelpWidth, top: Self.top, dismiss: dismiss) { _ in
             VStack(spacing: 0) {
-                HStack(spacing: theme.space4) {
-                    Image(systemName: "keyboard")
-                        .font(.system(size: OverlayMetrics.rowIconSize))
-                        .foregroundStyle(theme.textTertiary.color)
+                OverlayFieldRow(symbol: "keyboard") {
                     TextField("Filter shortcuts", text: Binding(get: { model.filter }, set: { model.filter = $0 }),
-                              prompt: Text("Filter shortcuts").foregroundStyle(theme.textTertiary.color))
-                        .textFieldStyle(.plain)
-                        .font(theme.typePaletteInput.swiftUIFont)
-                        .overlayInputLine(theme.typePaletteInput)
+                              prompt: Text("Filter shortcuts"))
+                        .overlayField()
                         .focused($focused)
                         .onKeyPress(.escape) { dismiss(); return .handled }
                         .accessibilityLabel("Filter shortcuts")
-                    KeycapView(text: "esc")
+                } trailing: {
+                    OverlayShortcutHint("esc")
                 }
-                .padding(.horizontal, OverlayMetrics.rowIconX)
-                .frame(height: OverlayMetrics.pickerInputHeight)
-                .layoutPriority(1)
-                Divider().overlay(theme.borderHairline.color)
+                Divider()
                 ScrollView {
-                    HStack(alignment: .top, spacing: theme.space9) {
+                    HStack(alignment: .top, spacing: Self.columnSpacing) {
                         ForEach(model.sections) { section in
-                            VStack(alignment: .leading, spacing: theme.space2) {
+                            VStack(alignment: .leading, spacing: Self.lineSpacing) {
                                 Text(section.title)
-                                    .font(theme.typeLabel.swiftUIFont)
-                                    .foregroundStyle(theme.textTertiary.color)
+                                    .font(.system(size: NativeMetrics.Text.caption, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.bottom, OverlayMetrics.sectionHeaderBottom)
                                     .accessibilityAddTraits(.isHeader)
                                 ForEach(section.lines) { line in
-                                    HStack(spacing: theme.space3) {
-                                        VStack(alignment: .leading, spacing: 0) {
-                                            Text(line.title)
-                                                .font(theme.typeBody.swiftUIFont)
-                                                .foregroundStyle(theme.textPrimary.color)
-                                                .lineLimit(1)
-                                            if let place = line.place {
-                                                Text(place)
-                                                    .font(theme.typeCaption.swiftUIFont)
-                                                    .foregroundStyle(theme.textTertiary.color)
-                                                    .lineLimit(1)
-                                            }
-                                        }
-                                        Spacer(minLength: theme.space3)
-                                        if let first = line.keys.first {
-                                            Text(first)
-                                                .font(theme.typeKeycap.swiftUIFont)
-                                                .foregroundStyle(theme.component.keycap.text.color)
-                                        }
-                                    }
-                                    .accessibilityElement(children: .combine)
-                                    .accessibilityLabel(Self.accessibilityText(line))
+                                    lineView(line)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .topLeading)
                         }
                     }
-                    .padding(OverlayMetrics.rowIconX)
+                    .padding(OverlayMetrics.panelInsetX)
                 }
                 .frame(maxHeight: OverlayMetrics.paletteListMaxHeight + 120)
             }
         }
         .onAppear { focused = true }
+    }
+
+    static let top: CGFloat = 64
+    static let columnSpacing: CGFloat = 24
+    static let lineSpacing: CGFloat = 4
+
+    private func lineView(_ line: ShortcutLine) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: OverlayMetrics.rowSpacing) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(line.title)
+                    .font(.system(size: NativeMetrics.Text.body))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if let place = line.place {
+                    Text(place)
+                        .font(.system(size: NativeMetrics.Text.caption))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: OverlayMetrics.rowSpacing)
+            if let first = line.keys.first { OverlayShortcutHint(first) }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Self.accessibilityText(line))
     }
 
     static func accessibilityText(_ line: ShortcutLine) -> String {

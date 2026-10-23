@@ -15,6 +15,8 @@ struct TrackingTab: View {
             SettingsSection("Tracking", footnote: "Kept on this Mac only. Without the last switch nothing from your mail's "
                             + "text is stored: only what the rules saw (yes or no, counts) and the sender's domain.") {
                 SettingsRow("Keep a log of how each conversation was sorted", isOn: binding(model.logEnabled))
+                    .task { model.start() }
+                    .onChange(of: ruleSet.revision) { _, _ in Task { await model.reload() } }
                 SettingsRow("Learn from my corrections", detail: "Not important, Label as… and Wrong label are kept as examples.",
                             isOn: binding(model.teach))
                 SettingsRow("Suggest rules when I correct", detail: "Offers \u{201C}Always do this for this sender, domain "
@@ -24,18 +26,6 @@ struct TrackingTab: View {
             decisionLog
             corrections
             if let message = model.message { SettingsFootnote(message) }
-        }
-        .task { model.start() }
-        .onChange(of: ruleSet.revision) { _, _ in Task { await model.reload() } }
-        .confirmationDialog("Clear the decision log?", isPresented: $confirmClearLog) {
-            Button("Clear decision log", role: .destructive) { Task { await model.clearLog() } }
-        } message: {
-            Text("This removes Mail's notes on how conversations were sorted on this Mac. It doesn't change any mail.")
-        }
-        .confirmationDialog("Clear your corrections?", isPresented: $confirmClearCorrections) {
-            Button("Clear corrections", role: .destructive) { Task { await model.clearExamples() } }
-        } message: {
-            Text("This removes the examples Mail kept from your corrections. It doesn't change any mail or rule.")
         }
     }
 
@@ -55,6 +45,11 @@ struct TrackingTab: View {
                 Button("Clear decision log…") { confirmClearLog = true }
                     .disabled(model.decisions.isEmpty)
             }
+            .confirmationDialog("Clear the decision log?", isPresented: $confirmClearLog) {
+                Button("Clear decision log", role: .destructive) { Task { await model.clearLog() } }
+            } message: {
+                Text("This removes Mail's notes on how conversations were sorted on this Mac. It doesn't change any mail.")
+            }
         }
         .accessibilityIdentifier("settings.tracking.log")
     }
@@ -73,6 +68,11 @@ struct TrackingTab: View {
             SettingsRow("Clear corrections", detail: "Local examples only; your rules and mail are not touched.") {
                 Button("Clear corrections…") { confirmClearCorrections = true }
                     .disabled(model.examples.isEmpty)
+            }
+            .confirmationDialog("Clear your corrections?", isPresented: $confirmClearCorrections) {
+                Button("Clear corrections", role: .destructive) { Task { await model.clearExamples() } }
+            } message: {
+                Text("This removes the examples Mail kept from your corrections. It doesn't change any mail or rule.")
             }
         }
     }

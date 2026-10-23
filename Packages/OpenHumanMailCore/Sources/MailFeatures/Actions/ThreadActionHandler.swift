@@ -532,7 +532,8 @@ public final class ThreadActionHandler: ActionHandler {
             guard !rows.isEmpty else { return .notHandled }
             state.selection.checkFromHere(cursor: list.cursor, in: rows)
         case .clearChecks:
-            if state.selection.checked.isEmpty, case .search? = state.location {
+            let searching = if case .search? = state.location { true } else { state.searchOpen }
+            if state.selection.checked.isEmpty, searching {
                 environment?.overlays.search.close()
             } else {
                 state.selection.clearChecked()

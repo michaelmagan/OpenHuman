@@ -16,16 +16,13 @@ struct ListRemindTests {
         #expect(controller.hoverActions.contains(.remind))
         let rowView = try #require(controller.tableView.rowView(atRow: 1, makeIfNecessary: false) as? ThreadRowBackgroundView)
         let view = try #require(controller.tableView.view(atColumn: 0, row: 1, makeIfNecessary: false) as? ThreadRowView)
-        let enter = NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
-                                           windowNumber: window.windowNumber, context: nil, eventNumber: 0,
-                                           trackingNumber: 0, userData: nil)!
-        rowView.mouseEntered(with: enter)
+        rowView.setHovering(true)
         view.layoutSubtreeIfNeeded()
         let plate = try #require(view.subviews.first)
         let buttons = plate.subviews.compactMap { $0 as? NSButton }
         #expect(buttons.map { $0.accessibilityLabel() } == ["Mark done", "Remind me"])
         #expect(buttons.allSatisfy { $0.toolTip == nil }, "the shortcut tip replaces the native tooltip")
-        rowView.mouseExited(with: enter)
+        rowView.setHovering(false)
         let actions = try #require(view.accessibilityCustomActions())
         #expect(actions.map(\.name) == ["Mark done", "Trash", "Remind me"])
 

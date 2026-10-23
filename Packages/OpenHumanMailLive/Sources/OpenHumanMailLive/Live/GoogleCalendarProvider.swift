@@ -74,7 +74,8 @@ final class GoogleCalendarProvider: CalendarProviding {
             let page = try await client.listEventWindow(from: from, to: to)
             onFetch?(CalendarFetchRecord(kind: .events, from: from, to: to, duration: ContinuousClock.now - started,
                                          count: page.events.count, failure: nil))
-            return CalendarEventWindow(records: page.events.map(Self.record), syncToken: page.nextSyncToken)
+            return CalendarEventWindow(records: page.events.map(Self.record), syncToken: page.nextSyncToken,
+                                       isComplete: page.isComplete)
         } catch GoogleCalendarError.rateLimited {
             reportFailure(from: from, to: to, started: started, error: GoogleCalendarError.rateLimited)
             throw CalendarSyncError.rateLimited(retryAfter: nil)
@@ -184,10 +185,10 @@ final class GoogleCalendarProvider: CalendarProviding {
         }
         do {
             let answered = try await client.respond(eventID: event.id, response: response.rawValue,
-                                                    sendUpdates: Self.sendUpdates(sendUpdates))
-            if let answered { return Self.event(answered) }
-            var shown = event
-            shown.myResponse = response
+                                                    sendUpdates: Self.sendUpdates(sendUpdates), as: event.respondsAs)
+            var shown = answered.map(Self.event) ?? event
+            if shown.myResponse == nil || answered == nil { shown.myResponse = response }
+            shown.respondsAs = event.respondsAs
             return shown
         } catch GoogleCalendarError.unclear {
             throw CalendarError.unclear("Google may have sent your answer. Check your calendar.")
@@ -215,7 +216,9 @@ final class GoogleCalendarProvider: CalendarProviding {
                 var wire = Self.googlePatch(patch)
                 if let time = wire.time {
                     guard let first = try await client.readEvent(id: masterID) else { throw CalendarError.failed("Couldn't read the series.") }
-                    let shifted = first.start.addingTimeInterval(time.start.timeIntervalSince(event.start))
+                    let zone = TimeZone(identifier: time.timeZone)
+                        ?? first.timeZone.flatMap(TimeZone.init(identifier:)) ?? .current
+                    let shifted = Self.shiftedSeriesStart(first.start, instant: event.start, movedTo: time.start, zone: zone)
                     wire.time = GoogleEventPatch.Time(start: shifted, end: shifted.addingTimeInterval(time.end.timeIntervalSince(time.start)),
                                                       isAllDay: time.isAllDay, timeZone: time.timeZone)
                 }
@@ -233,12 +236,37 @@ final class GoogleCalendarProvider: CalendarProviding {
         }
     }
 
+    // The series keeps its wall-clock time across a daylight-saving change: days and time of day, not seconds
+    static func shiftedSeriesStart(_ first: Date, instant: Date, movedTo start: Date, zone: TimeZone) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: instant),
+                                           to: calendar.startOfDay(for: start)).day ?? 0
+        let wall = calendar.dateComponents([.hour, .minute, .second], from: start)
+        guard let day = calendar.date(byAdding: .day, value: days, to: calendar.startOfDay(for: first)),
+              let shifted = calendar.date(bySettingHour: wall.hour ?? 0, minute: wall.minute ?? 0, second: wall.second ?? 0,
+                                          of: day) else {
+            return first.addingTimeInterval(start.timeIntervalSince(instant))
+        }
+        return shifted
+    }
+
     private func splitSeries(_ event: CalendarEvent, masterID: String, patch: CalendarEventPatch,
                              sendUpdates: GoogleSendUpdates) async throws -> CalendarEvent {
         let rules = try await client.seriesRecurrence(id: masterID)
         guard !rules.isEmpty else { throw CalendarError.failed("Couldn't read how the series repeats.") }
         let zoneID = patch.time?.timeZone ?? event.timeZone ?? TimeZone.current.identifier
         let zone = TimeZone(identifier: zoneID) ?? .current
+        let following: [String]
+        if let chosen = patch.recurrence {
+            following = chosen
+        } else if let kept = CalendarRepeat.continuing(rules, from: event.start, isAllDay: event.isAllDay, zone: zone) {
+            following = kept
+        } else {
+            throw CalendarError.refused(Self.countedSeriesRefusal)
+        }
+        let master = try await client.readEvent(id: masterID)
+        let series = master.map(Self.extras) ?? event.extras
         let times = patch.time
         var insert = GoogleEventInsert(title: patch.title ?? event.title, start: times?.start ?? event.start,
                                        end: times?.end ?? event.end, timeZone: zoneID,
@@ -248,8 +276,8 @@ final class GoogleCalendarProvider: CalendarProviding {
         let wanted = patch.guests ?? (event.extras.guests.isEmpty ? event.attendees.map { CalendarGuest($0) } : event.extras.guests)
         insert.attendees = wanted.map(\.email)
         insert.optionalAttendees = Set(wanted.filter(\.isOptional).map { $0.email.lowercased() })
-        var details = Self.googlePatch(patch).details
-        details.recurrence = patch.recurrence ?? CalendarRepeat.continuing(rules)
+        var details = Self.merged(Self.insertDetails(series), with: Self.googlePatch(patch).details)
+        details.recurrence = following
         insert.details = details
         let keepMeet = event.meetLink != nil && patch.meet != .remove
         let made = try await client.insertEvent(insert, sendUpdates: sendUpdates, addMeet: patch.meet == .add || keepMeet)
@@ -261,6 +289,25 @@ final class GoogleCalendarProvider: CalendarProviding {
             throw CalendarError.failed("Saved the new events, but couldn't end the old series. Check your calendar.")
         }
         return Self.event(made)
+    }
+
+    static let countedSeriesRefusal = "This series ends after a set number of times, so Mail can't split it. "
+        + "Change this event or all events."
+
+    static func merged(_ base: GoogleEventDetails, with patch: GoogleEventDetails) -> GoogleEventDetails {
+        var out = base
+        if let value = patch.guestsCanModify { out.guestsCanModify = value }
+        if let value = patch.guestsCanInviteOthers { out.guestsCanInviteOthers = value }
+        if let value = patch.guestsCanSeeOtherGuests { out.guestsCanSeeOtherGuests = value }
+        if let value = patch.recurrence { out.recurrence = value }
+        if let value = patch.useDefaultReminders {
+            out.useDefaultReminders = value
+            out.reminderOverrides = patch.reminderOverrides
+        }
+        if let value = patch.transparency { out.transparency = value }
+        if let value = patch.visibility { out.visibility = value }
+        if let value = patch.colorID { out.colorID = value }
+        return out
     }
 
     static func googlePatch(_ patch: CalendarEventPatch) -> GoogleEventPatch {

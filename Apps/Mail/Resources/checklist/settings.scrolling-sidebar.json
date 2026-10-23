@@ -1,0 +1,15 @@
+{
+  "id": "settings.scrolling-sidebar",
+  "area": "Settings",
+  "title": "Settings: the page list scrolls to its last page, and the window resizes and keeps its size",
+  "steps": [
+    "Launch with -UseFakeData, press ⌘, and drag the Settings window's bottom edge up as far as it goes",
+    "Scroll the page list with the trackpad to the end, then click General and press ↓ until Advanced is selected",
+    "Open Advanced, then AI, and scroll each page to its end",
+    "Make the window larger, close it with ⌘W and press ⌘, again; then quit, relaunch and press ⌘,"
+  ],
+  "deepLink": null,
+  "expected": "Every page title shows in full. The list scrolls until Advanced and the version note under it are in view, and the arrow keys keep the selected page in view. Each page scrolls to its last row. The window can't get smaller than its minimum and reopens at the size it was left at, also after relaunching.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

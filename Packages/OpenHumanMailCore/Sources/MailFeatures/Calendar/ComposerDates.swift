@@ -9,7 +9,7 @@ extension ComposeManager {
         guard let sidebar = environment.calendarSidebar else { return }
         let thread = session.thread
         let key = PendingEventKey.draft(session.id)
-        Task { await sidebar.beginDraft(for: thread, at: mention, key: key) }
+        Task { await sidebar.reveal(mention, in: thread, key: key) }
     }
 
     public func makeSendMarksDoneSetting() -> StoredSetting<Bool> {

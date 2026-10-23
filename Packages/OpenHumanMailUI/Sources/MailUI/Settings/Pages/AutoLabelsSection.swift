@@ -1,5 +1,6 @@
 import MailFeatures
 import MailModel
+import OpenHumanAI
 import SwiftUI
 
 struct AutoLabelsSection: View {
@@ -24,6 +25,7 @@ struct AutoLabelsSection: View {
                         statusTone: .warning, isOn: binding(model.enabled))
                 .disabled(!model.canUseSwitch)
                 .accessibilityIdentifier("settings.autoLabels.enabled")
+                .task { model.start() }
             SettingsRow("Also apply as Gmail labels", detail: AutoLabelSettingsModel.applyNote,
                         isOn: binding(model.applyToGmail))
                 .disabled(!model.canUseSwitch || !model.enabled.value)
@@ -42,6 +44,13 @@ struct AutoLabelsSection: View {
                     .disabled(model.isBusy || model.center == nil)
                     .accessibilityIdentifier("settings.autoLabels.reset")
             }
+            if environment.ai != nil {
+                SettingsRow(Self.promptTitle, detail: Self.promptNote) {
+                    Button("Edit Prompt…") { environment.settingsNavigator.openPrompt(PromptName.autoLabel.rawValue) }
+                        .accessibilityLabel("Edit the Auto labels prompt")
+                        .accessibilityIdentifier("settings.autoLabels.editPrompt")
+                }
+            }
             ForEach(AutoLabelSettingsModel.categories, id: \.self) { category in
                 SettingsRow(category, selection: placement(category)) {
                     ForEach(AutoLabelSettingsModel.Placement.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -50,8 +59,10 @@ struct AutoLabelsSection: View {
             }
             SettingsErrorLine(text: model.errorMessage)
         }
-        .task { model.start() }
     }
+
+    static let promptTitle = "Instructions to the model"
+    static let promptNote = "The prompt that picks a label for each conversation. It opens in AI › Prompts."
 
     private func binding<Value>(_ setting: StoredSetting<Value>) -> Binding<Value> {
         Binding(get: { setting.value }, set: { value in Task { await setting.set(value) } })

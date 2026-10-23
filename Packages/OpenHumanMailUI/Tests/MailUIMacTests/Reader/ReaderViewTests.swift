@@ -78,26 +78,23 @@ struct ReaderViewTests {
         #expect(reader.router === content.windowModel)
     }
 
-    @Test func theBarAndTheMoreMenuFollowTheCatalogOrder() async throws {
+    @Test func theToolbarGroupAndTheMoreMenuFollowTheCatalogOrder() async throws {
         let detail = F.conversation(2, count: 1)
         let source = UITestSource(details: [detail], bodies: [detail.messages[0].id: MessageContent(html: nil, text: "Hi")])
         let h = try await ReaderHarness.make(source, thread: detail.id)
         defer { h.close() }
-        try await until { !h.controller.threadActionButtons.isEmpty }
-        let buttons = h.controller.threadActionButtons
+        try await until { !h.controller.toolbarActions.primary.isEmpty }
+        let actions = h.controller.toolbarActions
         let offered = ReaderActions.threadActions.filter { h.controller.decided($0) != .hidden }
         let catalogOrder = ActionCatalog.all.map(\.id.rawValue).filter { id in offered.contains { $0.id.rawValue == id } }
         #expect(offered.map(\.id.rawValue) == catalogOrder)
-        let (primary, _) = ReaderActions.split(offered)
-        #expect(buttons.map { $0.identifier?.rawValue } == primary.map(\.id.rawValue))
-        let sections = ReaderActions.moreMenuSections.map { $0.filter { h.controller.decided($0) != .hidden } }
+        let primary = ReaderToolbarActions.primaryIDs.filter { id in offered.contains { $0.id == id } }
+        #expect(actions.primary.map(\.id) == primary)
+        let sections = ReaderToolbarActions.moreMenuSections.map { $0.filter { h.controller.decided($0) != .hidden } }
             .filter { !$0.isEmpty }
-        let more = Array(sections.joined())
-        let menu = h.controller.threadMoreMenu()
-        let items = menu.items.filter { !$0.isSeparatorItem }
-        #expect(items.map { $0.identifier?.rawValue } == more.map(\.id.rawValue))
-        #expect(menu.items.filter(\.isSeparatorItem).count == sections.count - 1)
+        #expect(actions.more.map { $0.map(\.id) } == sections.map { $0.map(\.id) })
         #expect(offered.contains { $0.id == .markDone } && offered.contains { $0.id == .trash })
+        #expect(ReaderToolbarActions(router: h.router).isEmpty, "no open conversation in the router, no toolbar actions")
     }
 
     @Test func markDoneFromTheReaderGoesThroughTheRouter() async throws {
@@ -114,10 +111,11 @@ struct ReaderViewTests {
         let first = try #require(content.windowModel.list?.rows.first?.id)
         content.windowModel.open(first)
         let reader = try #require(content.children.compactMap { $0 as? ReaderViewController }.first)
-        try await until { reader.threadActionButtons.first { $0.identifier?.rawValue == "thread.done" }?.isEnabled == true }
-        let done = try #require(reader.threadActionButtons.first { $0.identifier?.rawValue == "thread.done" })
-        #expect(done.tipText == "Mark done  E")
-        done.onPress?()
+        try await until { reader.toolbarActions.item(.markDone)?.isEnabled == true }
+        let done = try #require(reader.toolbarActions.item(.markDone))
+        #expect(done.help == "Mark done  E")
+        #expect(ReaderToolbarActions(router: content.windowModel) == reader.toolbarActions, "the toolbar reads the same actions")
+        #expect(ReaderToolbarActions.perform(done.id, router: try #require(reader.router)))
         try await until { content.windowModel.list?.rows.contains { $0.id == first } == false }
     }
 

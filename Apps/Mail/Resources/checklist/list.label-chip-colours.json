@@ -9,7 +9,7 @@
     "Switch View › Appearance to Dark, then try Paper and Midnight"
   ],
   "deepLink": null,
-  "expected": "Each label chip is a soft pastel with dark text of the same hue (light themes) or a deep tint with light text (dark themes); a label has the same colour in every row and in search results. Important, VIP and +N stay grey; a Superhuman category not imported yet is muted grey. Every chip reads easily, also on the highlighted row.",
+  "expected": "Each label chip is a capsule tinted with its own colour, with text of the same hue (darker in light themes, lighter in dark themes); a label has the same colour in every row and in search results. Important, VIP and +N are grey tints; a Superhuman category not imported yet is muted grey. Every chip reads easily, also on the selected and checked rows.",
   "requires": "fake",
   "addedIn": "2026-10-14"
 }

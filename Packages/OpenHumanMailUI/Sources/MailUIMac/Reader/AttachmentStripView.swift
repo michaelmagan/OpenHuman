@@ -104,13 +104,14 @@ final class AttachmentTileView: NSView {
     weak var strip: AttachmentStripView?
     private let theme: ThemeTokens
     var isSelected = false { didSet { updateBorder() } }
+    private(set) var isHovered = false { didSet { if isHovered != oldValue { updateBorder() } } }
 
     init(_ attachment: AttachmentInfo, theme: ThemeTokens) {
         self.attachment = attachment
         self.theme = theme
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = theme.radiusLG
+        layer?.cornerRadius = theme.radiusMD
         layer?.borderWidth = theme.borderWidthHairline
         updateBorder()
         let type = UTType(mimeType: attachment.mimeType) ?? UTType(filenameExtension: (attachment.filename as NSString).pathExtension) ?? .data
@@ -148,8 +149,19 @@ final class AttachmentTileView: NSView {
 
     private func updateBorder() {
         layer?.borderColor = (isSelected ? theme.accentRing : theme.borderHairline).nsColor.cgColor
-        layer?.backgroundColor = (isSelected ? theme.accentSubtle : theme.bgWindow).nsColor.withAlphaComponent(isSelected ? 1 : 0).cgColor
+        let fill: NSColor = isSelected ? theme.accentSubtle.nsColor : (isHovered ? theme.bgRowHover.nsColor : .clear)
+        layer?.backgroundColor = fill.cgColor
     }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
 
     func updateAccessibilityHelp(dragsOut: Bool) {
         setAccessibilityHelp(dragsOut ? "Space previews it, double-click opens it, drag it to copy it."

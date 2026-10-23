@@ -140,6 +140,17 @@ public final class FakeCalendar: CalendarProviding, Sendable {
             guard let index = s.events.firstIndex(where: { $0.id == event.id }) else {
                 throw CalendarError.failed("The calendar didn't find the event.")
             }
+            if let alias = event.respondsAs?.lowercased(), s.events[index].myResponse == nil {
+                for guest in s.events[index].extras.guests.indices
+                    where s.events[index].extras.guests[guest].email.lowercased() == alias {
+                    s.events[index].extras.guests[guest].response = response
+                }
+                s.touch(event.id)
+                var answered = s.events[index]
+                answered.myResponse = response
+                answered.respondsAs = event.respondsAs
+                return answered
+            }
             s.events[index].myResponse = response
             s.touch(event.id)
             return s.events[index]
@@ -268,9 +279,19 @@ public final class FakeCalendar: CalendarProviding, Sendable {
             s.lookups.append(Lookup(iCalUID: query.uid, wholeSeries: wholeSeries))
             if let failure = s.failure { throw CalendarError.failed(failure) }
             let uids = s.iCalUIDs
+            let series = s.series
             switch query.pick(s.events, start: \.start, uid: { uids[$0.id] },
                               looksLike: { query.looksLike(title: $0.title, organizer: nil) }) {
             case .found(let event): return wholeSeries ? event.seriesReference : event
+            case .ambiguous: throw CalendarError.refused(CalendarInviteQuery.ambiguousRefusal)
+            case .missing: break
+            }
+            let moved = query.pickMoved(s.events, wholeSeries: wholeSeries, uid: { uids[$0.id] }, role: { event in
+                if event.recurringEventID != nil || series[event.id] != nil { return .occurrence(originalStart: nil) }
+                return event.extras.recurrence.isEmpty ? .single : .series
+            })
+            switch moved {
+            case .found(let event): return event
             case .missing: return nil
             case .ambiguous: throw CalendarError.refused(CalendarInviteQuery.ambiguousRefusal)
             }

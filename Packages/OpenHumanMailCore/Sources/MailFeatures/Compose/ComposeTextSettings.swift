@@ -60,10 +60,13 @@ public final class ComposeTextSettings {
     public static let smartPunctuationKey = "compose.spelling.smartPunctuation"
     public static let writingToolsKey = "compose.allow_writing_tools"
     public static let autoListsKey = "compose.auto_lists"
+    public static let pastedImageSizeKey = "compose.pasted_image_size"
 
     public static let replacementsNote = "Uses the text replacements you set up in macOS."
     public static let autoListsNote = "Typing 1. or - or * and a space at the start of a line starts a list. "
         + "Return adds the next item; Return on an empty item ends the list."
+    public static let pastedImageSizeNote = "Pictures you paste or drop into a message start at this size, never larger "
+        + "than the picture itself. Click a picture in a draft to change its size."
     public static let protectedNote = "Autocorrect never changes email addresses, links, snippet shortcuts or fill-in fields."
 
     public var autocorrect: AutocorrectChoice { didSet { defaults.set(autocorrect.rawValue, forKey: Self.autocorrectKey) } }
@@ -77,6 +80,9 @@ public final class ComposeTextSettings {
     }
     public var allowWritingTools: Bool { didSet { defaults.set(allowWritingTools, forKey: Self.writingToolsKey) } }
     public var autoLists: Bool { didSet { defaults.set(autoLists, forKey: Self.autoListsKey) } }
+    public var pastedImageSize: InlineImageSize {
+        didSet { defaults.set(pastedImageSize.rawValue, forKey: Self.pastedImageSizeKey) }
+    }
     public private(set) var system: SystemTextValues
 
     @ObservationIgnored let defaults: UserDefaults
@@ -94,6 +100,8 @@ public final class ComposeTextSettings {
             ?? .system
         allowWritingTools = defaults.object(forKey: Self.writingToolsKey) as? Bool ?? false
         autoLists = defaults.object(forKey: Self.autoListsKey) as? Bool ?? true
+        pastedImageSize = defaults.string(forKey: Self.pastedImageSizeKey).flatMap(InlineImageSize.init(rawValue:))
+            ?? .pastedDefault
         system = port.current()
         port.observe { [weak self] values in self?.system = values }
     }

@@ -4,23 +4,17 @@ import SwiftUI
 
 struct PaletteView: View {
     let palette: PaletteController
-    @Environment(\.theme) private var theme
     @FocusState private var focused: Bool
 
     var body: some View {
-        let tokens = theme.component.palette
-        OverlayCard(width: tokens.width, top: tokens.top, radius: tokens.radius, sheet: true, topRatio: tokens.topRatio,
-                    dismiss: close) {
+        OverlayPanel(width: NativeMetrics.Overlay.paletteWidth, top: OverlayMetrics.paletteTop,
+                     topRatio: OverlayMetrics.paletteTopRatio, dismiss: close) { _ in
             VStack(spacing: 0) {
-                OverlaySheetTitle(symbol: "command", title: "Commands") {
-                    if let scope = palette.scopeSummary { scopeChip(scope) }
-                }
-                OverlaySheetDivider()
-                input(height: tokens.inputHeight)
-                OverlaySheetDivider()
-                results(tokens)
-                OverlaySheetDivider()
-                footer(height: tokens.footerHeight)
+                input
+                Divider()
+                results
+                Divider()
+                footer
             }
         }
         .task(id: palette.query) { await palette.loadMail() }
@@ -29,75 +23,54 @@ struct PaletteView: View {
 
     private func close() { palette.close() }
 
-    private func input(height: Double) -> some View {
+    private var input: some View {
         let scope = palette.scopeSummary
-        let tokens = theme.component.palette
-        return HStack(spacing: theme.space4) {
+        return OverlayFieldRow(symbol: "command") {
             TextField("Command palette", text: Binding(get: { palette.query }, set: { palette.query = $0 }),
-                      prompt: Text("Type a command or search…").foregroundStyle(tokens.text.color))
-                .textFieldStyle(.plain)
-                .font(theme.typePaletteInput.swiftUIFont)
-                .foregroundStyle(tokens.textSelected.color)
-                .overlayInputLine(theme.typePaletteInput)
+                      prompt: Text("Type a command or search…"))
+                .overlayField()
                 .focused($focused)
                 .onSubmit { palette.performSelected() }
                 .overlayKeys(up: { palette.moveCursor(by: -1) }, down: { palette.moveCursor(by: 1) }, escape: close)
                 .accessibilityLabel(scope.map { "Command palette, acts on \($0)" } ?? "Command palette")
-            KeycapView(text: "esc")
+        } trailing: {
+            if let scope { OverlayScopeChip(text: scope) }
         }
-        .padding(.horizontal, OverlayMetrics.rowIconX)
-        .frame(height: height)
-        .overlay(alignment: .leading) { OverlayInputBar() }
-        .layoutPriority(1)
-    }
-
-    private func scopeChip(_ text: String) -> some View {
-        let tokens = theme.component.palette
-        return Text(text)
-            .font(theme.typeCaption.swiftUIFont)
-            .foregroundStyle(tokens.scopeText.color)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .padding(.horizontal, theme.space3)
-            .frame(height: tokens.scopeHeight)
-            .background(RoundedRectangle(cornerRadius: min(tokens.scopeRadius, tokens.scopeHeight / 2)).fill(tokens.scopeBg.color))
-            .frame(maxWidth: tokens.scopeMaxWidth, alignment: .trailing)
-            .help(text)
-            .accessibilityHidden(true)
     }
 
     @ViewBuilder
-    private func results(_ tokens: ThemeTokens.Components.Palette) -> some View {
+    private var results: some View {
         let sections = PaletteSections(palette.entries)
         if palette.isEmptyResult {
-            VStack(spacing: theme.space3) {
+            VStack(spacing: OverlayMetrics.rowSpacing) {
                 Text("Nothing matches “\(palette.query)”")
-                    .font(theme.typeBody.swiftUIFont)
-                    .foregroundStyle(tokens.text.color)
-                    .padding(.top, theme.space6)
+                    .font(.system(size: NativeMetrics.Text.body))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, OverlayMetrics.sectionHeaderHeight)
                 if let first = sections.rows.first {
-                    row(first, cursor: palette.cursor, rowHeight: tokens.rowHeight)
+                    row(first, cursor: palette.cursor)
                 }
             }
-            .frame(height: 120, alignment: .top)
+            .frame(height: Self.emptyResultHeight, alignment: .top)
         } else if sections.rows.isEmpty {
-            Color.clear.frame(height: theme.space3)
+            Color.clear.frame(height: OverlayMetrics.listPaddingY)
         } else {
             let cursor = palette.cursor
-            let height = listHeight(sections, tokens)
+            let height = Self.listHeight(sections)
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 0) {
                         ForEach(sections.groups) { section in
-                            OverlayGroupHeader(title: section.group.rawValue, height: tokens.groupHeight)
+                            OverlaySectionHeader(title: section.group.rawValue)
                             ForEach(section.rows) { item in
-                                row(item, cursor: cursor, rowHeight: tokens.rowHeight)
+                                row(item, cursor: cursor)
                             }
                         }
                     }
-                    .padding(.vertical, theme.space2)
+                    .padding(.vertical, OverlayMetrics.listPaddingY)
                 }
-                .frame(minHeight: min(height, tokens.rowHeight * 2 + tokens.groupHeight), maxHeight: height)
+                .frame(minHeight: min(height, OverlayMetrics.paletteRowHeight * 2 + OverlayMetrics.sectionHeaderHeight),
+                       maxHeight: height)
                 .onChange(of: sections.id(at: cursor)) { _, id in
                     if let id { proxy.scrollTo(id) }
                 }
@@ -105,94 +78,69 @@ struct PaletteView: View {
         }
     }
 
-    private func listHeight(_ sections: PaletteSections, _ tokens: ThemeTokens.Components.Palette) -> CGFloat {
-        let content = CGFloat(sections.rows.count) * tokens.rowHeight + CGFloat(sections.groups.count) * tokens.groupHeight
-            + theme.space2 * 2
+    static let emptyResultHeight: CGFloat = 120
+
+    static func listHeight(_ sections: PaletteSections) -> CGFloat {
+        let content = CGFloat(sections.rows.count) * OverlayMetrics.paletteRowHeight
+            + CGFloat(sections.groups.count) * OverlayMetrics.sectionHeaderHeight + OverlayMetrics.listPaddingY * 2
         return min(content, OverlayMetrics.paletteListMaxHeight)
     }
 
     @ViewBuilder
-    private func row(_ item: PaletteSections.Row, cursor: Int, rowHeight: Double) -> some View {
+    private func row(_ item: PaletteSections.Row, cursor: Int) -> some View {
         if let reason = item.entry.unavailableReason {
-            unavailableRow(item.entry, reason: reason, rowHeight: rowHeight)
+            unavailableRow(item.entry, reason: reason)
         } else {
-            availableRow(item.entry, index: item.index, isCursor: item.index == cursor, rowHeight: rowHeight)
+            availableRow(item.entry, index: item.index, isCursor: item.index == cursor)
         }
     }
 
-    private func unavailableRow(_ entry: PaletteEntry, reason: String, rowHeight: Double) -> some View {
-        let dimmed = theme.component.palette.rowDisabled
-        return HStack(spacing: 0) {
-            rowIcon(entry.symbol, color: dimmed)
-            HighlightedText(text: entry.title, matched: entry.matched, color: dimmed, style: theme.typePaletteRow)
+    private func unavailableRow(_ entry: PaletteEntry, reason: String) -> some View {
+        HStack(spacing: OverlayMetrics.rowSpacing) {
+            OverlayRowSymbol(symbol: entry.symbol)
+            OverlayMatchText(text: entry.title, matched: entry.matched)
             Text(reason)
-                .font(theme.typeBody.swiftUIFont)
-                .foregroundStyle(dimmed.color)
+                .font(.system(size: NativeMetrics.Text.secondary))
                 .lineLimit(1)
-                .padding(.leading, theme.space3)
-            Spacer(minLength: theme.space5)
+            Spacer(minLength: OverlayMetrics.rowSpacing)
         }
-        .padding(.trailing, OverlayMetrics.rowIconX)
-        .frame(height: rowHeight)
+        .foregroundStyle(.tertiary)
+        .overlayRowLayout(isSelected: false, height: OverlayMetrics.paletteRowHeight)
+        .padding(.horizontal, OverlayMetrics.plateInsetX)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(entry.title), unavailable, \(reason)")
     }
 
-    private func availableRow(_ entry: PaletteEntry, index: Int, isCursor: Bool, rowHeight: Double) -> some View {
-        let tokens = theme.component.palette
-        return Button {
+    private func availableRow(_ entry: PaletteEntry, index: Int, isCursor: Bool) -> some View {
+        OverlayRow(isSelected: isCursor, height: OverlayMetrics.paletteRowHeight) {
             palette.moveCursor(to: index)
             palette.perform(entry)
         } label: {
-            HStack(spacing: 0) {
-                rowIcon(entry.symbol, color: entry.isDestructive ? theme.textDanger : tokens.icon)
-                HighlightedText(text: entry.title, matched: entry.matched,
-                                color: isCursor ? tokens.textSelected : tokens.text, style: theme.typePaletteRow)
+            HStack(spacing: OverlayMetrics.rowSpacing) {
+                OverlayRowSymbol(symbol: entry.symbol, isDestructive: entry.isDestructive)
+                OverlayMatchText(text: entry.title, matched: entry.matched)
+                    .foregroundStyle(.primary)
                 if let detail = entry.detail {
                     Text(detail)
-                        .font(theme.typePaletteRow.swiftUIFont)
-                        .foregroundStyle(tokens.text.color)
+                        .font(.system(size: NativeMetrics.Text.body))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .padding(.leading, theme.space3)
                 }
-                Spacer(minLength: theme.space5)
-                if !entry.keycaps.isEmpty { KeycapRow(keycaps: entry.keycaps) }
+                Spacer(minLength: OverlayMetrics.rowSpacing)
+                if !entry.keycaps.isEmpty { OverlayShortcutHint(entry.keycaps) }
             }
-            .padding(.trailing, OverlayMetrics.rowIconX)
-            .frame(height: rowHeight)
-            .background(CursorRowBackground(isCursor: isCursor))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .accessibilityLabel(entry.title)
         .accessibilityValue(entry.keycaps.joined(separator: " then "))
-        .accessibilityAddTraits(isCursor ? .isSelected : [])
     }
 
-    private func rowIcon(_ symbol: String, color: ThemeColor) -> some View {
-        CircledSymbol(symbol: symbol, color: color)
-            .frame(width: OverlayMetrics.rowLabelX - OverlayMetrics.rowIconX + theme.space3, alignment: .leading)
-            .padding(.leading, OverlayMetrics.rowIconX)
-    }
-
-    private func footer(height: Double) -> some View {
-        HStack(spacing: theme.space7) {
-            hint("↑↓", "move")
-            hint("↵", palette.selectionCount > 1 ? "run on \(palette.selectionCount) selected" : "run")
-            hint("esc", "close")
-            Spacer()
+    private var footer: some View {
+        OverlayFooter {
+            OverlayFooterHint("↑↓", "Move")
+            OverlayFooterHint("↵", palette.selectionCount > 1 ? "Run on \(palette.selectionCount) selected" : "Run")
+            OverlayFooterHint("esc", "Close")
         }
-        .padding(.horizontal, OverlayMetrics.rowIconX)
-        .frame(height: height)
         .accessibilityHidden(true)
-    }
-
-    private func hint(_ key: String, _ text: String) -> some View {
-        HStack(spacing: theme.space2) {
-            Text(key).font(theme.typeKeycap.swiftUIFont)
-            Text(text).font(theme.typeCaption.swiftUIFont)
-        }
-        .foregroundStyle(theme.component.palette.text.color)
     }
 }
 

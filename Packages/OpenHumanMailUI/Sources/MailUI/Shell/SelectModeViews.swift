@@ -14,7 +14,6 @@ struct SelectAllCheckbox: View {
         if check == .hidden {
             Color.clear
                 .frame(width: ShellMetrics.toolbarControlHeight, height: ShellMetrics.toolbarControlHeight)
-                .padding(.trailing, theme.space3)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
         } else {
@@ -28,12 +27,17 @@ struct SelectAllCheckbox: View {
             }
             .buttonStyle(.plain)
             .shortcutTip(SelectAllShortcuts.tip(descriptors), alignment: .leading, pinned: tipPinned)
-            .padding(.trailing, theme.space3)
+            .help(Self.helpText(check == .all, rows))
             .accessibilityLabel(check == .all ? "Clear selection" : "Select all")
             .accessibilityValue(check == .all ? "All conversations checked" : "Some conversations checked")
             .accessibilityHint(Self.spokenHint(rows))
             .accessibilityIdentifier("toolbar.selectAll")
         }
+    }
+
+    static func helpText(_ allChecked: Bool, _ rows: [SelectAllShortcuts.TipRow]) -> String {
+        let title = allChecked ? "Clear selection" : "Select all"
+        return ([title] + rows.map { "\($0.title)  \($0.keycaps.joined())" }).joined(separator: "\n")
     }
 
     static func spokenHint(_ rows: [SelectAllShortcuts.TipRow]) -> String {
@@ -110,9 +114,16 @@ struct CheckBeforeHint: View {
         "Want to select everything before this conversation? Press \(SelectAllShortcuts.spoken(keycaps))."
     }
 
+    /// Only over the account's mail list on screen: not over a conversation, All Inboxes, or the Calendar, which is
+    /// drawn over the mail column while the list and its checks stay behind it.
+    static func applies(mode: AppRouter.Mode, isMail: Bool, offersCheckBefore: Bool) -> Bool {
+        mode == .list && isMail && offersCheckBefore
+    }
+
     static func shows(router: AppRouter) -> CheckBeforeHint? {
-        guard router.mode == .list, router.unifiedInbox == nil, let list = router.active?.list,
-              list.offersCheckBefore else { return nil }
+        guard let list = router.active?.list,
+              applies(mode: router.mode, isMail: ShellSurface(router: router).isMail,
+                      offersCheckBefore: list.offersCheckBefore) else { return nil }
         let keycaps = SelectAllShortcuts.keycaps(for: SelectAllShortcuts.commandA, in: router.environment.actions.descriptors)
         return keycaps.isEmpty ? nil : CheckBeforeHint(list: list, keycaps: keycaps)
     }

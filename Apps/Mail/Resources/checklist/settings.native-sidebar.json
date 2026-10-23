@@ -1,0 +1,15 @@
+{
+  "id": "settings.native-sidebar",
+  "area": "Settings",
+  "title": "Settings: a native sidebar, grouped pages and a direct way to the triage prompt",
+  "steps": [
+    "Launch with -UseFakeData and press ⌘, to open Settings",
+    "Press ↓ and ↑ in the sidebar, then open Appearance and switch between Light, Dark, Paper and Midnight",
+    "Open Importance & labels › Categories and click Triage beside Instructions to the model",
+    "Open AI › Overview and click Edit Prompt… beside Auto labels"
+  ],
+  "deepLink": null,
+  "expected": "The sidebar is the system sidebar with the accent selection, and the window title names the page. The arrows move between pages. Every page shows grouped boxes with titles above and notes below, in every theme. Triage opens AI › Prompts on the Triage editor with the text in use; Auto labels opens its own. Nothing is saved until you click Save my version.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

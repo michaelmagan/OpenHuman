@@ -215,7 +215,8 @@ public final class PlainTextMessageView: NSView, NSTextViewDelegate {
             guard storage.attribute(.link, at: span.range.location, effectiveRange: nil) == nil,
                   let url = URL(string: "\(Self.dateScheme):\(index)") else { continue }
             storage.addAttributes([.link: url,
-                                   .underlineStyle: NSUnderlineStyle.single.union(.patternDot).rawValue],
+                                   .underlineStyle: NSUnderlineStyle.single.rawValue,
+                                   .toolTip: String(localized: "Show on the calendar")],
                                   range: span.range)
         }
         storage.endEditing()

@@ -4,6 +4,7 @@ import MailFeatures
 import MailModel
 import MailRender
 import MailTheme
+import MailUI
 import OpenHumanCore
 
 @MainActor
@@ -18,24 +19,8 @@ public final class ReaderViewController: NSViewController {
     private let document = ReaderDocumentView()
     private let column = NSStackView()
     private let subjectRow = NSStackView()
-    private let subjectLine = NSStackView()
     private let subjectLabel = NSTextField(wrappingLabelWithString: "")
     private let metaLabel = NSTextField(labelWithString: "")
-    private let threadActions = NSStackView()
-    private(set) lazy var threadMoreButton: ReaderButton = {
-        let button = ReaderButton.icon("ellipsis", help: "More actions", theme: self.theme, pointSize: 14) { [weak self] in
-            self?.showThreadMoreMenu()
-        }
-        button.identifier = NSUserInterfaceItemIdentifier(Self.moreActionsID)
-        button.tip = KeycapTooltipContent(title: "More actions")
-        button.onHoverChange = { [weak self] button, inside in self?.tooltipHover(button, inside: inside) }
-        return button
-    }()
-    static let moreActionsID = "reader.threadMore"
-    private var moreMenuSections: [[ActionDescriptor]] = []
-    private(set) var actionsOnSubjectLine = false
-    private var renderedSegments: [CardSegment] = []
-    private var renderedSegmentItems: [ReaderModel.Item] = []
     private var renderedExpansion: [MessageKey: Bool] = [:]
     private var renderedShowsAll = false
     private(set) var messageViews: [MessageKey: MessageContainerView] = [:]
@@ -56,6 +41,7 @@ public final class ReaderViewController: NSViewController {
     private var liveScrollObserver: (any NSObjectProtocol)?
     let newMessagesPill: NewMessagesPillView
     private var renderedPending = 0
+    private var renderedCanAct = false
     private var keepFocusedVisibleUntil: Date?
     private var observation: ObservationLoop?
     private var zoomObservation: ObservationLoop?
@@ -114,6 +100,23 @@ public final class ReaderViewController: NSViewController {
 
     static func headerTop(_ theme: ThemeTokens) -> CGFloat { theme.space7 }
 
+    static func subjectStyle(_ theme: ThemeTokens) -> TypeStyle {
+        var style = theme.typeSubject
+        style.size = Double(NativeMetrics.Reader.subjectSize)
+        style.weight = 600
+        return style
+    }
+
+    static func metaStyle(_ theme: ThemeTokens) -> TypeStyle {
+        var style = theme.typeMeta
+        style.size = Double(NativeMetrics.Reader.metaSize)
+        return style
+    }
+
+    /// The column's text inset: the title block, the summary and every message's content start here, and the focus
+    /// plate fills the inset around a message's header.
+    static func contentInset(_ theme: ThemeTokens) -> CGFloat { MessageContainerView.horizontalPadding(theme) }
+
     public override func loadView() {
         root.controller = self
         scrollView.hasVerticalScroller = true
@@ -127,33 +130,22 @@ public final class ReaderViewController: NSViewController {
         document.controller = self
 
         column.orientation = .vertical
-        column.alignment = .leading
-        column.spacing = theme.cardGap
+        column.alignment = .centerX
+        column.spacing = 0
         column.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(column)
 
-        subjectLabel.font = theme.typeDisplay.font
+        subjectLabel.font = Self.subjectStyle(theme).font
         subjectLabel.textColor = theme.textPrimary.nsColor
         subjectLabel.maximumNumberOfLines = 3
         subjectLabel.lineBreakMode = .byWordWrapping
         subjectLabel.isSelectable = true
         subjectLabel.translatesAutoresizingMaskIntoConstraints = false
         subjectLabel.setAccessibilityRole(.staticText)
+        subjectLabel.setAccessibilityIdentifier("reader.subject")
         subjectLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        threadActions.orientation = .horizontal
-        threadActions.spacing = theme.space2
-        threadActions.translatesAutoresizingMaskIntoConstraints = false
-        threadActions.setAccessibilityElement(true)
-        threadActions.setAccessibilityRole(.toolbar)
-        threadActions.setAccessibilityLabel("Conversation actions")
-        threadActions.setHuggingPriority(.required, for: .horizontal)
-        subjectLine.orientation = .horizontal
-        subjectLine.alignment = .centerY
-        subjectLine.spacing = theme.space5
-        subjectLine.translatesAutoresizingMaskIntoConstraints = false
-        subjectLine.addArrangedSubview(subjectLabel)
         subjectLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        metaLabel.font = theme.typeMeta.font
+        metaLabel.font = Self.metaStyle(theme).font
         metaLabel.textColor = theme.textSecondary.nsColor
         metaLabel.lineBreakMode = .byTruncatingTail
         metaLabel.maximumNumberOfLines = 1
@@ -163,11 +155,10 @@ public final class ReaderViewController: NSViewController {
         subjectRow.alignment = .leading
         subjectRow.spacing = theme.space3
         subjectRow.translatesAutoresizingMaskIntoConstraints = false
-        subjectRow.addArrangedSubview(subjectLine)
+        subjectRow.addArrangedSubview(subjectLabel)
         subjectRow.addArrangedSubview(metaLabel)
-        subjectRow.setCustomSpacing(theme.space2, after: subjectLine)
-        subjectRow.addArrangedSubview(threadActions)
-        subjectLine.widthAnchor.constraint(equalTo: subjectRow.widthAnchor).isActive = true
+        subjectRow.setCustomSpacing(theme.space2, after: subjectLabel)
+        subjectLabel.widthAnchor.constraint(equalTo: subjectRow.widthAnchor).isActive = true
         metaLabel.widthAnchor.constraint(lessThanOrEqualTo: subjectRow.widthAnchor).isActive = true
 
         root.addSubview(scrollView)
@@ -181,7 +172,7 @@ public final class ReaderViewController: NSViewController {
         newMessagesPill.onClick = { [weak self] in self?.model?.showNewMessages() }
 
         let clip = scrollView.contentView
-        let maxWidth = theme.component.thread.maxWidth
+        let maxWidth = NativeMetrics.Reader.maxColumnWidth
         let preferred = column.widthAnchor.constraint(equalToConstant: maxWidth)
         preferred.priority = NSLayoutConstraint.Priority(490)
         let inset = column.leadingAnchor.constraint(greaterThanOrEqualTo: document.leadingAnchor, constant: 40)
@@ -257,7 +248,6 @@ public final class ReaderViewController: NSViewController {
         super.viewDidLayout()
         let side: CGFloat = (view.window?.frame.width ?? 1360) < 1100 ? 24 : 40
         if widthConstraint?.constant != side { widthConstraint?.constant = side }
-        updateTitleLayout()
     }
 
     public var focusView: NSView { document }
@@ -270,6 +260,9 @@ public final class ReaderViewController: NSViewController {
         handledFocusScroll = model.focusScrollRequest
         handledFind = model.findRequest
         renderedPending = model.pendingMessages.count
+        renderedCanAct = router?.active != nil
+        // The headers' Reply, Reply All and Forward open through the compose manager and are not offered until it runs
+        _ = router?.environment.compose
         Task { await webKit.prepare() }
         model.useRenderer(ReaderAppearance.renderer(for: theme))
         observation = ObservationLoop.observe { [weak self] in self?.render() }
@@ -291,12 +284,11 @@ public final class ReaderViewController: NSViewController {
         columnTop?.constant = Self.headerTop(theme)
         scrollRoom?.constant = 0
         renderedItems = []
-        renderedSegments = []
-        renderedSegmentItems = []
         renderedExpansion = [:]
         renderedShowsAll = false
         keepFocusedVisibleUntil = nil
         newMessagesPill.update(count: 0, key: nil)
+        renderedCanAct = false
         closeFind()
         linkPreview.show(nil, suspicious: nil)
         popover?.close()
@@ -313,15 +305,13 @@ public final class ReaderViewController: NSViewController {
         let messages = model.messages
         if column.arrangedSubviews.isEmpty {
             column.addArrangedSubview(subjectRow)
-            subjectRow.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+            subjectRow.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -2 * Self.contentInset(theme)).isActive = true
             column.setCustomSpacing(theme.space8, after: subjectRow)
         }
         if !aiAccessoryResolved { addAIAccessory(model) }
         let subject = model.state == .missing ? "This conversation is no longer here." : model.subject
         if subjectLabel.stringValue != subject { subjectLabel.stringValue = subject }
         renderMeta(model)
-        renderThreadActions(model)
-        updateTitleLayout()
 
         let expansionAnchor = captureExpansionAnchor(model)
         let docked = dockedSession(model)
@@ -363,13 +353,19 @@ public final class ReaderViewController: NSViewController {
             renderedOutgoing = outgoing.map(\.id)
         }
         let date = now()
+        let marksFocus = messages.count > 1
         for message in messages {
-            messageViews[message.id]?.update(message, focused: message.id == model.focusedMessage, now: date)
+            messageViews[message.id]?.update(message, focused: message.id == model.focusedMessage, marksFocus: marksFocus,
+                                             now: date)
         }
         for entry in outgoing { outgoingViews[entry.id]?.update(entry) }
+        let canAct = router?.active != nil
+        if canAct != renderedCanAct {
+            renderedCanAct = canAct
+            for view in messageViews.values { view.header?.refreshMessageActions() }
+        }
         placeInlineComposer(docked, anchor: anchor, model: model)
         placeSchedulingSlot(model)
-        applyCardSegments(items, model: model)
         restoreExpansionAnchor(expansionAnchor)
         if let sentHere, let card = outgoingViews[sentHere] { scrollClearOfToast(card) }
         let pending = model.pendingMessages.count
@@ -537,7 +533,7 @@ public final class ReaderViewController: NSViewController {
         aiAccessoryResolved = true
         guard let line = AIReaderAccessory.view(reader: model, environment: router.environment, theme: theme) else { return }
         column.insertArrangedSubview(line, at: 1)
-        line.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        line.widthAnchor.constraint(equalTo: column.widthAnchor, constant: -2 * Self.contentInset(theme)).isActive = true
         aiAccessory = line
         guard let summary = line as? ThreadSummaryLineView else {
             applySummaryGaps(.settled, after: line)
@@ -590,55 +586,9 @@ public final class ReaderViewController: NSViewController {
         scrollView.reflectScrolledClipView(clip)
     }
 
-    private func renderThreadActions(_ model: ReaderModel) {
-        let (primary, _) = ReaderActions.split(offeredThreadActions())
-        moreMenuSections = offeredMoreMenu()
-        let navigation = actionContext() == nil ? [] : ReaderActions.navigationActions
-        let wanted = primary.map(\.id.rawValue) + (moreMenuSections.isEmpty ? [] : [Self.moreActionsID])
-            + navigation.map(\.id.rawValue)
-        if threadActions.arrangedSubviews.map({ $0.identifier?.rawValue }) != wanted {
-            if let shown = tooltipButton, shown.isDescendant(of: threadActions) { hideTooltip() }
-            for view in threadActions.arrangedSubviews { threadActions.removeArrangedSubview(view); view.removeFromSuperview() }
-            for descriptor in primary { addThreadActionButton(descriptor) }
-            if !moreMenuSections.isEmpty { threadActions.addArrangedSubview(threadMoreButton) }
-            if !navigation.isEmpty, let last = threadActions.arrangedSubviews.last {
-                threadActions.setCustomSpacing(theme.space4, after: last)
-            }
-            for descriptor in navigation { addThreadActionButton(descriptor) }
-        }
-        for descriptor in primary + navigation {
-            guard let button = threadActions.arrangedSubviews.first(where: { $0.identifier?.rawValue == descriptor.id.rawValue })
-                as? ReaderButton else { continue }
-            let availability = availability(descriptor)
-            button.isEnabled = availability.isEnabled
-            button.tip = KeycapTooltipContent.make(title: actionTitle(descriptor), bindings: keyBindings(descriptor),
-                                                  enabled: availability.isEnabled, reason: availability.help)
-            button.isActive = (descriptor.id == .toggleRead && model.messages.contains { $0.summary.isUnread })
-                || (descriptor.id == .toggleStar && model.isStarred)
-        }
-        threadActions.isHidden = threadActions.arrangedSubviews.isEmpty
-    }
-
-    private func addThreadActionButton(_ descriptor: ActionDescriptor) {
-        guard let symbol = ReaderActions.symbol(for: descriptor.id) else { return }
-        let button = ReaderButton.icon(symbol, activeSymbol: ReaderActions.activeSymbol(for: descriptor.id),
-                                       help: descriptor.title, theme: theme, pointSize: 14) { [weak self] in
-            self?.perform(descriptor.id)
-        }
-        button.identifier = NSUserInterfaceItemIdentifier(descriptor.id.rawValue)
-        button.setAccessibilityLabel(descriptor.title)
-        button.onHoverChange = { [weak self] button, inside in self?.tooltipHover(button, inside: inside) }
-        threadActions.addArrangedSubview(button)
-    }
-
     func keyBindings(_ descriptor: ActionDescriptor) -> [KeyBinding] {
         (router?.environment.actions.descriptor(descriptor.id) ?? descriptor).defaultBindings
     }
-
-    private func actionTitle(_ descriptor: ActionDescriptor) -> String {
-        actionContext().map { ActionRules.title(for: descriptor, in: $0.1) } ?? descriptor.title
-    }
-
 
     func tooltipHover(_ button: ReaderButton, inside: Bool) {
         guard inside else {
@@ -686,41 +636,11 @@ public final class ReaderViewController: NSViewController {
         tooltipHiddenAt = .now
     }
 
-    func threadMoreMenu() -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        let context = actionContext()?.1
-        // Why: availability can change after the last render, so the menu reads it when it opens.
-        let sections = offeredMoreMenu()
-        for (index, section) in sections.enumerated() {
-            if index > 0 { menu.addItem(.separator()) }
-            for descriptor in section {
-                let availability = availability(descriptor)
-                let title = context.map { ActionRules.title(for: descriptor, in: $0) } ?? descriptor.title
-                let item = MenuAction(title, enabled: availability.isEnabled) { [weak self] in
-                    self?.perform(descriptor.id, source: .menu)
-                }
-                item.identifier = NSUserInterfaceItemIdentifier(descriptor.id.rawValue)
-                item.toolTip = availability.isEnabled ? nil : availability.help
-                if descriptor.id == .toggleStar, model?.isStarred == true { item.state = .on }
-                menu.addItem(item)
-            }
-        }
-        MenuShortcutHints(descriptors: sections.flatMap { $0 }).apply(to: menu)
-        return menu
-    }
-
-    private func showThreadMoreMenu() {
-        let button = threadMoreButton
-        threadMoreMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.isFlipped ? button.bounds.maxY + 4 : -4),
-                               in: button)
-    }
-
     private func renderMeta(_ model: ReaderModel) {
         let me = meAddresses.isEmpty ? [meAddress.lowercased()] : meAddresses
         let text = ReaderFormatting.titleMeta(model.messages.map(\.summary), me: Set(me))
         let line = NSMutableAttributedString(string: text, attributes: [
-            .font: theme.typeMeta.font, .foregroundColor: theme.textSecondary.nsColor,
+            .font: Self.metaStyle(theme).font, .foregroundColor: theme.textSecondary.nsColor,
         ])
         var listChips: [ThreadRowChip]?
         if let list = router?.active?.list, let row = list.row(for: model.thread) { listChips = list.chips(for: row) }
@@ -772,23 +692,6 @@ public final class ReaderViewController: NSViewController {
         return menu
     }
 
-    private func updateTitleLayout() {
-        let width = column.frame.width
-        guard width > 0, !threadActions.arrangedSubviews.isEmpty else { return }
-        let actions = threadActions.fittingSize.width
-        let subject = ceil(subjectLabel.attributedStringValue.size().width)
-        let fits = subject + theme.space5 + actions <= width
-        guard fits != actionsOnSubjectLine || threadActions.superview == nil else { return }
-        actionsOnSubjectLine = fits
-        threadActions.removeFromSuperview()
-        if fits {
-            subjectLine.addArrangedSubview(threadActions)
-        } else {
-            subjectRow.addArrangedSubview(threadActions)
-            subjectRow.setCustomSpacing(theme.space3, after: metaLabel)
-        }
-    }
-
     private func captureExpansionAnchor(_ model: ReaderModel) -> (key: MessageKey, y: CGFloat)? {
         var expansion: [MessageKey: Bool] = [:]
         for message in model.messages { expansion[message.id] = message.isExpanded }
@@ -812,42 +715,16 @@ public final class ReaderViewController: NSViewController {
         scrollView.reflectScrolledClipView(clip)
     }
 
-    private func applyCardSegments(_ items: [ReaderModel.Item], model: ReaderModel) {
-        let segments = ReaderCardGroups.segments(items) { key in
-            model.message(key)?.isExpanded == false && messageViews[key]?.attachedComposer == nil
-        }
-        guard segments != renderedSegments || items != renderedSegmentItems else { return }
-        renderedSegments = segments
-        renderedSegmentItems = items
-        for (item, segment) in zip(items, segments) {
-            let view: NSView?
-            switch item {
-            case .message(let key):
-                messageViews[key]?.cardSegment = segment
-                view = messageViews[key]
-            case .olderMessages(let keys):
-                pillViews[keys]?.cardSegment = segment
-                view = pillViews[keys]
-            }
-            guard let view, view.superview === column else { continue }
-            column.setCustomSpacing(segment.joinsBelow ? 0 : NSStackView.useDefaultSpacing, after: view)
-        }
-    }
-
     private func actionContext() -> (AppRouter, ActionContext)? {
         guard let model, let router, router.active != nil else { return nil }
         return (router, ReaderActions.context(host: router, thread: model.thread, lastMessage: model.messages.last?.id,
                                               isStarred: model.isStarred))
     }
 
-    func offeredThreadActions() -> [ActionDescriptor] {
-        guard let (router, context) = actionContext() else { return [] }
-        return ReaderActions.offeredThreadActions(registry: router.environment.actions, host: router, context: context)
-    }
-
-    func offeredMoreMenu() -> [[ActionDescriptor]] {
-        guard let (router, context) = actionContext() else { return [] }
-        return ReaderActions.offeredMoreMenu(registry: router.environment.actions, host: router, context: context)
+    /// The conversation's toolbar actions, as the window toolbar shows them for this reader.
+    var toolbarActions: ReaderToolbarActions {
+        guard let model, let router else { return .empty }
+        return ReaderToolbarActions(router: router, reader: model)
     }
 
     func decided(_ descriptor: ActionDescriptor) -> ActionAvailability {
@@ -863,22 +740,8 @@ public final class ReaderViewController: NSViewController {
 
     var subjectView: NSView { subjectLabel }
     var subjectContainer: NSView { subjectRow }
+    var metaLabelView: NSTextField { metaLabel }
     var metaText: String { metaLabel.attributedStringValue.string }
-
-    var threadActionButtons: [ReaderButton] {
-        threadActions.arrangedSubviews.compactMap { $0 as? ReaderButton }
-            .filter { $0 !== threadMoreButton && !Self.isNavigationButton($0) }
-    }
-
-    var threadNavButtons: [ReaderButton] {
-        threadActions.arrangedSubviews.compactMap { $0 as? ReaderButton }.filter(Self.isNavigationButton)
-    }
-
-    private static func isNavigationButton(_ button: ReaderButton) -> Bool {
-        ReaderActions.navigationActionIDs.contains { $0.rawValue == button.identifier?.rawValue }
-    }
-
-    var cardSegments: [CardSegment] { renderedSegments }
 
     func perform(_ action: ActionID, source: ActionSource = .toolbar) {
         guard let router else { return }
@@ -1290,13 +1153,20 @@ final class ReaderDocumentView: NSView {
 
 @MainActor
 final class HairlineView: NSView {
+    let thickness: CGFloat = 1
+    let color: NSColor
+
     init(theme: ThemeTokens) {
+        color = theme.borderHairline.nsColor
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
-        layer?.backgroundColor = theme.borderHairline.nsColor.cgColor
-        heightAnchor.constraint(equalToConstant: 1).isActive = true
+        layer?.backgroundColor = color.cgColor
+        heightAnchor.constraint(equalToConstant: thickness).isActive = true
+        setAccessibilityElement(false)
     }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }

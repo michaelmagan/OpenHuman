@@ -18,6 +18,8 @@ public struct CalendarEvent: Identifiable, Sendable, Hashable {
     public var myResponse: CalendarResponse?
     public var recurringEventID: String?
     public var extras: CalendarEventExtras
+    // The guest address Mail answers as when the calendar marks no entry as its own (an invitation sent to an alias)
+    public var respondsAs: String?
 
     public init(id: String, title: String, start: Date, end: Date, isAllDay: Bool = false, timeZone: String? = nil,
                 attendees: [EmailAddress] = [], calendarName: String? = nil, meetLink: URL? = nil,
@@ -104,6 +106,17 @@ public struct CalendarEventDraft: Sendable, Hashable {
         self.addMeetLink = addMeetLink
         self.location = location
         self.notes = notes
+    }
+
+    // A new event with guests emails them its invitation unless the user turns that off
+    public static func defaultSendUpdates(attendees: [EmailAddress]) -> CalendarSendUpdates {
+        attendees.isEmpty ? .none : .all
+    }
+
+    // The first guest turns invitations on; later changes keep what the user chose
+    public mutating func setAttendees(_ people: [EmailAddress]) {
+        if attendees.isEmpty, !people.isEmpty { sendUpdates = Self.defaultSendUpdates(attendees: people) }
+        attendees = people
     }
 
     public var emailsAttendees: Bool { sendUpdates != .none && !attendees.isEmpty }

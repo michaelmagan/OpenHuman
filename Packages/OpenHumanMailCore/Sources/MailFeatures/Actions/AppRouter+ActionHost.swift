@@ -22,6 +22,7 @@ extension AppRouter: ActionHost {
             return c
         }
         c.location = active.location
+        c.searchOpen = active.searchOpen
         let list = active.list
         let rows = list?.rows ?? []
         c.hasRows = !rows.isEmpty

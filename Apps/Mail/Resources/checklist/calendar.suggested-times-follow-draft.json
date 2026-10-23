@@ -1,0 +1,15 @@
+{
+  "id": "calendar.suggested-times-follow-draft",
+  "area": "Calendar",
+  "title": "Suggested times can be removed from the draft and follow its recipients",
+  "steps": [
+    "Launch with -UseFakeData -UseFakeCalendar, open a conversation, press r, show the calendar (Control-Command-C) and press Suggest times",
+    "Press Insert in draft, then Replace, then Remove; press Cmd+Z in the draft",
+    "Add a recipient, then press Other times",
+    "Open another conversation"
+  ],
+  "deepLink": null,
+  "expected": "Insert puts the times in once and the box says In your draft; Replace swaps them in place, Remove takes them out and Cmd+Z puts them back. After a recipient change the times dim with a note and are found again on their own; Other times offers different ones. Another conversation clears the box completely, and going back does not bring it back. Nothing is added to the calendar.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

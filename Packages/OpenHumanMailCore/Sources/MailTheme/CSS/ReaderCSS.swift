@@ -52,8 +52,9 @@ public enum ReaderCSS {
           margin: 0 0 0 \(quoteBar); padding-left: \(px(t.space4)); border-left: \(quoteBar) solid var(--oh-quote);
           color: var(--oh-text-secondary); }
         details.oh-quoted > summary { list-style: none; cursor: default; display: inline-block;
-          width: \(px(t.space7)); height: \(px(t.space5)); border-radius: \(px(t.space3)); background: transparent; }
-        details.oh-quoted > summary:hover, details.oh-quoted > summary:focus-visible { background: var(--oh-sunken); }
+          width: \(px(t.space7)); height: \(px(t.space5)); border-radius: 999px; background: var(--oh-sunken); }
+        details.oh-quoted > summary:hover, details.oh-quoted > summary:focus-visible {
+          background: color-mix(in srgb, var(--oh-text) 12%, var(--oh-sunken)); }
         mark.oh-hit { background: var(--oh-mark); color: inherit; border-radius: var(--oh-radius-xs); padding: 0 \(px(t.space1 / 2)); }
         pre, code { font: var(--oh-mono-size)/var(--oh-mono-lh) var(--oh-mono-font); }
         table { max-width: 100%; }

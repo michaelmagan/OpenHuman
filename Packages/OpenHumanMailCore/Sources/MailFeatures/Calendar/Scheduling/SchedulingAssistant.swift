@@ -100,7 +100,9 @@ public final class SchedulingAssistant {
     @ObservationIgnored private var generation: [ThreadKey: Int] = [:]
     @ObservationIgnored private var analyzedAt: [ThreadKey: Date] = [:]
     @ObservationIgnored private var held: [UUID: Task<Void, Never>] = [:]
-    @ObservationIgnored private var undoable: [UUID: (moved: [(CalendarEvent, Date, Date)], created: CalendarEvent?)] = [:]
+    @ObservationIgnored private var undoable: [UUID: (moved: [(CalendarEvent, Date, Date)], created: CalendarEvent?,
+                                                      calendar: any CalendarProviding)] = [:]
+    @ObservationIgnored private var calendars: [ThreadKey: any CalendarProviding] = [:]
     @ObservationIgnored private var undoerStorage: SchedulingUndoer?
 
     public static let freshFor: TimeInterval = 60
@@ -114,6 +116,13 @@ public final class SchedulingAssistant {
     }
 
     public var writeRefusal: String? { provider.info.createRefusal }
+
+    func calendar(for thread: ThreadKey) -> any CalendarProviding { calendars[thread] ?? provider }
+
+    private func resolveCalendar(for thread: ThreadKey) async -> (any CalendarProviding)? {
+        guard let sidebar = environment.calendarSidebar, sidebar.routesByAccount else { return provider }
+        return await sidebar.calendarOf(thread.account).provider
+    }
 
     public func analyze(_ thread: ThreadKey, force: Bool = false) async {
         if !force, let at = analyzedAt[thread], now().timeIntervalSince(at) < Self.freshFor, status[thread] != nil { return }
@@ -138,6 +147,12 @@ public final class SchedulingAssistant {
         let to = calendar.date(byAdding: .day, value: 1, to: lastDay) ?? lastDay.addingTimeInterval(86_400)
         let title = CalendarEventDraftBuilder.title(message.subject)
         let link = await bookingLink()
+        guard let provider = await resolveCalendar(for: thread) else {
+            guard generation[thread] == mine else { return }
+            return forget(thread)
+        }
+        guard generation[thread] == mine else { return }
+        calendars[thread] = provider
         do {
             let key = CalendarEventStore.key(for: provider)
             let store = environment.calendarEvents
@@ -455,7 +470,7 @@ public final class SchedulingAssistant {
 
     public func moveConflicts() async {
         guard var card = followUp, !card.moves.isEmpty else { return }
-        if let refusal = writeRefusal {
+        if let refusal = calendar(for: card.context.thread).info.createRefusal {
             card.note = refusal
             followUp = card
             environment.notices.post(refusal, duration: NoticeCenter.infoDuration)
@@ -477,7 +492,8 @@ public final class SchedulingAssistant {
     }
 
     private func commit(_ moves: [SchedulingMove], context: SchedulingReplyContext) async {
-        if let refusal = writeRefusal {
+        let provider = calendar(for: context.thread)
+        if let refusal = provider.info.createRefusal {
             environment.notices.post(String(localized: "Nothing was moved. \(refusal)"), style: .error)
             return
         }
@@ -504,7 +520,7 @@ public final class SchedulingAssistant {
         let line = String(localized: "Moved \(first.event.title) to \(clockText(first.to.start)).")
         if moves.allSatisfy({ $0.notifies.isEmpty }) {
             let id = UUID()
-            undoable[id] = (moved, created)
+            undoable[id] = (moved, created, provider)
             pushUndo(id, title: line, threads: [context.thread])
         } else {
             environment.notices.post(line + " " + String(localized: "Google emailed the attendees."),
@@ -514,7 +530,8 @@ public final class SchedulingAssistant {
 
     public func acceptConflict() async {
         guard var card = followUp else { return }
-        if let refusal = writeRefusal {
+        let target = calendar(for: card.context.thread)
+        if let refusal = target.info.createRefusal {
             card.note = refusal
             followUp = card
             environment.notices.post(refusal, duration: NoticeCenter.infoDuration)
@@ -532,7 +549,7 @@ public final class SchedulingAssistant {
             guard let created else { return }
             let overlap = context.conflicts.first.map { String(localized: " It overlaps \($0.title); both stay on your calendar.") } ?? ""
             let undoID = UUID()
-            self.undoable[undoID] = ([], created)
+            self.undoable[undoID] = ([], created, target)
             self.pushUndo(undoID, title: String(localized: "Added \(self.clockText(created.start)).") + overlap,
                           threads: [context.thread])
         }
@@ -541,6 +558,7 @@ public final class SchedulingAssistant {
     }
 
     private func createAccepted(_ context: SchedulingReplyContext) async -> CalendarEvent? {
+        let provider = calendar(for: context.thread)
         let kind = await read(AppSettings.calendarAcceptedHoldKind)
         let title = kind == .tentative ? String(localized: "Tentative: \(context.title)") : context.title
         let draft = CalendarEventDraft(title: title, start: context.proposal.start, end: context.proposal.end,
@@ -585,6 +603,7 @@ public final class SchedulingAssistant {
                                      duration: NoticeCenter.infoDuration)
             return
         }
+        let provider = done.calendar
         do {
             let key = CalendarEventStore.key(for: provider)
             for (event, start, end) in done.moved {

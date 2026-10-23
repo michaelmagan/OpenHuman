@@ -2,14 +2,16 @@ import MailTheme
 import SwiftUI
 
 public enum SettingsMetrics {
-    public static let sidebarWidth: CGFloat = 200
-    public static let sidebarRowHeight: CGFloat = 28
+    public static let windowWidth: CGFloat = NativeMetrics.Settings.minWidth
+    public static let windowHeight: CGFloat = NativeMetrics.Settings.minHeight
+    /// The page list's starting and narrowest width: the longest page title fits beside its symbol at the large
+    /// sidebar size. Dragging the divider widens it up to `sidebarMaxWidth`.
+    public static let sidebarWidth: CGFloat = 220
+    public static let sidebarMaxWidth: CGFloat = 320
     public static let sidebarIconSize: CGFloat = 14
     public static let contentMaxWidth: CGFloat = 640
-    public static let rowMinHeight: CGFloat = 40
-    public static let compactRowMinHeight: CGFloat = 28
-    public static let windowWidth: CGFloat = 780
-    public static let windowHeight: CGFloat = 560
+    public static let rowMinHeight: CGFloat = NativeMetrics.Settings.rowMinHeight
+    public static let compactRowMinHeight: CGFloat = NativeMetrics.Settings.compactRowMinHeight
 }
 
 public enum SettingsTone: Sendable, Hashable {
@@ -17,7 +19,7 @@ public enum SettingsTone: Sendable, Hashable {
 
     func color(_ theme: ResolvedTheme) -> Color {
         switch self {
-        case .secondary: theme.textSecondary.color
+        case .secondary: Color.secondary
         case .warning: theme.textWarning.color
         case .danger: theme.textDanger.color
         case .success: theme.textSuccess.color
@@ -25,6 +27,8 @@ public enum SettingsTone: Sendable, Hashable {
     }
 }
 
+/// A settings page: a grouped `Form` whose sections are `SettingsSection`s. The page title is the window title.
+/// `.fill` is for pages that lay out their own full-height content (a list beside an editor).
 public struct SettingsPageScaffold<Content: View>: View {
     public enum Layout: Sendable { case column, fill }
 
@@ -40,34 +44,23 @@ public struct SettingsPageScaffold<Content: View>: View {
     }
 
     public var body: some View {
-        Group {
-            switch layout {
-            case .column:
-                ScrollView(.vertical) {
-                    stack
-                        .frame(maxWidth: SettingsMetrics.contentMaxWidth, alignment: .leading)
-                        .padding(theme.space8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
+        switch layout {
+        case .column:
+            Form { content }
+                .formStyle(.grouped)
                 .scrollIndicatorsFlash(onAppear: true)
-            case .fill:
-                stack
-                    .padding(theme.space8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            }
-        }
-        .background(theme.bgWindow.color)
-    }
-
-    private var stack: some View {
-        VStack(alignment: .leading, spacing: theme.space7) {
-            Text(title).themeFont(theme.typeTitle).foregroundStyle(theme.textPrimary.color)
-                .accessibilityAddTraits(.isHeader)
-            content
+                .navigationTitle(title)
+        case .fill:
+            VStack(alignment: .leading, spacing: 0) { content }
+                .padding(theme.space6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .navigationTitle(title)
         }
     }
 }
 
+/// One group of rows. Draws nothing when it has no rows, so a section whose rows are all switched off disappears with
+/// its title and footnote.
 public struct SettingsSection<Content: View>: View {
     let title: String?
     let detail: String?
@@ -88,31 +81,29 @@ public struct SettingsSection<Content: View>: View {
     public var body: some View {
         Group(subviews: content.environment(\.settingsCompactRows, compact)) { rows in
             if !rows.isEmpty {
-                VStack(alignment: .leading, spacing: theme.space3) {
-                    if let title {
-                        Text(title).themeFont(theme.typeHeadline).foregroundStyle(theme.textPrimary.color)
-                            .accessibilityAddTraits(.isHeader)
-                    }
-                    if let detail {
-                        SettingsFootnote(detail)
-                    }
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(rows) { row in
-                            if row.id != rows.first?.id {
-                                Rectangle().fill(theme.borderHairline.color).frame(height: theme.borderWidthHairline)
-                                    .accessibilityHidden(true)
-                            }
-                            row
-                        }
-                    }
-                    .padding(.horizontal, theme.space4)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: theme.radiusLG).fill(theme.bgSunken.color))
-                    .overlay(RoundedRectangle(cornerRadius: theme.radiusLG)
-                        .strokeBorder(theme.borderHairline.color, lineWidth: theme.borderWidthHairline))
-                    if let footnote {
-                        SettingsFootnote(footnote).padding(.horizontal, theme.space4)
-                    }
+                Section {
+                    ForEach(rows) { row in row }
+                } header: {
+                    header
+                } footer: {
+                    if let footnote { SettingsFootnote(footnote) }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var header: some View {
+        if title != nil || detail != nil {
+            VStack(alignment: .leading, spacing: theme.space1) {
+                if let title {
+                    Text(title).accessibilityAddTraits(.isHeader)
+                }
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: NativeMetrics.Text.secondary))
+                        .fontWeight(.regular)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -123,6 +114,8 @@ extension EnvironmentValues {
     @Entry var settingsCompactRows = false
 }
 
+/// A labelled row: the title (with an optional detail and status line) on the leading side and the control on the
+/// trailing side, as `LabeledContent` in the grouped form. `stacked` puts a wide control under the text.
 public struct SettingsRow<Control: View>: View {
     let title: String
     let detail: String?
@@ -151,41 +144,51 @@ public struct SettingsRow<Control: View>: View {
 
     public var body: some View {
         arranged
-            .padding(.vertical, compact ? theme.space2 : theme.space3)
             .frame(minHeight: compact ? SettingsMetrics.compactRowMinHeight : SettingsMetrics.rowMinHeight)
     }
 
     // Why: a wide control beside the title squeezes the title until it wraps a letter per line
     @ViewBuilder private var arranged: some View {
         if stacked {
-            VStack(alignment: .leading, spacing: theme.space2) {
+            VStack(alignment: .leading, spacing: theme.space3) {
                 text
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .modifier(RowTextAccessibility(hidden: labelsControl))
-                control
+                accessibleControl
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .modifier(RowControlAccessibility(label: labelsControl ? title : nil, hint: labelsControl ? spokenDetail : nil))
+            }
+        } else if alignment == .center {
+            LabeledContent {
+                accessibleControl.fixedSize(horizontal: true, vertical: false)
+            } label: {
+                text.modifier(RowTextAccessibility(hidden: labelsControl))
             }
         } else {
-            HStack(alignment: alignment, spacing: theme.space5) {
-                text
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .modifier(RowTextAccessibility(hidden: labelsControl))
-                control
-                    .fixedSize(horizontal: true, vertical: false)
-                    .modifier(RowControlAccessibility(label: labelsControl ? title : nil, hint: labelsControl ? spokenDetail : nil))
+            LabeledContent {
+                accessibleControl.fixedSize(horizontal: true, vertical: false)
+            } label: {
+                text.modifier(RowTextAccessibility(hidden: labelsControl))
             }
+            .labeledContentStyle(AlignedRowStyle(alignment: alignment, spacing: theme.space6))
         }
+    }
+
+    private var accessibleControl: some View {
+        control.modifier(RowControlAccessibility(label: labelsControl ? title : nil, hint: labelsControl ? spokenDetail : nil))
     }
 
     private var text: some View {
         VStack(alignment: .leading, spacing: theme.space1) {
-            Text(title).themeFont(theme.typeBody).foregroundStyle((isEnabled ? theme.textPrimary : theme.textTertiary).color)
+            Text(title).foregroundStyle(isEnabled ? HierarchicalShapeStyle.primary : .tertiary)
             if let detail {
-                Text(detail).themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
+                Text(detail)
+                    .font(.system(size: NativeMetrics.Text.secondary))
+                    .foregroundStyle(.secondary)
             }
             if let status {
-                Text(status).themeFont(theme.typeMeta).foregroundStyle(statusTone.color(theme))
+                Text(status)
+                    .font(.system(size: NativeMetrics.Text.secondary))
+                    .foregroundStyle(statusTone.color(theme))
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -194,6 +197,18 @@ public struct SettingsRow<Control: View>: View {
     private var spokenDetail: String? {
         let lines = [detail, status].compactMap { $0 }
         return lines.isEmpty ? nil : lines.joined(separator: " ")
+    }
+}
+
+private struct AlignedRowStyle: LabeledContentStyle {
+    let alignment: VerticalAlignment
+    let spacing: CGFloat
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(alignment: alignment, spacing: spacing) {
+            configuration.label.frame(maxWidth: .infinity, alignment: .leading)
+            configuration.content
+        }
     }
 }
 
@@ -272,6 +287,7 @@ private struct RowControlAccessibility: ViewModifier {
 }
 
 extension View {
+    /// For a row that is not a `SettingsRow` (a picker, an editor, a list): fills the row's width.
     public func settingsRowPadding() -> some View {
         modifier(SettingsRowPadding())
     }
@@ -282,23 +298,22 @@ private struct SettingsRowPadding: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .padding(.vertical, theme.space3)
+            .padding(.vertical, theme.space1)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
+/// Sections hosted together, for example by an app-provided page part. The sections stay separate sections of the
+/// page's form. A modifier on the stack applies to each section, so put a one-off `.task` or dialog on one section.
 public struct SettingsSectionStack<Content: View>: View {
     let content: Content
-    @Environment(\.theme) private var theme
 
     public init(@ViewBuilder content: () -> Content) {
         self.content = content()
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: theme.space7) {
-            content
-        }
+        content
     }
 }
 
@@ -313,7 +328,9 @@ public struct SettingsFootnote: View {
     }
 
     public var body: some View {
-        Text(text).themeFont(theme.typeMeta).foregroundStyle(tone.color(theme))
+        Text(text)
+            .font(.system(size: NativeMetrics.Text.secondary))
+            .foregroundStyle(tone.color(theme))
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -321,28 +338,13 @@ public struct SettingsFootnote: View {
 
 extension View {
     public func settingsTextField() -> some View {
-        modifier(SettingsTextFieldStyle())
+        textFieldStyle(.roundedBorder)
     }
 }
 
 extension Text {
     public func settingsPrompt(_ theme: ResolvedTheme) -> Text {
         foregroundStyle(theme.textTertiary.color)
-    }
-}
-
-private struct SettingsTextFieldStyle: ViewModifier {
-    @Environment(\.theme) private var theme
-
-    func body(content: Content) -> some View {
-        content
-            .textFieldStyle(.plain)
-            .themeFont(theme.typeBody)
-            .padding(.horizontal, theme.space2)
-            .padding(.vertical, theme.space1)
-            .background(RoundedRectangle(cornerRadius: theme.radiusSM).fill(theme.bgWindow.color))
-            .overlay(RoundedRectangle(cornerRadius: theme.radiusSM)
-                .strokeBorder(theme.borderControl.color, lineWidth: theme.borderWidthControl))
     }
 }
 
@@ -376,6 +378,8 @@ typealias SettingsNote = SettingsFootnote
 
 extension View {
     func settingsSectionLabel(_ theme: ResolvedTheme) -> some View {
-        themeFont(theme.typeLabel).foregroundStyle(theme.textTertiary.color).accessibilityAddTraits(.isHeader)
+        font(.system(size: NativeMetrics.Text.caption, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .accessibilityAddTraits(.isHeader)
     }
 }

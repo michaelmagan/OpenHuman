@@ -26,6 +26,9 @@ CERTIFICATE = b"synthetic Developer ID Application certificate"
 NOW = datetime.datetime(2026, 10, 16)
 SIGNATURE_FAILS = ("ad-hoc signature, not Developer ID", "team not set, expected", "no secure timestamp",
                    "hardened runtime off")
+FEED = "https://updates.example.test/appcast.xml"
+UPDATE_KEY = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
+SANDBOX = {"com.apple.security.app-sandbox": True, "com.apple.security.network.client": True}
 
 spec = importlib.util.spec_from_file_location("provisioning", RELEASE / "provisioning.py")
 provisioning = importlib.util.module_from_spec(spec)
@@ -278,7 +281,7 @@ class CheckReleaseProfileTests(unittest.TestCase):
     def setUpClass(cls):
         cls.write_profile = staticmethod(make_profile_signer(cls))
 
-    def make_app(self, entitlements=None, fields=None, nested=None, **info):
+    def make_app(self, entitlements=None, fields=None, nested=None, sparkle=None, **info):
         root = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root)
         app = root / "OpenHuman Mail.app"
@@ -295,10 +298,36 @@ class CheckReleaseProfileTests(unittest.TestCase):
             helper = app / "Contents" / "Helpers" / "helper"
             shutil.copy(shutil.which("true"), helper)
             self.sign(helper, nested, root / "helper.plist")
+        if sparkle is not None:
+            self.make_sparkle(app, root, with_services=sparkle == "services")
         if fields is not None:
             self.write_profile(app / "Contents" / "embedded.provisionprofile", fields)
         self.sign(app, entitlements, root / "app.plist")
         return app
+
+    def make_sparkle(self, app, root, with_services):
+        """A minimal Sparkle.framework, signed inside out; with_services adds Downloader.xpc in its own sandbox."""
+        framework = app / "Contents" / "Frameworks" / "Sparkle.framework"
+        version = framework / "Versions" / "B"
+        (version / "Resources").mkdir(parents=True)
+        shutil.copy(shutil.which("true"), version / "Sparkle")
+        with open(version / "Resources" / "Info.plist", "wb") as handle:
+            plistlib.dump({"CFBundleExecutable": "Sparkle", "CFBundleIdentifier": "org.sparkle-project.Sparkle",
+                           "CFBundlePackageType": "FMWK"}, handle)
+        (framework / "Versions" / "Current").symlink_to("B")
+        names = ["Sparkle", "Resources"]
+        if with_services:
+            xpc = version / "XPCServices" / "Downloader.xpc" / "Contents"
+            (xpc / "MacOS").mkdir(parents=True)
+            shutil.copy(shutil.which("true"), xpc / "MacOS" / "Downloader")
+            with open(xpc / "Info.plist", "wb") as handle:
+                plistlib.dump({"CFBundleExecutable": "Downloader", "CFBundlePackageType": "XPC!",
+                               "CFBundleIdentifier": "org.sparkle-project.DownloaderService"}, handle)
+            self.sign(xpc.parent, SANDBOX, root / "downloader.plist")
+            names.append("XPCServices")
+        for name in names:
+            (framework / name).symlink_to(f"Versions/Current/{name}")
+        self.sign(framework, None, root / "framework.plist")
 
     def sign(self, path, entitlements, plist):
         args = ["codesign", "--force", "--sign", "-"]
@@ -390,6 +419,81 @@ class CheckReleaseProfileTests(unittest.TestCase):
 
     def test_unsigned_and_icloud_do_not_go_together(self):
         self.assertEqual(run([CHECK, "--unsigned", "--icloud", self.make_app()]).returncode, 2)
+
+    def test_an_app_without_a_feed_never_updates(self):
+        result, fails = self.check("--unsigned", "--updates", "off", self.make_app(sparkle="plain"))
+        self.assertEqual(fails, [], result.stdout)
+        self.assertIn("ok    Sparkle.framework without XPC services", result.stdout)
+        self.assertIn("ok    updates off: no SUFeedURL or SUPublicEDKey", result.stdout)
+
+    def test_sparkles_xpc_services_never_ship_and_their_entitlements_stay_refused(self):
+        result, fails = self.check("--unsigned", self.make_app(sparkle="services"))
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(any(line.startswith("Sparkle's XPC services are in the app (Contents/Frameworks/Sparkle.framework/"
+                                            "Versions/B/XPCServices/Downloader.xpc") for line in fails), fails)
+        downloader = [line for line in fails if "Downloader.xpc/Contents/MacOS/Downloader: entitlement" in line]
+        self.assertEqual(len(downloader), 2, fails)
+        self.assertTrue(all("is broader than this app needs" in line for line in downloader), downloader)
+
+    def test_the_xpc_services_cannot_be_switched_on(self):
+        for flag in ("SUEnableDownloaderService", "SUEnableInstallerLauncherService"):
+            with self.subTest(flag):
+                result, fails = self.check("--unsigned", self.make_app(sparkle="plain", **{flag: True}))
+                self.assertEqual(fails, [f"Info.plist turns on {flag}, which needs the XPC services a non-sandboxed "
+                                         "app leaves out"])
+
+    def test_only_a_developer_id_build_without_icloud_carries_a_feed(self):
+        feed = dict(SUFeedURL=FEED, SUPublicEDKey=UPDATE_KEY)
+        result, fails = self.check("--unsigned", self.make_app(sparkle="plain", **feed))
+        self.assertEqual(fails, ["an unsigned build carries an update feed; only Developer ID builds may update"])
+        result, fails = self.check("--pre-notarization", "--team", TEAM, self.make_app(sparkle="plain", **feed))
+        self.assertEqual(fails, [], result.stdout)
+        self.assertIn(f"ok    update feed {FEED}", result.stdout)
+        result, fails = self.check("--pre-notarization", "--team", TEAM,
+                                   self.make_app(icloud_entitlements(), profile(), sparkle="plain", **feed))
+        self.assertEqual(len(fails), 1, fails)
+        self.assertIn("Updating builds are made with --no-icloud", fails[0])
+        result, fails = self.check("--pre-notarization", "--team", TEAM, self.make_app(**feed))
+        self.assertEqual(fails, ["Info.plist names an update feed, but the app has no Sparkle.framework"])
+
+    def test_the_feed_and_key_are_the_ones_the_build_asked_for(self):
+        app = self.make_app(sparkle="plain", SUFeedURL=FEED, SUPublicEDKey=UPDATE_KEY)
+        result, fails = self.check("--pre-notarization", "--team", TEAM, "--updates", FEED, "--update-key", UPDATE_KEY, app)
+        self.assertEqual(fails, [], result.stdout)
+        result, fails = self.check("--pre-notarization", "--team", TEAM, "--updates", "off", app)
+        self.assertEqual(len(fails), 1, fails)
+        self.assertIn("but this build was made without --enable-updates", fails[0])
+        other = "https://other.example.test/appcast.xml"
+        result, fails = self.check("--pre-notarization", "--team", TEAM, "--updates", other, app)
+        self.assertEqual(fails, [f"Info.plist SUFeedURL is '{FEED}', expected {other}"])
+        result, fails = self.check("--pre-notarization", "--team", TEAM, "--updates", FEED, self.make_app(sparkle="plain"))
+        self.assertEqual(fails, ["built with --enable-updates, but Info.plist has no SUFeedURL or SUPublicEDKey"])
+        for key in ("", "not a key", "AAAA"):
+            with self.subTest(key=key):
+                result, fails = self.check("--pre-notarization", "--team", TEAM,
+                                           self.make_app(sparkle="plain", SUFeedURL=FEED, SUPublicEDKey=key))
+                self.assertTrue(any("not a base64 EdDSA public key of 32 bytes" in line for line in fails), fails)
+
+    def test_a_feed_on_this_mac_is_only_for_a_staged_test(self):
+        app = self.make_app(sparkle="plain", SUFeedURL="http://127.0.0.1:8000/appcast.xml", SUPublicEDKey=UPDATE_KEY)
+        result, fails = self.check("--pre-notarization", "--team", TEAM, app)
+        self.assertEqual(fails, [], result.stdout)
+        self.assertIn("warn  update feed http://127.0.0.1:8000/appcast.xml is on this Mac: a staged update test only",
+                      result.stdout)
+        result, fails = self.check("--team", TEAM, app)
+        self.assertIn("update feed http://127.0.0.1:8000/appcast.xml is on this Mac; a notarized build must read an "
+                      "https:// feed", fails)
+        result, fails = self.check("--pre-notarization", "--team", TEAM,
+                                   self.make_app(sparkle="plain", SUFeedURL="http://updates.example.test/appcast.xml",
+                                                 SUPublicEDKey=UPDATE_KEY))
+        self.assertEqual(fails, ["update feed 'http://updates.example.test/appcast.xml' is not https://"])
+
+    def test_update_options_that_cannot_apply_are_refused(self):
+        app = self.make_app()
+        for args in (["--update-key", UPDATE_KEY], ["--updates", "off", "--update-key", UPDATE_KEY],
+                     ["--unsigned", "--updates", FEED], ["--icloud", "--updates", FEED], ["--updates"]):
+            with self.subTest(args):
+                self.assertEqual(run([CHECK, *args, app]).returncode, 2)
 
 
 class EntitlementFilesTests(unittest.TestCase):
@@ -496,7 +600,8 @@ class MakeDmgProfileTests(unittest.TestCase):
         self.env = dict(os.environ, PATH=f"{self.bin}{os.pathsep}{os.environ['PATH']}", FAKE_LOG=str(self.log),
                         FAKE_IDENTITY=provisioning.certificate_sha1(CERTIFICATE), GIT_CONFIG_GLOBAL=os.devnull,
                         GIT_CONFIG_NOSYSTEM="1")
-        for name in ("OH_PROVISIONING_PROFILE", "OH_SIGN_IDENTITY", "OH_NOTARY_PROFILE", "OH_BUNDLE_ID_PREFIX"):
+        for name in ("OH_PROVISIONING_PROFILE", "OH_SIGN_IDENTITY", "OH_NOTARY_PROFILE", "OH_BUNDLE_ID_PREFIX",
+                     "OH_UPDATE_FEED_URL", "OH_SPARKLE_PUBLIC_KEY"):
             self.env.pop(name, None)
         for args in (["init", "-q"], ["add", "-A"],
                      ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "fixture"]):
@@ -504,8 +609,10 @@ class MakeDmgProfileTests(unittest.TestCase):
         self.profiles = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.profiles)
 
-    def make_dmg(self, *args, fields=None, profile_path=None):
+    def make_dmg(self, *args, fields=None, profile_path=None, updates=None):
         env = dict(self.env)
+        if updates is not None:
+            env.update(updates, OH_RELEASE_ENV=str(self.profiles / "absent.env"))
         if fields is not None:
             profile_path = self.write_profile(self.profiles / "Mail.provisionprofile", fields)
         if profile_path is not None:
@@ -527,7 +634,7 @@ class MakeDmgProfileTests(unittest.TestCase):
         self.assertIn("OH_ENTITLEMENTS=Entitlements/Mail.entitlements", self.line(result, "xcodebuild archive"))
         self.assertIn("--write", self.line(result, "provisioning.py"))
         self.assertIn("$ cp \\<your-Developer-ID.provisionprofile\\> ", self.line(result, "embedded.provisionprofile"))
-        sign = self.line(result, "codesign --force")
+        sign = next(line for line in result.stdout.splitlines() if "codesign --force" in line and "--entitlements" in line)
         for part in ("--options runtime --timestamp --entitlements", "Mail-iCloud.entitlements"):
             self.assertIn(part, sign)
         self.assertIn("--icloud", self.line(result, "check-release.sh --team"))
@@ -586,6 +693,72 @@ class MakeDmgProfileTests(unittest.TestCase):
                 self.assertIn("OH_ENTITLEMENTS=Entitlements/Mail.entitlements",
                               self.line(result, "xcodebuild archive"))
                 self.assertEqual(self.tool_calls(), [])
+
+    def test_every_build_leaves_sparkles_xpc_services_out_and_signs_sparkle_again(self):
+        for args, signing in ((["--no-icloud"], "--options runtime --timestamp"), (["--unsigned"], "--sign -")):
+            with self.subTest(args):
+                result = self.make_dmg("--dry-run", *args)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                removed = self.line(result, "XPCServices")
+                self.assertIn("rm -rf", removed)
+                self.assertIn("Sparkle.framework/Versions/B/XPCServices", removed)
+                for part in ("Versions/B/Autoupdate", "Versions/B/Updater.app"):
+                    self.assertIn(signing, self.line(result, part))
+                self.assertIn("updates off", result.stdout)
+
+    def test_updates_need_a_developer_id_build_without_icloud(self):
+        for args, expected in ((["--enable-updates"], "--no-icloud"),
+                               (["--enable-updates", "--unsigned", "--no-icloud"], "Developer ID")):
+            with self.subTest(args):
+                result = self.make_dmg("--dry-run", *args, updates={"OH_UPDATE_FEED_URL": FEED,
+                                                                    "OH_SPARKLE_PUBLIC_KEY": UPDATE_KEY})
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(expected, result.stderr)
+                self.assertEqual(self.tool_calls(), [])
+
+    def test_a_real_run_with_updates_needs_the_feed_and_key_before_building(self):
+        result = self.make_dmg("--sign-only", "--no-icloud", "--enable-updates", updates={})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("--enable-updates needs OH_UPDATE_FEED_URL", result.stderr)
+        self.assertEqual(self.tool_calls(), [])
+        self.assertFalse((self.root / "build").exists())
+
+    def test_a_dry_run_with_updates_builds_in_the_feed_and_key(self):
+        result = self.make_dmg("--dry-run", "--no-icloud", "--enable-updates",
+                               updates={"OH_UPDATE_FEED_URL": FEED, "OH_SPARKLE_PUBLIC_KEY": UPDATE_KEY})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        archive = self.line(result, "xcodebuild archive")
+        self.assertIn(f" OH_UPDATE_FEED_URL={FEED} ", archive)
+        self.assertIn(f" OH_SPARKLE_PUBLIC_KEY={UPDATE_KEY} ", archive)
+        self.assertIn(f"--updates {FEED} --update-key {UPDATE_KEY}", self.line(result, "check-release.sh --"))
+        self.assertEqual(self.tool_calls(), [])
+
+    def test_without_enable_updates_a_set_feed_never_reaches_the_app(self):
+        result = self.make_dmg("--dry-run", "--no-icloud",
+                               updates={"OH_UPDATE_FEED_URL": FEED, "OH_SPARKLE_PUBLIC_KEY": UPDATE_KEY})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        archive = self.line(result, "xcodebuild archive")
+        self.assertIn(" OH_UPDATE_FEED_URL= OH_SPARKLE_PUBLIC_KEY= ", archive)
+        self.assertNotIn(FEED, result.stdout)
+        self.assertIn("--updates off", self.line(result, "check-release.sh --"))
+
+    def test_update_settings_are_checked_before_building(self):
+        cases = (
+            (["--no-icloud"], {"OH_UPDATE_FEED_URL": "http://updates.example.test/appcast.xml"}, "must start with https://"),
+            (["--no-icloud"], {"OH_SPARKLE_PUBLIC_KEY": "not a key"}, "not a base64 EdDSA public key"),
+            (["--no-icloud"], {"OH_UPDATE_FEED_URL": "http://127.0.0.1:8000/appcast.xml"}, "add --sign-only"),
+        )
+        for args, override, expected in cases:
+            with self.subTest(expected):
+                settings = dict({"OH_UPDATE_FEED_URL": FEED, "OH_SPARKLE_PUBLIC_KEY": UPDATE_KEY}, **override)
+                result = self.make_dmg("--dry-run", "--enable-updates", *args, updates=settings)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(expected, result.stderr)
+                self.assertIn("Nothing was built", result.stderr)
+        result = self.make_dmg("--dry-run", "--sign-only", "--no-icloud", "--enable-updates",
+                               updates={"OH_UPDATE_FEED_URL": "http://127.0.0.1:8000/appcast.xml",
+                                        "OH_SPARKLE_PUBLIC_KEY": UPDATE_KEY})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

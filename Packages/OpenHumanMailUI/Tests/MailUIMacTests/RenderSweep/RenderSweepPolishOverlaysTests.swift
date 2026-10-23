@@ -66,13 +66,15 @@ extension RenderSweepTests {
 
     @Test(arguments: SweepTheme.builtIns + SweepTheme.accessibility)
     func searchSheets(_ theme: SweepTheme) async throws {
+        SearchDropdownPanel.drawsMaterial = true
+        defer { SearchDropdownPanel.drawsMaterial = false }
         do {
             let w = try await SweepWindow.make(SweepOverlayFixture.environment(), theme: theme)
             defer { w.close() }
             let search = w.environment.overlays.search
             let editor = try await openSearchField(w)
             try await until { search.isOpen && !search.suggestions.isEmpty }
-            try await sweepShoot(w.window, screen: "search-sheet-empty", theme: theme)
+            try await sweepShootWithChildWindows(w.window, screen: "search-sheet-empty", theme: theme)
             guard !theme.isAccessibilityVariant else { return }
 
             editor.insertText("da", replacementRange: editor.selectedRange())
@@ -80,7 +82,7 @@ extension RenderSweepTests {
                 search.text == "da" && search.suggestions.contains { $0.kind == .person } && search.shownQuery == "da"
                     && w.router.list?.state == .loaded
             }
-            try await sweepShoot(w.window, screen: "search-sheet-typed", theme: theme)
+            try await sweepShootWithChildWindows(w.window, screen: "search-sheet-typed", theme: theme)
 
             editor.selectAll(nil)
             editor.insertText("from:da", replacementRange: editor.selectedRange())
@@ -88,7 +90,7 @@ extension RenderSweepTests {
                 search.text == "from:da" && search.suggestions.contains { $0.kind == .person }
                     && search.shownQuery == "from:da" && w.router.list?.state == .loaded
             }
-            try await sweepShoot(w.window, screen: "search-sheet-from", theme: theme)
+            try await sweepShootWithChildWindows(w.window, screen: "search-sheet-from", theme: theme)
         }
         guard !theme.isAccessibilityVariant else { return }
         do {
@@ -98,7 +100,7 @@ extension RenderSweepTests {
             let editor = try await openSearchField(w)
             editor.insertText("budget", replacementRange: editor.selectedRange())
             try await until { search.text == "budget" && search.shownQuery == "budget" && w.router.list?.state == .loaded }
-            try await sweepShoot(w.window, screen: "search-sheet-ask-ai", theme: theme)
+            try await sweepShootWithChildWindows(w.window, screen: "search-sheet-ask-ai", theme: theme)
 
             search.submit()
             try await until {

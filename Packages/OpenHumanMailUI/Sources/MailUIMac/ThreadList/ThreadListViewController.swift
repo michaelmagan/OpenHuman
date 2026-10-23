@@ -39,6 +39,8 @@ public final class ThreadListViewController: NSViewController, NSTableViewDataSo
     private var appliedPagingFailed = false
     private var routerHost: RouterThreadListHost?
     private var notificationTokens: [NSObjectProtocol] = []
+    private var hover = ThreadListHover()
+    var hoveredRow: Int? { hover.row }
     let tipPresenter: KeycapTooltipPresenter
 
     public var model: ThreadListModel? {
@@ -54,6 +56,15 @@ public final class ThreadListViewController: NSViewController, NSTableViewDataSo
     public var swipeActions: (leading: [ActionID], trailing: [ActionID]) = ([.markDone], [ThreadListActionIDs.snooze, .trash])
     public var hoverActions: [ActionID] = [.markDone, ThreadListActionIDs.snooze, .remind]
     public var onTableUpdate: ((ThreadListChange, Duration) -> Void)?
+    /// Draws the selection as in a key (`true`) or inactive (`false`) window regardless of the window, for renders.
+    var selectionEmphasisOverride: Bool? {
+        didSet {
+            guard selectionEmphasisOverride != oldValue, isViewLoaded else { return }
+            tableView.enumerateAvailableRowViews { rowView, _ in
+                (rowView as? ThreadRowBackgroundView)?.emphasisOverride = self.selectionEmphasisOverride
+            }
+        }
+    }
     public var showsDateGroups = false {
         didSet {
             if showsDateGroups != oldValue { model?.groupsByDate = showsDateGroups }
@@ -114,6 +125,31 @@ public final class ThreadListViewController: NSViewController, NSTableViewDataSo
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(scrolled), name: NSView.boundsDidChangeNotification,
                                                object: scrollView.contentView)
+        notificationTokens.append(NotificationCenter.default.addObserver(
+            forName: NSScrollView.willStartLiveScrollNotification, object: scrollView, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.liveScrollBegan() }
+        })
+        notificationTokens.append(NotificationCenter.default.addObserver(
+            forName: NSScrollView.didEndLiveScrollNotification, object: scrollView, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.liveScrollEnded() }
+        })
+        notificationTokens.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: nil, queue: .main) { [weak self] note in
+            let resigned = (note.object as AnyObject?).map(ObjectIdentifier.init)
+            MainActor.assumeIsolated {
+                guard let self, let window = self.tableView.window, resigned == ObjectIdentifier(window) else { return }
+                self.pointerExited()
+                self.windowKeyChanged()
+            }
+        })
+        notificationTokens.append(NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] note in
+            let became = (note.object as AnyObject?).map(ObjectIdentifier.init)
+            MainActor.assumeIsolated {
+                guard let self, let window = self.tableView.window, became == ObjectIdentifier(window) else { return }
+                self.windowKeyChanged()
+            }
+        })
         for name in [Notification.Name.NSCalendarDayChanged, .NSSystemTimeZoneDidChange] {
             notificationTokens.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.datesChanged() }
@@ -305,6 +341,7 @@ public final class ThreadListViewController: NSViewController, NSTableViewDataSo
         mirrorCursor()
         updateEmptyState()
         reportVisibleRange(force: true)
+        rehover()
         onTableUpdate?(change, clock.now - start)
     }
 
@@ -434,7 +471,18 @@ public final class ThreadListViewController: NSViewController, NSTableViewDataSo
             ?? ThreadRowBackgroundView(style: style)
         view.style = style
         view.isChecked = isChecked(row: row)
+        view.emphasisOverride = selectionEmphasisOverride
         return view
+    }
+
+    // Only the selected row's plate changes with the window's key state
+    private func windowKeyChanged() {
+        guard tableView.selectedRow >= 0 else { return }
+        (tableView.rowView(atRow: tableView.selectedRow, makeIfNecessary: false) as? ThreadRowBackgroundView)?.emphasisChanged()
+    }
+
+    public func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
+        (rowView as? ThreadRowBackgroundView)?.setHovering(hover.row == row)
     }
 
     public func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
@@ -765,6 +813,51 @@ public final class ThreadListViewController: NSViewController, NSTableViewDataSo
     @objc private func scrolled() {
         tipPresenter.hide()
         reportVisibleRange(force: false)
+        if !hover.isScrolling { refreshHover() }
+    }
+
+    func pointerMoved(to point: NSPoint) {
+        if hover.pointer(over: hoverRow(at: point)) { showHover() }
+    }
+
+    func pointerExited() {
+        if hover.pointerExited() { showHover() }
+    }
+
+    func liveScrollBegan() {
+        if hover.scrollBegan() { showHover() }
+    }
+
+    func liveScrollEnded() {
+        if hover.scrollEnded(pointerOver: rowUnderPointer()) { showHover() }
+    }
+
+    private func refreshHover() {
+        if hover.pointer(over: rowUnderPointer()) { showHover() }
+    }
+
+    private func rehover() {
+        if hover.pointer(over: rowUnderPointer()) || hover.row != nil { showHover() }
+    }
+
+    private func hoverRow(at point: NSPoint) -> Int? {
+        guard tableView.visibleRect.contains(point) else { return nil }
+        let row = tableView.row(at: point)
+        return row >= 0 && row < rowCount ? row : nil
+    }
+
+    private func rowUnderPointer() -> Int? {
+        guard let window = tableView.window, window.isVisible, window.isKeyWindow,
+              NSWindow.windowNumber(at: NSEvent.mouseLocation, belowWindowWithWindowNumber: 0) == window.windowNumber
+        else { return nil }
+        return hoverRow(at: tableView.convert(window.mouseLocationOutsideOfEventStream, from: nil))
+    }
+
+    private func showHover() {
+        let hovered = hover.row
+        tableView.enumerateAvailableRowViews { rowView, row in
+            (rowView as? ThreadRowBackgroundView)?.setHovering(row == hovered)
+        }
     }
 
     private func reportVisibleRange(force: Bool) {

@@ -69,6 +69,7 @@ struct CalendarMonthView: View {
             ForEach(cell.events) { event in
                 Button { model.openEvent(event) } label: { chip(event) }
                     .buttonStyle(.plain)
+                    .calendarPopoverAnchor(!event.id.isEmpty && model.card?.event.id == event.id)
             }
             if cell.more > 0 {
                 Button { Task { await model.show(day: cell.day, as: .day) } } label: {
@@ -114,7 +115,8 @@ struct CalendarMonthView: View {
         }
         .padding(.horizontal, theme.space1 + 1)
         .frame(height: 18)
-        .background(RoundedRectangle(cornerRadius: theme.radiusSM).fill(filled || selected ? colors.fill.color : Color.clear))
+        .background(RoundedRectangle(cornerRadius: CalendarTimeGridView.blockRadius, style: .continuous)
+            .fill(filled || selected ? colors.fill.color : Color.clear))
         .contentShape(Rectangle())
         .help(event.title + "\n" + model.timeText(event))
         .accessibilityLabel("\(event.title), \(model.timeText(event))")

@@ -142,8 +142,11 @@ struct AppShellTests {
         await eventually("main window") { Self.mainWindow != nil && MailApp.app.router?.list?.state == .loaded }
         let window = try #require(Self.mainWindow)
         let router = try #require(MailApp.app.router)
-        await eventually("title") { window.title == router.windowTitle }
-        #expect(window.title.hasSuffix("— robin@example.com"))
+        await eventually("title") { window.title == ShellTitles.title(router) && window.subtitle == ShellTitles.subtitle(router) }
+        let account = try #require(router.account)
+        #expect(window.subtitle.hasPrefix(ShellTitles.accountName(account)), "the subtitle names the account: \(window.subtitle)")
+        #expect(window.toolbar != nil && window.toolbarStyle == .unified, "the unified toolbar holds the window's controls")
+        #expect(window.titleVisibility == .visible, "the title shows in the toolbar")
         let appearance: NSAppearance.Name = AppThemes.store.resolved.appearance == .dark ? .darkAqua : .aqua
         #expect(window.appearance?.name == appearance)
         #expect(!window.frameAutosaveName.isEmpty)

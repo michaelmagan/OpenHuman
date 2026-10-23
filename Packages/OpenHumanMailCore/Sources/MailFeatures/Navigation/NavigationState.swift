@@ -144,7 +144,7 @@ public struct NavigationSnapshot: Codable, Equatable, Sendable {
     public var panels: PanelsPlace?
     public var openDraftIDs: [String]
 
-    public init(activeAccount: AccountID?, labelSidebarVisible: Bool = false, places: [AccountPlace] = [],
+    public init(activeAccount: AccountID?, labelSidebarVisible: Bool = true, places: [AccountPlace] = [],
                 window: WindowPlace? = nil, panels: PanelsPlace? = nil, openDraftIDs: [String] = []) {
         self.version = Self.currentVersion
         self.activeAccount = activeAccount
@@ -163,7 +163,7 @@ public struct NavigationSnapshot: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         version = try c.decode(Int.self, forKey: .version)
         activeAccount = try c.decodeIfPresent(AccountID.self, forKey: .activeAccount)
-        labelSidebarVisible = try c.decodeIfPresent(Bool.self, forKey: .labelSidebarVisible) ?? false
+        labelSidebarVisible = try c.decodeIfPresent(Bool.self, forKey: .labelSidebarVisible) ?? true
         places = try c.decodeIfPresent([AccountPlace].self, forKey: .places) ?? []
         window = try c.decodeIfPresent(WindowPlace.self, forKey: .window)
         panels = try c.decodeIfPresent(PanelsPlace.self, forKey: .panels)

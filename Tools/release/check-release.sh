@@ -14,6 +14,8 @@ runtime, entitlements, no baked-in OAuth client, no developer switches or sample
 arguments anywhere in the app, notarization ticket and Gatekeeper (docs/release/RELEASE-HOWTO.md).
 An entitlement that needs a provisioning profile (iCloud, push, keychain groups) must be granted
 by the profile embedded in the app, for the app's team, App ID and signing certificate.
+Updates: an app carries an update feed and key (SUFeedURL, SUPublicEDKey) only as a Developer ID
+build without iCloud entitlements, and Sparkle's XPC services are never in the bundle.
 Read-only: it never signs, submits or changes what it checks.
 A .dmg is attached read-only and hidden from Finder, checked (with the app inside it), then
 detached. A release-info.txt (written by make-dmg.sh) is checked for the marker, and so are the
@@ -34,6 +36,9 @@ release-notes.md beside it.
                          it built)
   --allow-dirty          accept an OHGitCommit ending in +dirty (rehearsals only, never a build
                          you hand out)
+  --updates <feed|off>   Info.plist SUFeedURL must equal this feed, or with off carry no feed or
+                         key (make-dmg.sh passes it)
+  --update-key <key>     Info.plist SUPublicEDKey must equal this public key
   --github-release <tag> the published GitHub release must be marked as a pre-release and say
                          "(early development)" in its title (asks GitHub through the gh
                          command)
@@ -60,6 +65,7 @@ OPENHUMAN_OAUTH_CLIENT_JSON OPENHUMAN_INSECURE_FILE_TOKENS OPENHUMAN_STORE_POLL_
 fake-gmail-access-token OpenHumanMail-FakeGmail-"
 
 PRE=0; UNSIGNED=0; EXPECT_ICLOUD=0; TEAM=""; EXPECT_COMMIT=""; ALLOW_DIRTY=0; TARGETS=(); RELEASES=()
+EXPECT_FEED=""; EXPECT_KEY=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --pre-notarization) PRE=1; shift ;;
@@ -68,6 +74,10 @@ while [[ $# -gt 0 ]]; do
         --team) TEAM="${2:-}"; shift 2 ;;
         --expect-commit) EXPECT_COMMIT="${2:-}"; shift 2 ;;
         --allow-dirty) ALLOW_DIRTY=1; shift ;;
+        --updates) [[ -n "${2:-}" ]] || { echo "check-release: --updates needs a feed address or off" >&2; exit 2; }
+                   EXPECT_FEED="$2"; shift 2 ;;
+        --update-key) [[ -n "${2:-}" ]] || { echo "check-release: --update-key needs a public key" >&2; exit 2; }
+                      EXPECT_KEY="$2"; shift 2 ;;
         --github-release) [[ -n "${2:-}" ]] || { echo "check-release: --github-release needs a tag" >&2; exit 2; }
                           RELEASES+=("$2"); shift 2 ;;
         -h|--help) usage; exit 0 ;;
@@ -80,6 +90,12 @@ done
 [[ "$UNSIGNED" == 0 || -z "$TEAM" ]] || { echo "check-release: --unsigned builds carry no team, so --team does not apply" >&2; exit 2; }
 [[ "$UNSIGNED" == 0 || "$EXPECT_ICLOUD" == 0 ]] \
     || { echo "check-release: --unsigned builds carry no iCloud entitlements, so --icloud does not apply" >&2; exit 2; }
+[[ -z "$EXPECT_KEY" || ( -n "$EXPECT_FEED" && "$EXPECT_FEED" != off ) ]] \
+    || { echo "check-release: --update-key goes with --updates <feed>" >&2; exit 2; }
+if [[ -n "$EXPECT_FEED" && "$EXPECT_FEED" != off ]]; then
+    [[ "$UNSIGNED" == 0 ]] || { echo "check-release: --unsigned builds never update, so --updates <feed> does not apply" >&2; exit 2; }
+    [[ "$EXPECT_ICLOUD" == 0 ]] || { echo "check-release: updating builds are made without iCloud, so --updates <feed> and --icloud do not go together" >&2; exit 2; }
+fi
 
 FAILS=0; WARNS=0; MOUNTS=""
 ok()   { printf '  ok    %s\n' "$*"; }
@@ -209,6 +225,59 @@ check_developer_names() {
     rm -f "$patterns" "$found"
 }
 
+is_public_key() {
+    python3 -I -c 'import base64, sys; sys.exit(0 if len(base64.b64decode(sys.argv[1], validate=True)) == 32 else 1)' "$1" \
+        >/dev/null 2>&1
+}
+
+# Why: Mail is not sandboxed, so Sparkle installs through Autoupdate. Its XPC services would only add sandboxed helpers
+# with entitlements of their own, and a feed in any build but a Developer ID one would offer updates nobody can verify
+check_updates() {
+    local app="$1" plist="$1/Contents/Info.plist" sparkle="$1/Contents/Frameworks/Sparkle.framework" feed key flag services
+    if [[ -d "$sparkle" ]]; then
+        services="$(find "$sparkle" -name '*.xpc' -prune -print 2>/dev/null | sed "s|^$app/||")"
+        if [[ -n "$services" ]]; then
+            bad "Sparkle's XPC services are in the app ($(printf '%s ' $services)). Mail is not sandboxed and never uses them; make-dmg.sh leaves them out"
+        else
+            ok "Sparkle.framework without XPC services"
+        fi
+    fi
+    for flag in SUEnableDownloaderService SUEnableInstallerLauncherService; do
+        case "$(plist_value "$plist" "$flag")" in
+            true|YES|1) bad "Info.plist turns on $flag, which needs the XPC services a non-sandboxed app leaves out" ;;
+        esac
+    done
+    feed="$(plist_value "$plist" SUFeedURL)"; key="$(plist_value "$plist" SUPublicEDKey)"
+    if [[ -z "$feed" && -z "$key" ]]; then
+        if [[ -n "$EXPECT_FEED" && "$EXPECT_FEED" != off ]]; then bad "built with --enable-updates, but Info.plist has no SUFeedURL or SUPublicEDKey"
+        else ok "updates off: no SUFeedURL or SUPublicEDKey, so the app never checks for updates"; fi
+        return 0
+    fi
+    if [[ "$EXPECT_FEED" == off ]]; then
+        bad "Info.plist carries an update feed or key (SUFeedURL '$feed'), but this build was made without --enable-updates"
+    elif [[ -n "$EXPECT_FEED" && "$feed" != "$EXPECT_FEED" ]]; then
+        bad "Info.plist SUFeedURL is '$feed', expected $EXPECT_FEED"
+    fi
+    if [[ -n "$EXPECT_KEY" && "$key" != "$EXPECT_KEY" ]]; then bad "Info.plist SUPublicEDKey is '$key', expected $EXPECT_KEY"; fi
+    [[ -d "$sparkle" ]] || bad "Info.plist names an update feed, but the app has no Sparkle.framework"
+    if [[ -z "$key" ]] || ! is_public_key "$key"; then bad "Info.plist SUPublicEDKey is '${key:-empty}', not a base64 EdDSA public key of 32 bytes"; fi
+    case "$feed" in
+        https://?*) ok "update feed $feed" ;;
+        http://127.0.0.1[:/]*|http://localhost[:/]*)
+            if [[ "$PRE" == 1 && "$UNSIGNED" == 0 ]]; then warn "update feed $feed is on this Mac: a staged update test only, never hand this build out"
+            else bad "update feed $feed is on this Mac; a notarized build must read an https:// feed"; fi ;;
+        "") bad "Info.plist has SUPublicEDKey but no SUFeedURL" ;;
+        *) bad "update feed '$feed' is not https://" ;;
+    esac
+    if [[ "$UNSIGNED" == 1 ]]; then bad "an unsigned build carries an update feed; only Developer ID builds may update"; fi
+    for flag in $ICLOUD_ENTITLEMENTS; do
+        if has_word "$APP_KEYS" "$flag"; then
+            bad "the app updates itself and is signed with $flag. Updating builds are made with --no-icloud, so every update keeps the entitlements of the first installed build"
+            break
+        fi
+    done
+}
+
 FIRST_TEAM=""
 check_signature() {
     local path="$1" label="$2" needs_runtime="$3" out authority team
@@ -280,6 +349,7 @@ check_app() {
     check_entitlements_source
     check_signed_entitlements "$app" "app" 1
     check_profile "$app"
+    check_updates "$app"
 
     nested="$(mktemp)"
     find "$app/Contents" -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) ! -path "$exe" >"$nested" 2>/dev/null || true
@@ -356,6 +426,10 @@ check_release_info() {
     channel="$(sed -n 's/^channel=//p' "$info" | head -1)"
     prerelease="$(sed -n 's/^prerelease=//p' "$info" | head -1)"
     label="$(sed -n 's/^label=//p' "$info" | head -1)"
+    if [[ "$(sed -n 's/^updates=//p' "$info" | head -1)" == yes ]]; then
+        if grep -qx 'signing=developer-id' "$info" && grep -qx 'icloud=no' "$info"; then ok "updates on: a Developer ID build without iCloud"
+        else bad "updates=yes needs signing=developer-id and icloud=no"; fi
+    fi
     if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then ok "version $version"
     else bad "version is '${version:-missing}', not three numbers such as 0.1.0"; fi
     if [[ "$channel" == "$RELEASE_CHANNEL" ]]; then ok "channel $channel"

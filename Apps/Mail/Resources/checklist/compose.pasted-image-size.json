@@ -1,0 +1,15 @@
+{
+  "id": "compose.pasted-image-size",
+  "area": "Composer",
+  "title": "A pasted screenshot starts at a sensible size and can be resized",
+  "steps": [
+    "Launch Mail with -UseFakeGmail, reply to a conversation, type a line and paste a screenshot taken with ⌃⇧⌘4",
+    "Click the picture, choose Small, drag a corner handle, then press ⌘Z twice and ⌘⇧Z",
+    "Select the picture with ⇧←, press Tab, pick Large with the arrow keys and Space, then press Escape",
+    "Set Settings › General › Writing › Pasted image size to Small, paste again, then send and open the reply"
+  ],
+  "deepLink": null,
+  "expected": "The paste is at most about 60 percent of the column, never larger than the picture, and the text stays put. The sizes and corner handles show over the picture in light and dark. Each change is one Undo. Tab reaches the sizes and Escape goes back. The new default applies to the next paste. The sent copy matches the draft.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

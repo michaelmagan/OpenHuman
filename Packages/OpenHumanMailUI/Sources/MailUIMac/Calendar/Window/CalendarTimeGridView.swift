@@ -10,10 +10,13 @@ struct CalendarTimeGridView: View {
     @Bindable var model: CalendarWindowModel
     @Environment(\.theme) private var theme
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var drag: GridDrag?
     @State private var userScrolled = false
+    @State private var hoveredBlock: String?
 
     static let hourHeight: CGFloat = 44
+    static let blockRadius: CGFloat = 5
     static let axisWidth: CGFloat = 56
     static let laneHeight: CGFloat = 20
     static let scrollAnchor = "calendar.window.scroll"
@@ -24,6 +27,8 @@ struct CalendarTimeGridView: View {
             case create(dayIndex: Int, from: Double)
             case move(blockID: String)
             case resize(blockID: String)
+            case movePending
+            case resizePending
         }
 
         var kind: Kind
@@ -50,7 +55,7 @@ struct CalendarTimeGridView: View {
                                 hourLines(width: geometry.size.width, grid: grid, columnWidth: columnWidth)
                                 emptySlots(grid, columnWidth: columnWidth)
                                 if let placement = model.pendingPlacement {
-                                    pendingSlot(placement, columnWidth: columnWidth)
+                                    pendingSlot(placement, grid: grid, columnWidth: columnWidth)
                                 }
                                 ForEach(grid.blocks) { block in
                                     eventBlock(block, grid: grid, columnWidth: columnWidth)
@@ -132,19 +137,31 @@ struct CalendarTimeGridView: View {
                         let colors = CalendarPalette.block(bar.colorIndex, state: selected ? .selected : .normal,
                                                            tokens: theme.tokens)
                         let span = CGFloat(bar.lastDay - bar.firstDay + 1)
+                        let hovered = hoveredBlock == "allDay.\(bar.id)"
                         Button { model.openEvent(bar.event) } label: {
                             Text(bar.event.title).themeFont(theme.typeCaption).fontWeight(.semibold)
                                 .foregroundStyle(colors.text.color)
                                 .lineLimit(1).truncationMode(.tail)
                                 .padding(.horizontal, theme.space2)
                                 .frame(width: max(span * columnWidth - 4, 8), height: Self.laneHeight - 2, alignment: .leading)
-                                .background(RoundedRectangle(cornerRadius: theme.radiusSM).fill(colors.fill.color))
+                                .background(RoundedRectangle(cornerRadius: Self.blockRadius, style: .continuous)
+                                    .fill(colors.fill.color))
+                                .overlay {
+                                    if hovered, !selected {
+                                        RoundedRectangle(cornerRadius: Self.blockRadius, style: .continuous)
+                                            .fill(theme.textPrimary.color.opacity(Self.hoverOpacity))
+                                            .allowsHitTesting(false)
+                                    }
+                                }
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .onHover { inside in hover("allDay.\(bar.id)", inside) }
+                        .calendarPopoverAnchor(!bar.event.id.isEmpty && model.card?.event.id == bar.event.id)
                         .offset(x: CGFloat(bar.firstDay) * columnWidth + 2, y: CGFloat(bar.lane) * Self.laneHeight + 1)
                         .help(bar.event.title)
                         .accessibilityLabel("\(bar.event.title), all day")
+                        .accessibilityAddTraits(selected ? .isSelected : [])
                     }
                 }
             }
@@ -245,29 +262,104 @@ struct CalendarTimeGridView: View {
         if let drag, case .create(let index, let from) = drag.kind, abs(drag.to - from) * Double(height) > 4 {
             let top = CGFloat(min(from, drag.to)) * height
             let span = max(CGFloat(abs(drag.to - from)) * height, 12)
-            RoundedRectangle(cornerRadius: 4)
+            RoundedRectangle(cornerRadius: Self.blockRadius, style: .continuous)
                 .fill(theme.accentSubtle.color)
-                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(theme.accentFill.color, lineWidth: 1.5))
+                .overlay(RoundedRectangle(cornerRadius: Self.blockRadius, style: .continuous)
+                    .strokeBorder(theme.accentFill.color, lineWidth: 1.5))
                 .frame(width: columnWidth - 4, height: span)
                 .offset(x: CGFloat(index) * columnWidth + 2, y: top)
                 .allowsHitTesting(false)
         }
     }
 
-    private func pendingSlot(_ placement: (dayIndex: Int, top: Double, height: Double), columnWidth: CGFloat) -> some View {
+    static let pendingID = "pending"
+
+    // The event being prepared moves and stretches like a saved one; the editor beside it follows it
+    private func pendingSlot(_ placement: (dayIndex: Int, top: Double, height: Double), grid: CalendarTimeGrid,
+                             columnWidth: CGFloat) -> some View {
         let title = model.sidebar.draft?.title ?? ""
+        let movable = model.sidebar.draft?.isAllDay == false
+        var x = CGFloat(placement.dayIndex) * columnWidth + 2
+        var y = CGFloat(placement.top) * height
+        var slotHeight = max(CGFloat(placement.height) * height - 1, 16)
+        if let drag {
+            switch drag.kind {
+            case .movePending:
+                x += CGFloat(Self.dayIndex(placement.dayIndex, shiftedBy: drag.translation.width, columnWidth: columnWidth,
+                                           days: grid.days.count) - placement.dayIndex) * columnWidth
+                y += Self.snapped(drag.translation.height)
+            case .resizePending:
+                slotHeight = max(slotHeight + Self.snapped(drag.translation.height), Self.hourHeight / 4)
+            default:
+                break
+            }
+        }
+        let shape = RoundedRectangle(cornerRadius: Self.blockRadius, style: .continuous)
+        let dragging = drag?.kind == .movePending || drag?.kind == .resizePending
         return Text(title.isEmpty ? String(localized: "New event") : title)
             .themeFont(theme.typeCaption).fontWeight(.medium).foregroundStyle(theme.textPrimary.color)
             .lineLimit(2)
             .padding(theme.space1)
-            .frame(width: columnWidth - 4, height: max(CGFloat(placement.height) * height - 1, 16), alignment: .topLeading)
-            .background(RoundedRectangle(cornerRadius: 4).fill(theme.accentSubtle.color))
-            .overlay(RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(theme.accentFill.color, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])))
-            .offset(x: CGFloat(placement.dayIndex) * columnWidth + 2, y: CGFloat(placement.top) * height)
-            .allowsHitTesting(false)
+            .frame(width: columnWidth - 4, height: slotHeight, alignment: .topLeading)
+            .background(shape.fill(theme.accentSubtle.color))
+            .overlay(shape.strokeBorder(theme.accentFill.color, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])))
+            .contentShape(shape)
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("The event you're preparing")
             .accessibilityIdentifier("calendar.window.pendingSlot")
+            .overlay(alignment: .bottom) {
+                if movable {
+                    resizeHandle(.resizePending, label: "Change when the event you're preparing ends",
+                                 shown: hoveredBlock == Self.pendingID && slotHeight >= 24) { dy in
+                        let calendar = CalendarDateMentions.calendar(model.timeZone)
+                        let fraction = placement.top + placement.height + Double(dy / height)
+                        let end = CalendarDragMath.time(atFraction: fraction, on: grid.days[placement.dayIndex], calendar: calendar)
+                        settle { model.resizePending(to: end) }
+                    }
+                }
+            }
+            .onHover { inside in hover(Self.pendingID, inside) }
+            .calendarPopoverAnchor(model.showsPendingCard)
+            .gesture(pendingMoveGesture(placement, grid: grid, columnWidth: columnWidth, enabled: movable))
+            .offset(x: x, y: y)
+            .transaction { transaction in if drag != nil { transaction.animation = nil } }
+            .zIndex(dragging ? 1 : 0)
+    }
+
+    // A click without a drag keeps the editor open; a drag of 4 points or more moves the event by quarter hours,
+    // across days too, and keeps its length
+    private func pendingMoveGesture(_ placement: (dayIndex: Int, top: Double, height: Double), grid: CalendarTimeGrid,
+                                    columnWidth: CGFloat, enabled: Bool) -> some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.gridSpace))
+            .onChanged { value in
+                guard enabled else { return }
+                drag = GridDrag(kind: .movePending, translation: value.translation)
+            }
+            .onEnded { value in
+                guard enabled else {
+                    drag = nil
+                    return
+                }
+                let calendar = CalendarDateMentions.calendar(model.timeZone)
+                let dayIndex = Self.dayIndex(placement.dayIndex, shiftedBy: value.translation.width, columnWidth: columnWidth,
+                                             days: grid.days.count)
+                let fraction = placement.top + Double(value.translation.height / height)
+                let start = CalendarDragMath.time(atFraction: fraction, on: grid.days[dayIndex], calendar: calendar)
+                settle { model.movePending(to: start) }
+            }
+    }
+
+    // The block lands where it was dropped and the editor moves with it, without animation when motion is reduced
+    private func settle(_ change: () -> Void) {
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
+            drag = nil
+            change()
+        }
+    }
+
+    static func dayIndex(_ index: Int, shiftedBy dx: CGFloat, columnWidth: CGFloat, days: Int) -> Int {
+        let shift = columnWidth > 0 ? Int((dx / columnWidth).rounded()) : 0
+        return min(max(index + shift, 0), max(days - 1, 0))
     }
 
     private func eventBlock(_ block: CalendarTimeGrid.Block, grid: CalendarTimeGrid, columnWidth: CGFloat) -> some View {
@@ -289,17 +381,36 @@ struct CalendarTimeGridView: View {
             }
         }
         let movable = block.event.isMovableByMe && !block.startsBefore && !block.endsAfter
+        let hovered = hoveredBlock == block.id
         return CalendarEventBlockView(block: block, isSelected: model.selectedEventID == block.event.id,
-                                      height: blockHeight, model: model)
+                                      isHovered: hovered, height: blockHeight, model: model)
             .frame(width: max(width, 8), height: blockHeight)
             .overlay(alignment: .bottom) {
-                if movable { resizeHandle(block, grid: grid) }
+                if movable {
+                    resizeHandle(.resize(blockID: block.id), label: "Change when \(block.event.title) ends",
+                                 shown: hovered && blockHeight >= 24) { dy in
+                        drag = nil
+                        let calendar = CalendarDateMentions.calendar(model.timeZone)
+                        let fraction = block.top + block.height + Double(dy / height)
+                        let end = CalendarDragMath.time(atFraction: fraction, on: grid.days[block.dayIndex], calendar: calendar)
+                        let resized = CalendarDragMath.resized(block.event, to: end)
+                        dragEnded(block.event, proposedStart: resized.start, proposedEnd: resized.end)
+                    }
+                }
             }
+            .onHover { inside in hover(block.id, inside) }
+            .calendarPopoverAnchor(!block.event.id.isEmpty && model.card?.event.id == block.event.id)
             .onTapGesture { model.openEvent(block.event) }
             .gesture(moveGesture(block, grid: grid, columnWidth: columnWidth, enabled: movable))
             .offset(x: x, y: y)
             .transaction { transaction in if drag != nil { transaction.animation = nil } }
             .zIndex(drag.map { $0.kind == .move(blockID: block.id) || $0.kind == .resize(blockID: block.id) } == true ? 1 : 0)
+    }
+
+    static let hoverOpacity = 0.07
+
+    private func hover(_ id: String, _ inside: Bool) {
+        if inside { hoveredBlock = id } else if hoveredBlock == id { hoveredBlock = nil }
     }
 
     static func snapped(_ dy: CGFloat) -> CGFloat {
@@ -330,22 +441,25 @@ struct CalendarTimeGridView: View {
             }
     }
 
-    private func resizeHandle(_ block: CalendarTimeGrid.Block, grid: CalendarTimeGrid) -> some View {
+    // The bottom edge drags the end; a grip shows there while the pointer is over the event
+    private func resizeHandle(_ kind: GridDrag.Kind, label: LocalizedStringKey, shown: Bool,
+                              ended: @escaping (CGFloat) -> Void) -> some View {
         Rectangle().fill(Color.clear)
             .frame(height: 6)
+            .overlay {
+                if shown {
+                    Capsule().fill(theme.textPrimary.color.opacity(0.35))
+                        .frame(width: 18, height: 3)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
             .contentShape(Rectangle())
             .onHover { inside in if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
             .highPriorityGesture(DragGesture(minimumDistance: 2, coordinateSpace: .named(Self.gridSpace))
-                .onChanged { value in drag = GridDrag(kind: .resize(blockID: block.id), translation: value.translation) }
-                .onEnded { value in
-                    drag = nil
-                    let calendar = CalendarDateMentions.calendar(model.timeZone)
-                    let fraction = block.top + block.height + Double(value.translation.height / height)
-                    let end = CalendarDragMath.time(atFraction: fraction, on: grid.days[block.dayIndex], calendar: calendar)
-                    let resized = CalendarDragMath.resized(block.event, to: end)
-                    dragEnded(block.event, proposedStart: resized.start, proposedEnd: resized.end)
-                })
-            .accessibilityLabel("Change when \(block.event.title) ends")
+                .onChanged { value in drag = GridDrag(kind: kind, translation: value.translation) }
+                .onEnded { value in ended(value.translation.height) })
+            .accessibilityLabel(label)
     }
 
     private func nowLine(_ now: CalendarTimeGrid.NowMark, columnWidth: CGFloat) -> some View {
@@ -364,6 +478,7 @@ struct CalendarTimeGridView: View {
 struct CalendarEventBlockView: View {
     let block: CalendarTimeGrid.Block
     let isSelected: Bool
+    var isHovered = false
     let height: CGFloat
     let model: CalendarWindowModel
     @Environment(\.theme) private var theme
@@ -373,10 +488,10 @@ struct CalendarEventBlockView: View {
         let event = block.event
         let state = CalendarPalette.state(isSelected: isSelected, isDeclined: block.isDeclined,
                                           needsAnswer: event.canRespond && event.myResponse == .needsAction,
-                                          isOutlined: block.isOutlined, isPast: block.isPast)
+                                          isTentative: block.isTentative, isPast: block.isPast)
         let colors = CalendarPalette.block(block.colorIndex, state: state, tokens: theme.tokens)
         let content = CalendarPalette.content(height: Double(height))
-        let shape = RoundedRectangle(cornerRadius: theme.radiusSM)
+        let shape = RoundedRectangle(cornerRadius: CalendarTimeGridView.blockRadius, style: .continuous)
         HStack(alignment: .top, spacing: 0) {
             Rectangle().fill(colors.bar.color).frame(width: 3)
             Group {
@@ -398,12 +513,22 @@ struct CalendarEventBlockView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(colors.fill.color)
+        .overlay {
+            if isHovered, !isSelected {
+                theme.textPrimary.color.opacity(CalendarTimeGridView.hoverOpacity).allowsHitTesting(false)
+            }
+        }
         .clipShape(shape)
         .overlay {
             if let border = colors.border {
                 shape.strokeBorder(border.color, style: StrokeStyle(lineWidth: 1, dash: colors.dashedBorder ? [3, 2] : []))
             }
         }
+        .overlay {
+            // A hairline of the window's colour keeps two touching events apart
+            shape.strokeBorder(theme.bgWindow.color.opacity(0.9), lineWidth: 0.5).allowsHitTesting(false)
+        }
+        .shadow(color: .black.opacity(isSelected ? 0.22 : 0), radius: isSelected ? 3 : 0, y: isSelected ? 1 : 0)
         .contentShape(Rectangle())
         .help(event.title + "\n" + model.timeText(event) + (event.location.map { "\n" + $0 } ?? "")
               + (event.account.map { "\n" + $0 } ?? ""))
@@ -438,7 +563,8 @@ struct CalendarEventBlockView: View {
 
     private func stacked(_ event: CalendarEvent, ink: ThemeColor, content: CalendarPalette.BlockContent) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            title(event, ink: ink).lineLimit(height >= 44 ? 2 : 1)
+            // A single word gets one line, so a narrow block ends it with an ellipsis rather than breaking it
+            title(event, ink: ink).lineLimit(height >= 44 && event.title.contains(where: \.isWhitespace) ? 2 : 1)
             Text(model.timeText(event)).themeFont(theme.typeCaption).fontWeight(.regular)
                 .foregroundStyle(ink.color).lineLimit(1)
             if content == .withPlace || content == .withAccount, let place = event.location {

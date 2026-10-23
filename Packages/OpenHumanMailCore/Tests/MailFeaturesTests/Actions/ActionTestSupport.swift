@@ -25,8 +25,10 @@ struct ActionFixture {
     let presenter = RecordingPresenter()
 
     init(corpus: FakeCorpus = .make(threadCount: 10, now: fixedNow), options: FakeMailStore.Options = .init(remoteAck: .immediate),
-         location: MailLocation? = .system(.inbox), flags: FeatureFlags = FeatureFlags(), presenter: Bool = true) {
+         location: MailLocation? = .system(.inbox), flags: FeatureFlags = FeatureFlags(), presenter: Bool = true,
+         platform: SystemPlatform? = nil) {
         env = AppEnvironment.fake(corpus: corpus, options: options, featureFlags: flags)
+        if let platform { env.installPlatform(platform) }
         store = env.commands as! FakeMailStore
         router = AppRouter(environment: env, location: location)
         if presenter { env.actions.presenter = self.presenter }

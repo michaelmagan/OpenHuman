@@ -28,11 +28,6 @@ struct RulesTab: View {
             SettingsErrorLine(text: ruleSet.errorMessage)
             SettingsFootnote("Rules as of version \(ruleSet.version).")
         }
-        .task {
-            await ruleSet.load()
-            takePendingDraft()
-        }
-        .onChange(of: ruleSet.pendingDraft) { _, _ in takePendingDraft() }
     }
 
     private func takePendingDraft() {
@@ -70,6 +65,11 @@ struct RulesTab: View {
                     .disabled(draft != nil)
                     .accessibilityIdentifier("settings.rules.add")
             }
+            .task {
+                await ruleSet.load()
+                takePendingDraft()
+            }
+            .onChange(of: ruleSet.pendingDraft) { _, _ in takePendingDraft() }
         }
     }
 
@@ -257,7 +257,7 @@ struct RulesTab: View {
             VStack(alignment: .leading, spacing: theme.space3) {
                 ForEach(Array(current.fields.enumerated()), id: \.element.id) { index, field in
                     VStack(alignment: .leading, spacing: theme.space1) {
-                        Text(field.title).themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
+                        Text(field.title).font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
                         TextField(field.title, text: Binding(get: { paramsDraft?.fields[ruleSafe: index]?.text ?? "" },
                                                              set: { paramsDraft?.fields[index].text = $0 }), axis: .vertical)
                             .settingsTextField()

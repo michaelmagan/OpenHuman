@@ -8,6 +8,7 @@ final class RecordingCommands: MailCommanding {
     let store: FakeMailStore
     private let log = Mutex<[String]>([])
     private let scheduleHold = Mutex<Checkpoint?>(nil)
+    private let createHold = Mutex<Checkpoint?>(nil)
     private let discardFailure = Mutex<MailPortError?>(nil)
     private let applied = Mutex<[MailCommand]>([])
 
@@ -18,6 +19,7 @@ final class RecordingCommands: MailCommanding {
     private func record(_ name: String) { log.withLock { $0.append(name) } }
 
     func holdSchedules(at checkpoint: Checkpoint) { scheduleHold.withLock { $0 = checkpoint } }
+    func holdCreates(at checkpoint: Checkpoint) { createHold.withLock { $0 = checkpoint } }
     func failDiscards(with error: MailPortError) { discardFailure.withLock { $0 = error } }
 
     func apply(_ command: MailCommand) async throws -> UndoToken {
@@ -27,7 +29,9 @@ final class RecordingCommands: MailCommanding {
     }
     func undo(_ token: UndoToken) async throws -> UndoToken? { record("undo"); return try await store.undo(token) }
     func createDraft(_ input: DraftInput) async throws -> (key: DraftKey, version: Int) {
-        record("createDraft"); return try await store.createDraft(input)
+        record("createDraft")
+        if let hold = createHold.withLock({ $0 }) { await hold.pass() }
+        return try await store.createDraft(input)
     }
     func updateDraft(_ key: DraftKey, _ fields: DraftFields, expectedVersion: Int?) async throws -> Int {
         record("updateDraft"); return try await store.updateDraft(key, fields, expectedVersion: expectedVersion)

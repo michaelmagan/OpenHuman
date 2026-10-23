@@ -7,13 +7,20 @@ public struct CalendarInviteQuery: Sendable, Hashable {
     public var start: Date
     public var end: Date
     public var organizer: String?
+    public var recurrenceID: Date?
+    public var repeats: Bool
+    public var matchesTitle: Bool
 
-    public init(uid: String, title: String, start: Date, end: Date, organizer: String? = nil) {
+    public init(uid: String, title: String, start: Date, end: Date, organizer: String? = nil, recurrenceID: Date? = nil,
+                repeats: Bool = false, matchesTitle: Bool = true) {
         self.uid = uid
         self.title = title
         self.start = start
         self.end = end
         self.organizer = organizer?.lowercased()
+        self.recurrenceID = recurrenceID
+        self.repeats = repeats
+        self.matchesTitle = matchesTitle
     }
 
     public static let startSlack: TimeInterval = 60
@@ -43,9 +50,39 @@ public struct CalendarInviteQuery: Sendable, Hashable {
         let byUID = timed.filter { uid($0) == self.uid }
         if byUID.count > 1 { return .ambiguous }
         if let only = byUID.first { return .found(only) }
+        guard matchesTitle else { return .missing }
         let alike = timed.filter(looksLike)
         if alike.count > 1 { return .ambiguous }
         if let only = alike.first { return .found(only) }
+        return .missing
+    }
+
+    public enum Role: Sendable, Hashable {
+        case single
+        case series
+        case occurrence(originalStart: Date?)
+    }
+
+    // Why: an event moved after the invitation was sent no longer starts at its DTSTART, but its iCalUID still names
+    // it: a single event, the series itself, or the moved occurrence by the start it had in the series
+    public func pickMoved<Candidate>(_ candidates: [Candidate], wholeSeries: Bool, uid: (Candidate) -> String?,
+                                     role: (Candidate) -> Role) -> Pick<Candidate> {
+        let same = candidates.filter { uid($0) == self.uid }
+        let matches: [Candidate]
+        if wholeSeries {
+            matches = same.filter { role($0) == .series }
+        } else if let recurrenceID {
+            matches = same.filter {
+                guard case .occurrence(let original?) = role($0) else { return false }
+                return abs(original.timeIntervalSince(recurrenceID)) <= Self.startSlack
+            }
+        } else if repeats {
+            return .missing
+        } else {
+            matches = same.filter { role($0) == .single }
+        }
+        if matches.count > 1 { return .ambiguous }
+        if let only = matches.first { return .found(only) }
         return .missing
     }
 
@@ -63,9 +100,12 @@ extension CalendarProviding {
 extension CalendarEvent {
     public var seriesReference: CalendarEvent {
         guard let series = recurringEventID, !series.isEmpty else { return self }
-        return CalendarEvent(id: series, title: title, start: start, end: end, isAllDay: isAllDay, timeZone: timeZone,
-                             attendees: attendees, calendarName: calendarName, meetLink: meetLink,
-                             organizerIsMe: organizerIsMe, account: account, location: location, notes: notes,
-                             myResponse: myResponse, recurringEventID: nil)
+        var reference = CalendarEvent(id: series, title: title, start: start, end: end, isAllDay: isAllDay,
+                                      timeZone: timeZone, attendees: attendees, calendarName: calendarName,
+                                      meetLink: meetLink, organizerIsMe: organizerIsMe, account: account,
+                                      location: location, notes: notes, myResponse: myResponse, recurringEventID: nil,
+                                      extras: extras)
+        reference.respondsAs = respondsAs
+        return reference
     }
 }

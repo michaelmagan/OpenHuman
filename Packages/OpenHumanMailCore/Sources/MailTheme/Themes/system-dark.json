@@ -125,7 +125,7 @@
       "bg.sidebar": "{side.40}",
       "bg.elevated": "{elev.44}",
       "bg.sunken": "{sunk.24}",
-      "bg.canvas": "{sunk.24}",
+      "bg.canvas": "{win.30}",
       "bg.card": "{side.40}",
       "bg.row.hover": "{hov.35}",
       "bg.row.selected": "{sel.63}",

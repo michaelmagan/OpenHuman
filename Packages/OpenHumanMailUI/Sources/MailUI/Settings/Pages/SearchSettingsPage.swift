@@ -85,9 +85,9 @@ struct SearchWeightRow: View {
                     .accessibilityLabel(field.title)
                     .accessibilityValue(text)
                 Text(text)
-                    .themeFont(theme.typeMeta)
+                    .font(.system(size: NativeMetrics.Text.secondary))
                     .monospacedDigit()
-                    .foregroundStyle(theme.textSecondary.color)
+                    .foregroundStyle(.secondary)
                     .frame(minWidth: 56, alignment: .trailing)
                     .accessibilityHidden(true)
                 Button("Reset") { model.resetWeight(field) }

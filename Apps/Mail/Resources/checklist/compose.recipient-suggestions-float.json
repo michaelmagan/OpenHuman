@@ -1,0 +1,14 @@
+{
+  "id": "compose.recipient-suggestions-float",
+  "area": "Composer",
+  "title": "Recipient suggestions float over the composer and nothing under them moves",
+  "steps": [
+    "Launch with -UseFakeData and press c; in To type the first letters of a contact",
+    "Press Down twice, then Escape; type one more letter and press Return",
+    "Open a conversation, press r and do the same in the reply's To and Cc fields"
+  ],
+  "deepLink": null,
+  "expected": "The list floats under the chips and covers the From and Subject rows; nothing in the card moves or resizes. The highlighted row is a quiet grey, like the calendar's guest list, not a strong blue. The arrows move the highlight, Escape closes only the list, Return adds the highlighted person. The reply shows the same floating list.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

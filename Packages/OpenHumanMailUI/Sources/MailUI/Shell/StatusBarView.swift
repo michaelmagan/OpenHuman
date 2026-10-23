@@ -13,27 +13,27 @@ public struct StatusBarView: View {
     }
 
     public var body: some View {
-        HStack(spacing: theme.space5) {
+        HStack(spacing: NativeMetrics.HintLine.itemGap) {
             if let sending = model.sendingLine { sendingButton(sending) }
             if let focus = model.focusLine {
                 Text(focus)
-                    .font(theme.typeMeta.swiftUIFont)
-                    .foregroundStyle(theme.textTertiary.color)
+                    .font(Self.font)
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .layoutPriority(-1)
             }
             if let smart = model.smartSearchLine {
                 Text(smart)
-                    .font(theme.typeCaption.swiftUIFont)
-                    .foregroundStyle(theme.textSecondary.color)
+                    .font(Self.font)
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .layoutPriority(-1)
                     .help("Smart search is indexing your mail on this Mac. Nothing leaves this Mac.")
             }
             if let preparing = model.preparingLine {
                 Text(preparing)
-                    .font(theme.typeCaption.swiftUIFont)
-                    .foregroundStyle(theme.textTertiary.color)
+                    .font(Self.font)
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .layoutPriority(-1)
                     .help("Mail is preparing replies and summaries on this Mac. Nothing leaves this Mac.")
@@ -41,8 +41,8 @@ public struct StatusBarView: View {
             }
             if let pending = model.pendingLine {
                 Text(pending)
-                    .font(theme.typeMeta.swiftUIFont)
-                    .foregroundStyle(theme.textTertiary.color)
+                    .font(Self.font)
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .layoutPriority(-1)
                     .help(model.pendingHelp)
@@ -64,14 +64,14 @@ public struct StatusBarView: View {
         Button {
             model.showSending?()
         } label: {
-            HStack(spacing: theme.space2) {
+            HStack(spacing: NativeMetrics.HintLine.keyGap) {
                 Image(systemName: "paperplane")
-                    .font(.system(size: ShellMetrics.statusIconSize, weight: .regular))
+                    .font(Self.font)
                 Text(text)
-                    .font(theme.typeMeta.swiftUIFont)
+                    .font(Self.font)
                     .lineLimit(1)
             }
-            .foregroundStyle(theme.textSecondary.color)
+            .foregroundStyle(.secondary)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -81,27 +81,29 @@ public struct StatusBarView: View {
         .accessibilityIdentifier("status.sending")
     }
 
-    private var syncColor: ThemeColor {
-        guard let state = model.shownSync?.state else { return theme.textTertiary }
+    static let font = Font.system(size: NativeMetrics.HintLine.textSize)
+
+    private var syncColor: AnyShapeStyle {
+        guard let state = model.shownSync?.state else { return AnyShapeStyle(.tertiary) }
         switch state {
-        case .online: return theme.textTertiary
-        case .offline, .rateLimited, .syncFailing: return theme.textWarning
-        case .needsReauth: return theme.textDanger
+        case .online: return AnyShapeStyle(.tertiary)
+        case .offline, .rateLimited, .syncFailing: return AnyShapeStyle(Color.orange)
+        case .needsReauth: return AnyShapeStyle(Color.red)
         }
     }
 }
 
 struct SyncLine: View {
     let text: String
-    let color: ThemeColor
+    let color: AnyShapeStyle
     @Environment(\.theme) private var theme
     @State private var shown: String?
     @State private var pollingSince: Date?
 
     var body: some View {
         Text(shown ?? text)
-            .font(theme.typeMeta.swiftUIFont)
-            .foregroundStyle(color.color)
+            .font(StatusBarView.font)
+            .foregroundStyle(color)
             .lineLimit(1)
             .task(id: text) { await follow(text) }
     }

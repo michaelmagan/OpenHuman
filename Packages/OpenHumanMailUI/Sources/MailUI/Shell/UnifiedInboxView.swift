@@ -1,5 +1,6 @@
 import MailFeatures
 import MailModel
+import MailTheme
 import SwiftUI
 
 public struct UnifiedInboxView: View {
@@ -18,29 +19,32 @@ public struct UnifiedInboxView: View {
         VStack(spacing: 0) {
             searchBar
             Divider().overlay(theme.borderHairline.color)
+            // Keys belong to the list: letters in the search field above would reach the column first.
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .focusable()
+                .focused($focused)
+                .focusEffectDisabled()
+                .onKeyPress(.escape) { dismiss(); return .handled }
+                .onKeyPress(.return, phases: .down) { _ in model.openCursor(); return .handled }
+                .onKeyPress(.downArrow, phases: [.down, .repeat]) { _ in model.moveCursor(by: 1); return .handled }
+                .onKeyPress(.upArrow, phases: [.down, .repeat]) { _ in model.moveCursor(by: -1); return .handled }
+                .onKeyPress(characters: .letters, phases: [.down, .repeat]) { press in
+                    guard press.modifiers.isEmpty else { return .ignored }
+                    switch press.characters {
+                    case "j": model.moveCursor(by: 1)
+                    case "k": model.moveCursor(by: -1)
+                    case "e": model.markDoneAtCursor()
+                    case "l": model.labelAtCursor()
+                    default: return .ignored
+                    }
+                    return .handled
+                }
+                .onKeyPress(KeyEquivalent("/")) { searchFocused = true; return .handled }
         }
+        .onChange(of: model.searchFocusRequest) { searchFocused = true }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(theme.bgWindow.color)
-        .focusable()
-        .focused($focused)
-        .focusEffectDisabled()
-        .onKeyPress(.escape) { dismiss(); return .handled }
-        .onKeyPress(.return, phases: .down) { _ in model.openCursor(); return .handled }
-        .onKeyPress(.downArrow, phases: [.down, .repeat]) { _ in model.moveCursor(by: 1); return .handled }
-        .onKeyPress(.upArrow, phases: [.down, .repeat]) { _ in model.moveCursor(by: -1); return .handled }
-        .onKeyPress(characters: .letters, phases: [.down, .repeat]) { press in
-            guard press.modifiers.isEmpty else { return .ignored }
-            switch press.characters {
-            case "j": model.moveCursor(by: 1)
-            case "k": model.moveCursor(by: -1)
-            case "e": model.markDoneAtCursor()
-            case "l": model.labelAtCursor()
-            case "/": searchFocused = true
-            default: return .ignored
-            }
-            return .handled
-        }
         .onAppear { focused = true }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("All Inboxes")
@@ -112,12 +116,7 @@ public struct UnifiedInboxView: View {
             model.openCursor()
         } label: {
             HStack(spacing: theme.space3) {
-                Text(row.account)
-                    .font(theme.typeCaption.swiftUIFont)
-                    .foregroundStyle(theme.textSecondary.color)
-                    .lineLimit(1)
-                    .padding(.horizontal, theme.space2)
-                    .background(Capsule().fill(theme.borderHairline.color))
+                accountTag(row.account)
                     .frame(width: 120, alignment: .leading)
                 Text(row.thread.participantsDisplay)
                     .font(row.thread.isUnread ? theme.typeBodyStrong.swiftUIFont : theme.typeBody.swiftUIFont)
@@ -130,17 +129,39 @@ public struct UnifiedInboxView: View {
                     .lineLimit(1)
                 Spacer(minLength: theme.space3)
                 Text(row.thread.lastMessageAt, format: .dateTime.month(.abbreviated).day())
-                    .font(theme.typeCaption.swiftUIFont)
-                    .foregroundStyle(theme.textTertiary.color)
+                    .font(.system(size: NativeMetrics.List.dateTextSize).monospacedDigit())
+                    .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, OverlayMetrics.rowIconX)
             .frame(height: theme.component.picker.rowHeight)
-            .background(CursorRowBackground(isCursor: isCursor))
+            .background { if isCursor { UnifiedInboxSelectionPlate() } }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(row.account): \(row.thread.participantsDisplay), \(row.thread.subject)")
         .accessibilityHint("Return opens it in its account")
         .accessibilityAddTraits(isCursor ? .isSelected : [])
+    }
+
+    private func accountTag(_ account: String) -> some View {
+        let ink = theme.tokens.labelChip(LabelChipHue.forName(account)).text.color
+        return NativeTagCapsule(account, tint: ink, text: ink)
+    }
+}
+
+/// The cursor row's plate, drawn like the thread list's selection: accent while the window is active, grey otherwise.
+private struct UnifiedInboxSelectionPlate: View {
+    #if os(macOS)
+    @Environment(\.appearsActive) private var appearsActive
+    #else
+    private let appearsActive = true
+    #endif
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: NativeMetrics.List.plateCornerRadius, style: .continuous)
+            .fill(appearsActive ? Color.accentColor.opacity(NativeMetrics.List.selectedAlpha)
+                                : Color.primary.opacity(NativeMetrics.List.inactiveSelectedAlpha))
+            .padding(.horizontal, NativeMetrics.List.plateInsetX)
+            .padding(.vertical, NativeMetrics.List.plateInsetY)
     }
 }

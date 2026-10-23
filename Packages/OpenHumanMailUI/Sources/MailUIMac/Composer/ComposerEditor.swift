@@ -44,6 +44,7 @@ public struct ComposerEditor: NSViewRepresentable {
     let onClose: () -> Void
     let textFlags: ComposeTextFlags
     let isPlainText: Bool
+    let pastedImageSize: InlineImageSize
 
     public init(session: ComposeSession, manager: ComposeManager, theme: ThemeTokens, focusOnAppear: Bool,
                 placeholder: String = "", growsWithContent: Bool = false, minHeight: CGFloat = 0,
@@ -58,7 +59,8 @@ public struct ComposerEditor: NSViewRepresentable {
         self.showsFormatBar = manager.showsFormatBar
         self.focusOnAppear = focusOnAppear
         let strip = manager.instantReply(for: session)
-        self.placeholder = strip?.placeholder ?? placeholder
+        // The tip names ⌘J, so it steps aside while the AI panel it opens is showing
+        self.placeholder = session.aiPanel != nil ? "" : strip?.placeholder ?? placeholder
         self.ghostText = strip?.ghostText
         self.spokenPlaceholder = strip?.accessibilityPlaceholder
         self.growsWithContent = growsWithContent
@@ -70,6 +72,7 @@ public struct ComposerEditor: NSViewRepresentable {
         flags.writingTools = manager.allowsWritingTools(in: session)
         self.textFlags = flags
         self.isPlainText = session.isPlainText
+        self.pastedImageSize = manager.textSettings.pastedImageSize
     }
 
     public static func placeholder(for mode: DraftMode) -> String {
@@ -87,6 +90,7 @@ public struct ComposerEditor: NSViewRepresentable {
         let text = ComposerTextView.make()
         text.configure(with: textFlags)
         text.isPlainTextMode = isPlainText
+        text.pastedImageSize = pastedImageSize
         text.bridge = AttributedBridge(theme: theme)
         text.placeholder = placeholder
         text.allowsWritingTools = allowsWritingTools
@@ -124,6 +128,7 @@ public struct ComposerEditor: NSViewRepresentable {
         if text.allowsWritingTools != allowsWritingTools { text.allowsWritingTools = allowsWritingTools }
         text.configure(with: textFlags)
         text.isPlainTextMode = isPlainText
+        text.pastedImageSize = pastedImageSize
         text.ghostText = ghostText
         text.spokenPlaceholder = spokenPlaceholder
         context.coordinator.growsWithContent = growsWithContent
@@ -333,6 +338,7 @@ public struct ComposerEditor: NSViewRepresentable {
         func updateFloatingBar(_ text: ComposerTextView) {
             let range = text.selectedRange()
             guard range.length > 0, !manager.showsFormatBar, session.snippetPicker == nil, !text.hasMarkedText(),
+                  text.selectedImageIndex == nil,
                   let window = text.window, window.firstResponder === text else {
                 hideFloatingBar()
                 return

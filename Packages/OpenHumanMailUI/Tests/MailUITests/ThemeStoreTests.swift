@@ -33,9 +33,9 @@ func temporaryThemeFolder() throws -> ThemeFolder {
     @Test func defaultsFollowTheSystemAppearance() {
         let store = ThemeStore(preferencesStore: MemoryThemePreferencesStore())
         #expect(store.preferences.mode == .system)
-        #expect(store.resolved.tokens == ThemeTokens.light && store.version == 0)
+        #expect(store.resolved.themeID == BuiltinThemeID.systemLight && store.resolved.accentID == "system" && store.version == 0)
         store.systemAppearance = .dark
-        #expect(store.resolved.themeID == BuiltinThemeID.dark && store.resolved.tokens == ThemeTokens.dark)
+        #expect(store.resolved.themeID == BuiltinThemeID.systemDark && store.resolved.appearance == .dark)
         #expect(store.version == 1)
         #expect(store.readerCSS.contains("color-scheme: dark;"))
         store.systemAppearance = .dark
@@ -51,13 +51,71 @@ func temporaryThemeFolder() throws -> ThemeFolder {
         store.preferences.density = .comfortable
         #expect(persisted.load()?.accentID == "iris")
         let again = ThemeStore(preferencesStore: persisted)
-        #expect(again.resolved.accentID == "iris" && again.resolved.rowHeight == 44)
+        #expect(again.resolved.accentID == "iris" && again.resolved.rowHeight == 48)
         again.resetPreferences()
-        #expect(again.resolved.accentID == "periwinkle" && persisted.load() == ThemePreferences())
+        #expect(again.resolved.accentID == "system" && persisted.load() == ThemePreferences())
+    }
+
+    @Test func savedLightAndDarkMoveToTheSystemThemesOnce() throws {
+        let legacy = #"{"mode":"system","lightThemeID":"openhuman.light","darkThemeID":"openhuman.midnight","accentID":"pine"}"#
+        let persisted = MemoryThemePreferencesStore(try JSONDecoder().decode(ThemePreferences.self, from: Data(legacy.utf8)))
+        let store = ThemeStore(preferencesStore: persisted)
+        #expect(store.preferences.lightThemeID == BuiltinThemeID.systemLight)
+        #expect(store.preferences.darkThemeID == BuiltinThemeID.midnight && store.preferences.accentID == "pine")
+        #expect(persisted.load() == store.preferences, "the move is saved right away")
+        store.preferences.lightThemeID = BuiltinThemeID.light
+        let again = ThemeStore(preferencesStore: persisted)
+        #expect(again.preferences.lightThemeID == BuiltinThemeID.light, "a later choice of Light is kept")
+        #expect(again.resolved.themeID == BuiltinThemeID.light)
+    }
+
+    @Test func currentPreferencesAreNotRewrittenOnLoad() {
+        final class CountingStore: ThemePreferencesStoring, @unchecked Sendable {
+            var saves = 0
+            let value: ThemePreferences
+            init(_ value: ThemePreferences) { self.value = value }
+            func load() -> ThemePreferences? { value }
+            func save(_ preferences: ThemePreferences) { saves += 1 }
+        }
+        let counting = CountingStore(ThemePreferences(lightThemeID: BuiltinThemeID.paper))
+        let store = ThemeStore(preferencesStore: counting)
+        #expect(store.preferences.lightThemeID == BuiltinThemeID.paper && counting.saves == 0)
+    }
+
+    @Test func theLiveAccentRecolorsTheSystemAccentOnly() {
+        let purple = LiveAccent(light: ThemeColor(hex: "#953D96")!, dark: ThemeColor(hex: "#A550A7")!)
+        let store = ThemeStore(preferencesStore: MemoryThemePreferencesStore())
+        let fixed = store.resolved.accentFill
+        store.liveAccent = purple
+        #expect(store.resolved.accentFill == ThemeColor(hex: "#953D96") && store.version == 1)
+        #expect(store.resolve(store.preferences, appearance: .dark).accentFill == ThemeColor(hex: "#A550A7"), "previews follow it")
+        store.preferences.accentID = "iris"
+        #expect(store.resolved.accentID == "iris" && store.resolved.accentRing == ThemeColor(hex: "#5B45E0"))
+        store.preferences.accentID = nil
+        store.liveAccent = nil
+        #expect(store.resolved.accentFill == fixed)
+    }
+
+    @Test func systemColorChangesAlwaysNotifyObservers() {
+        let purple = LiveAccent(light: ThemeColor(hex: "#953D96")!, dark: ThemeColor(hex: "#A550A7")!)
+        let store = ThemeStore(preferencesStore: MemoryThemePreferencesStore())
+        store.systemColorsDidChange(liveAccent: purple)
+        #expect(store.version == 1 && store.liveAccent == purple)
+        store.systemColorsDidChange(liveAccent: purple)
+        #expect(store.version == 2, "same accent: observers still refresh cached system colours")
+    }
+
+    @Test func nativeControlsAreTintedOnlyByAChosenAccent() {
+        let store = ThemeStore(preferencesStore: MemoryThemePreferencesStore())
+        #expect(store.resolved.usesSystemAccent && store.resolved.controlTint == nil)
+        store.preferences.accentID = "pine"
+        #expect(!store.resolved.usesSystemAccent && store.resolved.controlTint == store.resolved.accentFill.color)
+        store.preferences = ThemePreferences(lightThemeID: BuiltinThemeID.paper, accentID: "system")
+        #expect(store.resolved.controlTint == nil)
     }
 
     @Test func increaseContrastReResolves() {
-        let store = ThemeStore()
+        let store = ThemeStore(preferencesStore: MemoryThemePreferencesStore(ThemePreferences(lightThemeID: BuiltinThemeID.light)))
         store.increaseContrast = true
         #expect(store.resolved.borderHairline == ThemeTokens.light.borderControl)
     }
@@ -66,7 +124,7 @@ func temporaryThemeFolder() throws -> ThemeFolder {
         let store = ThemeStore()
         let candidate = store.resolve(ThemePreferences(darkThemeID: BuiltinThemeID.midnight, accentID: "pine"), appearance: .dark)
         #expect(candidate.tokens.bgWindow == ThemeTokens.midnight.bgWindow && candidate.accentID == "pine")
-        #expect(store.resolved.tokens == ThemeTokens.light && store.version == 0)
+        #expect(store.resolved.themeID == BuiltinThemeID.systemLight && store.version == 0)
     }
 
     @Test func observeFiresOnEveryChange() async throws {

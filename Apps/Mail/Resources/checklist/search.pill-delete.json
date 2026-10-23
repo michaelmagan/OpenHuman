@@ -1,0 +1,15 @@
+{
+  "id": "search.pill-delete",
+  "area": "Search",
+  "title": "Search pills select, delete and come back with Undo",
+  "steps": [
+    "Press /, type from:dana has:attachment and a space, so both become pills; press Backspace twice, then Command-Z",
+    "Press Left Arrow twice, then Right Arrow twice, then Forward Delete after selecting a pill",
+    "Hover a pill and click its x; click another pill and press Backspace; type a word, press Command-A, then Backspace",
+    "Type from:dana and a space, press Backspace once, then Escape"
+  ],
+  "deepLink": null,
+  "expected": "Backspace highlights the pill before the caret, then removes it; Command-Z restores it. Arrows walk across the pills and Forward Delete removes the highlighted one. Hovering shows an x that removes a pill; a clicked pill goes on Backspace. Command-A, Backspace clears all. Escape lets go of a highlighted pill and keeps it.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

@@ -135,6 +135,77 @@ private let zone = TimeZone(identifier: "America/Los_Angeles")!
         #expect(notInvited.requests.count == 1, "an answer Mail does not give is refused before any request")
     }
 
+    @Test func anAnswerAsAnAliasPassesOnlyWhenTheRequestNamesThatAddress() {
+        let alias = "robin@team.example"
+        var named = patch(Self.event + "?sendUpdates=all", answer("accepted", own: ["email": alias]))
+        #expect(guardFor().refusalReason(for: named) != nil, "without the header an alias entry is someone else's")
+        named.headers[CalendarGuardTransport.answerAsHeader] = alias
+        #expect(guardFor().refusalReason(for: named) == nil)
+        var other = patch(Self.event + "?sendUpdates=all", answer("accepted", own: ["email": "lee@example.org"]))
+        other.headers[CalendarGuardTransport.answerAsHeader] = alias
+        #expect(guardFor().refusalReason(for: other) != nil, "the header names one address, not any guest")
+        var both = patch(Self.event + "?sendUpdates=all",
+                         ["attendees": [["email": alias, "responseStatus": "accepted"],
+                                        ["email": "robin@example.com", "responseStatus": "accepted"]]])
+        both.headers[CalendarGuardTransport.answerAsHeader] = alias
+        #expect(guardFor().refusalReason(for: both) != nil, "never two own entries")
+        var shortened = answer("declined")
+        shortened["attendeesOmitted"] = true
+        #expect(guardFor().refusalReason(for: patch(Self.event + "?sendUpdates=all", shortened)) == nil)
+        shortened["attendeesOmitted"] = false
+        #expect(guardFor().refusalReason(for: patch(Self.event + "?sendUpdates=all", shortened)) != nil)
+    }
+
+    @Test func withoutAnOwnEntryTheClientAnswersAsTheAliasAndKeepsAShortenedListShort() async throws {
+        let alias = "robin@team.example"
+        let http = FakeHTTPTransport()
+        http.on("GET", Self.path) { _ in
+            FakeHTTPTransport.json(200, ["id": "ev1", "start": ["dateTime": "2026-10-13T15:00:00-07:00"],
+                                         "end": ["dateTime": "2026-10-13T15:30:00-07:00"], "attendeesOmitted": true,
+                                         "attendees": [Self.organizer, ["email": "Robin@Team.example",
+                                                                        "responseStatus": "needsAction"]]])
+        }
+        http.on("PATCH", Self.path) { request in
+            let body = (try? JSONSerialization.jsonObject(with: request.body ?? Data()) as? [String: Any]) ?? [:]
+            return FakeHTTPTransport.json(200, ["id": "ev1", "start": ["dateTime": "2026-10-13T15:00:00-07:00"],
+                                                "end": ["dateTime": "2026-10-13T15:30:00-07:00"],
+                                                "attendees": body["attendees"] ?? []])
+        }
+        let calendar = client(CalendarScopes.request.write, http)
+        await #expect(throws: GoogleCalendarError.badRequest(reason: "not_invited")) {
+            _ = try await calendar.respond(eventID: "ev1", response: "accepted", sendUpdates: .all)
+        }
+        #expect(!http.requests.contains { $0.method == "PATCH" }, "no own entry and no alias: nothing is answered")
+        let answered = try await calendar.respond(eventID: "ev1", response: "accepted", sendUpdates: .all, as: alias)
+        #expect(answered?.selfResponse == "accepted", "the answer is read from the alias's entry")
+        let sent = try #require(http.requests.last { $0.method == "PATCH" })
+        let body = try #require(try JSONSerialization.jsonObject(with: sent.body ?? Data()) as? [String: Any])
+        #expect(Set(body.keys) == ["attendees", "attendeesOmitted"] && body["attendeesOmitted"] as? Bool == true)
+        let attendees = try #require(body["attendees"] as? [[String: Any]])
+        #expect(NSDictionary(dictionary: attendees[0]).isEqual(to: Self.organizer))
+        #expect(attendees[1]["responseStatus"] as? String == "accepted" && attendees.count == 2)
+        #expect(sent.headers[CalendarGuardTransport.answerAsHeader] == nil, "the guard's header never reaches Google")
+    }
+
+    @Test func anOwnEntryWinsOverTheAlias() async throws {
+        let http = FakeHTTPTransport()
+        http.on("GET", Self.path) { _ in
+            FakeHTTPTransport.json(200, ["id": "ev1", "start": ["dateTime": "2026-10-13T15:00:00-07:00"],
+                                         "end": ["dateTime": "2026-10-13T15:30:00-07:00"],
+                                         "attendees": [["email": "robin@team.example", "responseStatus": "needsAction"],
+                                                       ["email": "robin@example.com", "self": true,
+                                                        "responseStatus": "needsAction"]]])
+        }
+        http.on("PATCH", Self.path) { _ in FakeHTTPTransport.json(200, ["id": "ev1"]) }
+        _ = try await client(CalendarScopes.request.write, http).respond(eventID: "ev1", response: "declined",
+                                                                          sendUpdates: .all, as: "robin@team.example")
+        let sent = try #require(http.requests.last { $0.method == "PATCH" })
+        let body = try #require(try JSONSerialization.jsonObject(with: sent.body ?? Data()) as? [String: Any])
+        let attendees = try #require(body["attendees"] as? [[String: Any]])
+        #expect(attendees[0]["responseStatus"] as? String == "needsAction", "the alias's entry is left alone")
+        #expect(attendees[1]["responseStatus"] as? String == "declined")
+    }
+
     @Test func listingReadsTheOwnAnswerThePlaceTheNotesAndTheSeries() async throws {
         let http = FakeHTTPTransport()
         http.on("GET", "/calendar/v3/calendars/robin@example.com/events") { _ in

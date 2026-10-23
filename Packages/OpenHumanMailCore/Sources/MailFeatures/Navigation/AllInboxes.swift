@@ -24,6 +24,7 @@ public final class AllInboxesModel {
     public private(set) var searchAllAccounts = false
     public private(set) var isSearching = false
     public private(set) var searchFailedAccounts: [AccountID] = []
+    public private(set) var searchFocusRequest = 0
 
     @ObservationIgnored private let accounts: [Account]
     @ObservationIgnored private var windows: [AccountID: [ThreadRow]] = [:]
@@ -31,7 +32,7 @@ public final class AllInboxesModel {
     @ObservationIgnored private var searchResults: [Row] = []
     @ObservationIgnored private var data: (any MailDataSource)?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
-    @ObservationIgnored private var searchGeneration = 0
+    @ObservationIgnored private(set) var searchGeneration = 0
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     @ObservationIgnored private let onOpen: @MainActor (ThreadKey) -> Void
     @ObservationIgnored private let onDone: @MainActor ([ThreadKey]) -> Bool
@@ -64,6 +65,12 @@ public final class AllInboxesModel {
             let n = inboxRows.filter { $0.id.account == account.id && $0.thread.isUnread }.count
             return n == 0 ? nil : (chipNames[account.id] ?? account.email, n)
         }
+    }
+
+    // Whether these are the accounts it reads, in this order and under these names
+    public func reads(_ list: [Account]) -> Bool {
+        list.map(\.id) == accounts.map(\.id) && list.map(\.email) == accounts.map(\.email)
+            && list.map(\.alias) == accounts.map(\.alias)
     }
 
     public func threadRows(for keys: [ThreadKey]) -> [ThreadRow] {
@@ -105,7 +112,7 @@ public final class AllInboxesModel {
         rebuild()
     }
 
-    private func failed(_ account: AccountID) {
+    func failed(_ account: AccountID) {
         if !failedAccounts.contains(account) { failedAccounts.append(account) }
         rebuild()
     }
@@ -117,7 +124,7 @@ public final class AllInboxesModel {
         inboxRows = Self.merge(windows, order: order).map {
             Row(thread: reads.locallyRead($0), account: chips[$0.id.account] ?? "")
         }
-        isLoading = windows.count + failedAccounts.count < accounts.count
+        isLoading = Set(windows.keys).union(failedAccounts).count < accounts.count
         refreshRows()
     }
 
@@ -146,6 +153,8 @@ public final class AllInboxesModel {
             return words.allSatisfy { haystack.contains($0) }
         }
     }
+
+    public func requestSearchFocus() { searchFocusRequest += 1 }
 
     public var isSearchActive: Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -196,7 +205,7 @@ public final class AllInboxesModel {
         }
     }
 
-    private func finishSearch(_ found: [AccountID: [ThreadRow]], failed: [AccountID], generation: Int) {
+    func finishSearch(_ found: [AccountID: [ThreadRow]], failed: [AccountID], generation: Int) {
         guard generation == searchGeneration else { return }
         let order = accounts.map(\.id)
         searchResults = Self.merge(found, order: order).map {
@@ -243,10 +252,13 @@ public final class AllInboxesModel {
     public func markDoneAtCursor() -> Bool {
         guard let cursor else { return false }
         let index = cursorIndex ?? 0
+        // The neighbours before the done row leaves: a search result goes at once, an inbox row with the next window
+        let below = rows.indices.contains(index + 1) ? rows[(index + 1)...].map(\.id) : []
+        let above = rows.prefix(min(index, rows.count)).reversed().map(\.id)
         let started = markDone([cursor])
-        if started, rows.count > 1 {
-            let next = index + 1 < rows.count ? rows[index + 1].id : rows[max(0, index - 1)].id
-            self.cursor = next
+        if started {
+            let shown = Set(rows.map(\.id))
+            if let next = (below + above).first(where: shown.contains) { self.cursor = next }
         }
         return started
     }

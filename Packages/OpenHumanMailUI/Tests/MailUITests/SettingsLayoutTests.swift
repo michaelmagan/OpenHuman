@@ -6,6 +6,7 @@ import MailFeatures
 import MailModel
 import MailTheme
 import OpenHumanAI
+import OpenHumanAITesting
 import OpenHumanCore
 import SwiftUI
 import Testing
@@ -33,8 +34,8 @@ private func environmentWithSystem() async throws -> AppEnvironment {
 }
 
 @MainActor
-private func until(_ what: String, _ condition: () -> Bool) async throws {
-    let deadline = ContinuousClock.now + testBackstop
+private func until(_ what: String, timeout: Duration = testBackstop, _ condition: () -> Bool) async throws {
+    let deadline = ContinuousClock.now + timeout
     while !condition() {
         guard ContinuousClock.now < deadline else {
             Issue.record("timed out waiting for \(what)")
@@ -76,6 +77,12 @@ private final class Stage {
         return (pixels, CGFloat(rep.pixelsWide) / max(rep.size.width, 1), rep.size)
     }
 
+    /// The page's own background, read from its top-right corner: the grouped form draws a system colour there.
+    func background(of shot: (pixels: Pixels, scale: CGFloat, size: CGSize)) -> ThemeColor {
+        let pixel = shot.pixels.at(shot.size.width - 2, 2, scale: shot.scale)
+        return ThemeColor(red: Double(pixel.0) / 255, green: Double(pixel.1) / 255, blue: Double(pixel.2) / 255)
+    }
+
     func strays(in x: ClosedRange<CGFloat>, of shot: (pixels: Pixels, scale: CGFloat, size: CGSize),
                 color: ThemeColor) -> [CGPoint] {
         var out: [CGPoint] = []
@@ -113,17 +120,20 @@ struct SettingsLayoutTests {
         #expect(hosted == two, "rows inside an AnyView are still separate rows")
     }
 
-    @Test func hostedSectionsAreAPageSectionApart() {
+    @Test func hostedSectionsStaySeparateSectionsOfThePage() {
         let width = CGSize(width: 400, height: 1000)
         func height<V: View>(_ view: V) -> CGFloat {
             NSHostingController(rootView: view.environment(\.theme, .light)).sizeThatFits(in: width).height
         }
-        let one = height(SettingsSection("One", footnote: "A note.") { SettingsRow("A row") })
-        let two = height(SettingsSectionStack {
+        let stacked = height(SettingsSectionStack {
             SettingsSection("One", footnote: "A note.") { SettingsRow("A row") }
             SettingsSection("Two", footnote: "A note.") { SettingsRow("A row") }
         })
-        #expect(abs(two - (2 * one + ResolvedTheme.light.space7)) < 1, "\(two) vs 2 × \(one) + space.7")
+        let loose = height(Group {
+            SettingsSection("One", footnote: "A note.") { SettingsRow("A row") }
+            SettingsSection("Two", footnote: "A note.") { SettingsRow("A row") }
+        })
+        #expect(abs(stacked - loose) < 1, "the stack adds no container of its own (\(stacked) vs \(loose))")
     }
 
     @Test func aRowWrapsItsTextAndKeepsTheControlInside() {
@@ -135,7 +145,7 @@ struct SettingsLayoutTests {
         let compact = SettingsSection(compact: true) { SettingsRow("Archive") { KeycapView(text: "E") } }
         let compactHeight = NSHostingController(rootView: compact.environment(\.theme, .light))
             .sizeThatFits(in: CGSize(width: 300, height: 1000)).height
-        #expect(compactHeight < SettingsMetrics.rowMinHeight, "list-like sections use the 28 pt row")
+        #expect(compactHeight < SettingsMetrics.rowMinHeight, "list-like sections drop the control-height floor")
     }
 
     @Test func theCleanupAddRowKeepsItsTitleOnOneLineAtThePageWidth() {
@@ -177,19 +187,17 @@ struct SettingsLayoutTests {
         }
     }
 
-    @Test func everyPageTitleFitsTheSidebarSelectedOrNot() {
+    @Test func everyPageTitleFitsTheSidebar() {
         let theme = ResolvedTheme.light
         let pages = SettingsShellModel(environment: environment()).pages
         #expect(pages.contains { $0.id == ImportanceSettingsModel.pageID }, "the longest title is listed")
-        let room = SettingsMetrics.sidebarWidth - 2 * theme.space3
+        let room = SettingsMetrics.sidebarWidth - 2 * theme.space6
         for entry in pages {
-            for selected in [false, true] {
-                let row = SettingsSidebarRow(entry: entry, isSelected: selected, showsCursor: false) {}
-                    .fixedSize()
-                    .environment(\.theme, theme)
-                let needed = NSHostingController(rootView: row).sizeThatFits(in: CGSize(width: 1000, height: 100)).width
-                #expect(needed <= room, "“\(entry.title)” (\(selected ? "selected" : "not selected")) needs \(needed) pt of \(room)")
-            }
+            let row = SettingsSidebarRow(entry: entry)
+                .fixedSize()
+                .environment(\.theme, theme)
+            let needed = NSHostingController(rootView: row).sizeThatFits(in: CGSize(width: 1000, height: 100)).width
+            #expect(needed <= room, "“\(entry.title)” needs \(needed) pt of \(room)")
         }
     }
 
@@ -222,15 +230,6 @@ struct SettingsLayoutTests {
         #expect(strongest <= tertiary + 14, "the placeholder is text.tertiary, not darker (\(name): \(strongest) > \(tertiary))")
     }
 
-    @Test func theSidebarArrowsStopAtTheEnds() {
-        let ids = ["general", "accounts", "appearance"]
-        #expect(SettingsSidebar.page(after: "general", offset: 1, in: ids) == "accounts")
-        #expect(SettingsSidebar.page(after: "accounts", offset: -1, in: ids) == "general")
-        #expect(SettingsSidebar.page(after: "general", offset: -1, in: ids) == nil)
-        #expect(SettingsSidebar.page(after: "appearance", offset: 1, in: ids) == nil)
-        #expect(SettingsSidebar.page(after: "gone", offset: 1, in: ids) == "general", "a page that went away")
-    }
-
     @Test func theSidebarFooterShowsTheVersionAndTheEarlyDevelopmentNotice() {
         #expect(SettingsBuildFooter.lines(BuildLabel(version: "0.1.0", build: "1001", channel: "early-development"))
                 == ["Version 0.1.0 (1001)", "Early development build — expect rough edges. Please send feedback."])
@@ -247,18 +246,88 @@ struct SettingsLayoutTests {
     }
 
     @Test(arguments: [("light", ResolvedTheme.light), ("dark", ResolvedTheme.dark)])
-    func theShellDrawsTheThemesSidebar(_ name: String, _ theme: ResolvedTheme) throws {
-        let stage = Stage(SettingsShellView(environment: environment(), hosting: SettingsHosting(), defaults: .standard),
+    func theShellListsThePagesInANativeSidebar(_ name: String, _ theme: ResolvedTheme) throws {
+        let env = environment()
+        let pages = SettingsShellModel(environment: env).pages
+        let stage = Stage(SettingsShellView(environment: env, hosting: SettingsHosting(), defaults: .standard),
                           width: SettingsMetrics.windowWidth, height: SettingsMetrics.windowHeight, theme: theme)
         defer { stage.close() }
-        let shot = try stage.render("settings-window-\(name)")
-        #expect(matches(shot.pixels.at(SettingsMetrics.sidebarWidth / 2, SettingsMetrics.windowHeight - 20, scale: shot.scale),
-                        theme.bgSidebar), "below the pages: the theme's sidebar, not a system material")
-        let firstRow = 12 + SettingsMetrics.sidebarRowHeight / 2
-        #expect(matches(shot.pixels.at(SettingsMetrics.sidebarWidth - 16, firstRow, scale: shot.scale), theme.bgRowSelected),
-                "the selected page's plate")
-        #expect(matches(shot.pixels.at(SettingsMetrics.windowWidth - 24, SettingsMetrics.windowHeight - 8, scale: shot.scale),
-                        theme.bgWindow), "the page's right-hand margin")
+        _ = try stage.render("settings-window-\(name)")
+        let root = try #require(stage.window.contentView)
+        let sidebar = try #require(Self.tables(in: root).first { $0.numberOfRows == pages.count },
+                                   "the pages are the rows of a native list")
+        #expect(sidebar.selectedRow >= 0, "the open page is selected in the list")
+    }
+
+    /// Shorter than the page list with the build notice under it, so the list has to scroll.
+    static let shortWindow = CGSize(width: SettingsMetrics.windowWidth, height: 360)
+
+    @Test(arguments: [("light", ResolvedTheme.light), ("dark", ResolvedTheme.dark)])
+    func theSidebarScrollsToItsLastPageInAShortWindow(_ name: String, _ theme: ResolvedTheme) throws {
+        let env = environment()
+        let pages = SettingsShellModel(environment: env).pages
+        let build = BuildLabel(version: "0.1.0", build: "1001", channel: BuildLabel.earlyDevelopmentChannel)
+        let size = Self.shortWindow
+        let stage = Stage(SettingsShellView(environment: env, hosting: SettingsHosting(build: build), defaults: .standard),
+                          width: size.width, height: size.height, theme: theme)
+        defer { stage.close() }
+        _ = try stage.render("settings-window-short-\(name)")
+        let root = try #require(stage.window.contentView)
+        #expect(root.bounds.size == size, "the window keeps its size instead of growing to fit the list (\(root.bounds.size))")
+        let sidebar = try #require(Self.tables(in: root).first { $0.numberOfRows == pages.count })
+        let scroll = try #require(sidebar.enclosingScrollView, "the page list scrolls")
+        let frame = scroll.convert(scroll.bounds, to: nil)
+        #expect(Self.inside(size).contains(frame), "the list stays inside the window: \(frame)")
+        #expect(frame.width >= SettingsMetrics.sidebarWidth - 0.5, "the sidebar keeps its width: \(frame.width)")
+        let last = pages.count - 1
+        let insets = scroll.contentInsets
+        let shown = scroll.contentView.bounds.height - insets.top - insets.bottom
+        #expect(sidebar.rect(ofRow: last).maxY > shown, "the pages need more room than the window has")
+        sidebar.scrollRowToVisible(last)
+        root.layoutSubtreeIfNeeded()
+        let visible = scroll.contentView.bounds
+        let row = sidebar.convert(sidebar.rect(ofRow: last), to: scroll.contentView)
+        #expect(row.minY >= visible.minY + insets.top - 0.5 && row.maxY <= visible.maxY - insets.bottom + 0.5,
+                "the last page scrolls into view above the build notice: \(row) in \(visible), insets \(insets)")
+    }
+
+    @Test func everyPageScrollsInsideAShortWindow() async throws {
+        let env = environment()
+        let themes = ThemeStore(preferencesStore: MemoryThemePreferencesStore(ThemePreferences(mode: .system)))
+        let notifications = NotificationsSettingsModel(environment: env)
+        let hosting = SettingsHosting(
+            appearance: { AnyView(AppearanceSettingsView(store: themes, fontFamilies: ["Inter"])) },
+            notifications: { AnyView(NotificationsSettingsView(model: notifications)) },
+            build: BuildLabel(version: "0.1.0", build: "1001", channel: BuildLabel.earlyDevelopmentChannel))
+        let size = Self.shortWindow
+        let pages = SettingsShellModel(environment: env).pages
+        for (index, page) in pages.enumerated() {
+            env.settingsNavigator.open(page.id)
+            let stage = Stage(SettingsShellView(environment: env, hosting: hosting, defaults: .standard),
+                              width: size.width, height: size.height, theme: .light)
+            defer { stage.close() }
+            let root = try #require(stage.window.contentView)
+            // A row below the short sidebar's fold reports its selection once it has scrolled into view
+            try await until("the \(page.id) page", timeout: .seconds(10)) {
+                root.layoutSubtreeIfNeeded()
+                guard let sidebar = Self.tables(in: root).first(where: { $0.numberOfRows == pages.count }) else {
+                    return false
+                }
+                if sidebar.selectedRow != index { sidebar.scrollRowToVisible(index) }
+                return sidebar.selectedRow == index
+            }
+            _ = try stage.render("settings-page-short-\(page.id)")
+            #expect(root.bounds.size == size, "\(page.id) keeps the window's size (\(root.bounds.size))")
+            let split = try #require(Self.splitViews(in: root).first { $0.isVertical && $0.arrangedSubviews.count >= 2 },
+                                     "\(page.id) is in the split view")
+            let pane = try #require(split.arrangedSubviews.last)
+            let scrolls = Self.scrollViews(in: pane).filter { !$0.isHiddenOrHasHiddenAncestor }
+            #expect(!scrolls.isEmpty, "\(page.id) scrolls its content")
+            for scroll in scrolls {
+                let frame = scroll.convert(scroll.bounds, to: nil)
+                #expect(Self.inside(size).contains(frame), "\(page.id) scrolls inside the window: \(frame)")
+            }
+        }
     }
 
     @Test func advancedListsOnlyTheModulesThatNeedARestart() throws {
@@ -342,20 +411,21 @@ struct SettingsLayoutTests {
             let stage = Stage(view, width: pageWidth, height: 2400, theme: theme)
             defer { stage.close() }
             let shot = try stage.render("settings-page-\(page)-\(name)")
-            let margin = pageWidth - 32
-            let strays = stage.strays(in: (margin + 4)...(pageWidth - 6), of: shot, color: theme.bgWindow)
+            let strays = stage.strays(in: Self.margin, of: shot, color: stage.background(of: shot))
             #expect(strays.isEmpty, "\(page) (\(name)) draws in the right margin at \(strays.prefix(3))")
         }
     }
 
     @Test func theMarginCheckSeesARowThatRunsOver() throws {
         let page = SettingsPageScaffold(title: "Too wide") {
-            SettingsSection { SettingsRow("Wide") { Color.red.frame(width: pageWidth, height: 20) } }
+            // Stacked, so the control is leading-aligned and runs out to the right; beside the title the form's
+            // trailing alignment would push the overrun under the title instead
+            SettingsSection { SettingsRow("Wide", stacked: true) { Color.red.frame(width: pageWidth, height: 20) } }
         }
         let stage = Stage(page, width: pageWidth, height: 400, theme: .light)
         defer { stage.close() }
         let shot = try stage.render("settings-page-too-wide")
-        #expect(!stage.strays(in: (pageWidth - 28)...(pageWidth - 6), of: shot, color: ResolvedTheme.light.bgWindow).isEmpty)
+        #expect(!stage.strays(in: Self.margin, of: shot, color: stage.background(of: shot)).isEmpty)
     }
 
     @Test(arguments: [("light", ResolvedTheme.light), ("dark", ResolvedTheme.dark)])
@@ -373,8 +443,7 @@ struct SettingsLayoutTests {
             let stage = Stage(page, width: pageWidth, height: 2400, theme: theme)
             defer { stage.close() }
             let rendered = try stage.render("settings-ai-prompts-\(shot)-\(name)")
-            let margin = pageWidth - 32
-            let strays = stage.strays(in: (margin + 4)...(pageWidth - 6), of: rendered, color: theme.bgWindow)
+            let strays = stage.strays(in: Self.margin, of: rendered, color: stage.background(of: rendered))
             #expect(strays.isEmpty, "prompts \(shot) (\(name)) draws in the right margin at \(strays.prefix(3))")
         }
         try check("list")
@@ -387,6 +456,39 @@ struct SettingsLayoutTests {
         }
     }
 
+    /// The AI page with its models and every feature row, at the smallest window and wider: no row reaches past the
+    /// page's margin and nothing scrolls sideways.
+    @Test(arguments: [("light", ResolvedTheme.light), ("dark", ResolvedTheme.dark)])
+    func theAIPageStaysInsideItsPane(_ name: String, _ theme: ResolvedTheme) throws {
+        let center = AICenter.make(registry: ProviderRegistry(providers: [FakeAIProvider(displayName: "On-device test model")]),
+                                   settings: AISettingsBox(store: InMemoryAISettingsStore()))
+        let env = AppEnvironment.fake(corpus: .rich(threadCount: 20, now: fixedNow), options: .init(remoteAck: .immediate),
+                                      featureFlags: FeatureFlags(), ai: center)
+        for width in [pageWidth, pageWidth + 240] {
+            let page = SettingsPageScaffold(title: "AI") {
+                AISettingsTabs(prompts: nil) {
+                    SettingsSectionStack {
+                        AISettingsSection(center: center, environment: env, listsUnavailableModels: false)
+                        ClassifierSettingsSection(center: center, port: nil, environment: env)
+                    }
+                }
+            }
+            let stage = Stage(page, width: width, height: 2400, theme: theme)
+            defer { stage.close() }
+            let shot = try stage.render("settings-ai-page-\(Int(width))-\(name)")
+            let margin = (width - 12)...(width - 5)
+            let strays = stage.strays(in: margin, of: shot, color: stage.background(of: shot))
+            #expect(strays.isEmpty, "the AI page (\(name), \(width) pt) draws in the right margin at \(strays.prefix(3))")
+            let root = try #require(stage.window.contentView)
+            for scroll in Self.scrollViews(in: root) {
+                guard let document = scroll.documentView else { continue }
+                let shown = scroll.contentView.bounds.width
+                #expect(document.frame.width <= shown + 0.5,
+                        "the page is no wider than its pane (\(document.frame.width) of \(shown), \(name), \(width) pt)")
+            }
+        }
+    }
+
     @Test func theSplitListShowsEveryRowWithoutScrollingInsideThePage() async throws {
         let splits = SplitSettingsModel(environment: environment())
         splits.start()
@@ -395,7 +497,7 @@ struct SettingsLayoutTests {
         defer { stage.close() }
         _ = try stage.render("settings-splits-list")
         let root = try #require(stage.window.contentView)
-        let table = try #require(Self.tables(in: root).first, "the split list is a table")
+        let table = try #require(Self.tables(in: root).last, "the split list is a table (inside the page's form)")
         let scroll = try #require(table.enclosingScrollView)
         let shown = scroll.contentView.bounds.height
         let rows = table.numberOfRows
@@ -405,8 +507,23 @@ struct SettingsLayoutTests {
         #expect(shown - content < SplitSettingsPage.listRowHeight, "no empty row's worth of space under the list")
     }
 
+    /// The strip between a grouped form's sections and the page's right edge.
+    static let margin: ClosedRange<CGFloat> = (pageWidth - 12)...(pageWidth - 5)
+
     private static func tables(in view: NSView) -> [NSTableView] {
         (view as? NSTableView).map { [$0] } ?? view.subviews.flatMap(tables)
+    }
+
+    private static func splitViews(in view: NSView) -> [NSSplitView] {
+        ((view as? NSSplitView).map { [$0] } ?? []) + view.subviews.flatMap(splitViews)
+    }
+
+    private static func scrollViews(in view: NSView) -> [NSScrollView] {
+        ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(scrollViews)
+    }
+
+    private static func inside(_ size: CGSize) -> NSRect {
+        NSRect(origin: .zero, size: size).insetBy(dx: -0.5, dy: -0.5)
     }
 }
 #endif

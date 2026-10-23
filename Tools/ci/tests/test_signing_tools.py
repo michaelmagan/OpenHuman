@@ -111,7 +111,7 @@ class SigningScriptTests(unittest.TestCase):
         self.env = dict(os.environ, HOME=str(self.home), GIT_CONFIG_GLOBAL=str(config), GIT_CONFIG_NOSYSTEM="1",
                         OH_RELEASE_ENV=str(self.home / "absent.env"))
         for name in ("OH_SIGNING_KEYCHAIN", "OH_SIGNING_KEYCHAIN_PASSWORD_FILE", "OH_SIGN_IDENTITY", "OH_NOTARY_PROFILE",
-                     "SSH_CONNECTION", "SSH_TTY"):
+                     "OH_UPDATE_FEED_URL", "OH_SPARKLE_PUBLIC_KEY", "OH_SPARKLE_ACCOUNT", "SSH_CONNECTION", "SSH_TTY"):
             self.env.pop(name, None)
 
     def run_script(self, name, *args):
@@ -137,6 +137,24 @@ class SigningScriptTests(unittest.TestCase):
         self.assertIn("FAIL  no commit-signing key", result.stdout)
         self.assertIn("FAIL  OH_SIGNING_KEYCHAIN is not set", result.stdout)
         self.assertIn("errSecInternalComponent", result.stdout)
+        self.assertIn("OH_UPDATE_FEED_URL and OH_SPARKLE_PUBLIC_KEY are not set: builds are made without updates",
+                      result.stdout)
+
+    def test_verify_checks_the_update_settings_without_reading_a_key(self):
+        self.env.update(OH_UPDATE_FEED_URL="http://updates.example.test/appcast.xml", OH_SPARKLE_PUBLIC_KEY="not a key",
+                        OH_SPARKLE_ACCOUNT="openhuman-mail-absent-test-account")
+        result = self.run_script("verify.sh", "--builds")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAIL  OH_UPDATE_FEED_URL 'http://updates.example.test/appcast.xml' is not an https:// address",
+                      result.stdout)
+        self.assertIn("FAIL  OH_SPARKLE_PUBLIC_KEY is not a base64 EdDSA public key of 32 bytes", result.stdout)
+        self.assertIn("WARN  sign_update is not installed", result.stdout)
+        self.assertIn("WARN  no Sparkle signing key for account 'openhuman-mail-absent-test-account'", result.stdout)
+        self.env.update(OH_UPDATE_FEED_URL="https://updates.example.test/appcast.xml",
+                        OH_SPARKLE_PUBLIC_KEY="11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=")
+        result = self.run_script("verify.sh", "--builds")
+        self.assertIn("PASS  OH_UPDATE_FEED_URL is an https:// feed (https://updates.example.test/appcast.xml)", result.stdout)
+        self.assertIn("PASS  OH_SPARKLE_PUBLIC_KEY is a 32-byte EdDSA public key", result.stdout)
 
 
 if __name__ == "__main__":

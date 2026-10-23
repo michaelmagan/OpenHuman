@@ -5,11 +5,10 @@ import MailTheme
 @MainActor
 final class ThreadListEmptyView: NSView {
     private let symbolView = NSImageView()
-    private let titleField = NSTextField(labelWithString: "")
+    private let titleField = NSTextField(wrappingLabelWithString: "")
     private let subtitleField = NSTextField(wrappingLabelWithString: "")
     private let detailField = NSTextField(wrappingLabelWithString: "")
-    private let progress = CALayer()
-    private let progressTrack = CALayer()
+    private let spinner = NSProgressIndicator()
     private(set) var state: ThreadListEmptyState?
     private var style: ThreadRowStyle
 
@@ -17,16 +16,24 @@ final class ThreadListEmptyView: NSView {
         self.style = style
         super.init(frame: .zero)
         wantsLayer = true
+        // A long title (a search query) wraps, and past its last line ends in an ellipsis rather than mid-word
+        titleField.isSelectable = false
         for field in [titleField, subtitleField, detailField] {
             field.alignment = .center
             field.maximumNumberOfLines = 3
+            field.cell?.truncatesLastVisibleLine = true
             addSubview(field)
         }
         symbolView.imageScaling = .scaleNone
         symbolView.setAccessibilityElement(false)
         addSubview(symbolView)
-        layer?.addSublayer(progressTrack)
-        layer?.addSublayer(progress)
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.isDisplayedWhenStopped = true
+        spinner.isIndeterminate = true
+        spinner.isHidden = true
+        spinner.setAccessibilityElement(false)
+        addSubview(spinner)
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         apply(style: style)
@@ -45,8 +52,6 @@ final class ThreadListEmptyView: NSView {
         subtitleField.textColor = theme.textSecondary.nsColor
         detailField.font = theme.typeMeta.font
         detailField.textColor = theme.textTertiary.nsColor
-        progressTrack.backgroundColor = theme.borderHairline.nsColor.cgColor
-        progress.backgroundColor = theme.accentRing.nsColor.cgColor
         symbolView.contentTintColor = theme.textSecondary.nsColor
         needsLayout = true
     }
@@ -68,6 +73,7 @@ final class ThreadListEmptyView: NSView {
         let changed = state != self.state
         self.state = state
         isHidden = state == nil || state?.style == .blank
+        if isHidden { spinner.stopAnimation(nil) }
         guard let state, changed else { return }
         styleTitle()
         titleField.stringValue = state.title
@@ -76,20 +82,21 @@ final class ThreadListEmptyView: NSView {
         subtitleField.isHidden = state.subtitle == nil
         detailField.isHidden = state.detail == nil
         if let name = state.symbol, state.style == .inboxClear || state.style == .message {
-            let config = NSImage.SymbolConfiguration(pointSize: 28, weight: .light)
+            let config = NSImage.SymbolConfiguration(pointSize: 28, weight: .regular)
             symbolView.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config)
             symbolView.isHidden = symbolView.image == nil
         } else {
             symbolView.isHidden = true
         }
         let showsProgress = state.style == .progress
-        progress.isHidden = !showsProgress
-        progressTrack.isHidden = !showsProgress
+        spinner.isHidden = !showsProgress
         setAccessibilityLabel([state.title, state.subtitle, state.detail].compactMap { $0 }.joined(separator: ". "))
         if !symbolView.isHidden { fade(symbolView, duration: style.theme.motionSlow.seconds) }
-        if showsProgress { animateProgress() } else { progress.removeAllAnimations() }
+        if showsProgress, !reduceMotion { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
         needsLayout = true
     }
+
+    var showsSpinner: Bool { !spinner.isHidden }
 
     private var reduceMotion: Bool { style.theme.reduceMotion }
 
@@ -103,17 +110,6 @@ final class ThreadListEmptyView: NSView {
         layer.add(animation, forKey: "fade")
     }
 
-    private func animateProgress() {
-        progress.removeAllAnimations()
-        guard !reduceMotion else { return }
-        let move = CABasicAnimation(keyPath: "position.x")
-        move.fromValue = progressTrack.frame.minX - progress.bounds.width / 2
-        move.toValue = progressTrack.frame.maxX + progress.bounds.width / 2
-        move.duration = style.theme.motionProgress.seconds
-        move.repeatCount = .infinity
-        progress.add(move, forKey: "progress")
-    }
-
     override func layout() {
         super.layout()
         let width = bounds.width, height = bounds.height
@@ -123,6 +119,11 @@ final class ThreadListEmptyView: NSView {
             symbolView.frame = NSRect(x: ((width - 40) / 2).rounded(), y: y, width: 40, height: 40)
             y = symbolView.frame.maxY + 12
         }
+        if !spinner.isHidden {
+            let size = spinner.fittingSize
+            spinner.frame = NSRect(x: ((width - size.width) / 2).rounded(), y: y, width: size.width, height: size.height)
+            y = spinner.frame.maxY + 12
+        }
         func place(_ field: NSTextField, gap: CGFloat) {
             guard !field.isHidden, !field.stringValue.isEmpty else { return }
             let size = field.sizeThatFits(NSSize(width: textWidth, height: .greatestFiniteMagnitude))
@@ -130,15 +131,6 @@ final class ThreadListEmptyView: NSView {
             y = field.frame.maxY
         }
         place(titleField, gap: 0)
-        if !progress.isHidden {
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            progressTrack.frame = CGRect(x: ((width - 160) / 2).rounded(), y: y + 12, width: 160, height: 2)
-            progress.frame = CGRect(x: progressTrack.frame.minX, y: y + 12, width: 48, height: 2)
-            CATransaction.commit()
-            y += 14
-            if progress.animation(forKey: "progress") == nil { animateProgress() }
-        }
         place(subtitleField, gap: 8)
         place(detailField, gap: 8)
     }

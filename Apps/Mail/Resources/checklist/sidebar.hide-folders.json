@@ -9,7 +9,7 @@
     "Right-click Spam in the sidebar, choose Hide from sidebar, then press Undo in the notice"
   ],
   "deepLink": null,
-  "expected": "The All mail row leaves the sidebar at once; G A still opens All mail and its row stays while it is open, then goes after G I. With All Inboxes off the tray button before the account pictures and the All Inboxes row are gone and Ctrl-0, G U do nothing. Switching back on restores them. Spam leaves the sidebar with a notice naming in:spam; Undo brings it back.",
+  "expected": "The All mail row leaves the sidebar at once; G A still opens All mail and its row stays while it is open, then goes after G I. With All Inboxes off the All Inboxes row is gone and Ctrl-0, G U do nothing. Switching it back on restores the row and the keys. Spam leaves the sidebar with a notice naming in:spam; Undo brings it back.",
   "requires": "fake",
   "addedIn": "2026-10-15"
 }

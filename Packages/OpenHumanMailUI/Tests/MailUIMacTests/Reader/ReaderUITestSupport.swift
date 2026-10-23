@@ -110,6 +110,8 @@ struct ReaderHarness {
         let environment = AppEnvironment(data: store, commands: store, accounts: store, settings: store, isFake: true)
         let router = windowRouter ? environment.router : AppRouter(environment: environment)
         router.start()
+        // A window reads a conversation only through its active account, so the reader is never bound before one
+        try await until { router.active != nil }
         let controller = ReaderViewController(theme: theme, webKit: webKit, preferences: ReaderPreferences(defaults: nil))
         let host = StubHost(router)
         controller.host = host

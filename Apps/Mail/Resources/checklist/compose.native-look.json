@@ -1,0 +1,15 @@
+{
+  "id": "compose.native-look",
+  "area": "Composer",
+  "title": "The composer uses the Mac's own controls and layout",
+  "steps": [
+    "Launch Mail with -UseFakeGmail, open a conversation in the Work inbox and press r; then press c for a new message",
+    "Add two synthetic recipients, press ⇧⌘C and ⇧⌘B, hover a chip and its x, then click From and pick the Team address",
+    "Attach two files, hover the tools at the right of the bottom bar, then switch between the Light, Dark and Paper themes",
+    "Press Cmd+J, then Escape; pop the message out into its own window"
+  ],
+  "deepLink": null,
+  "expected": "Labels end at one edge with hairlines between rows. Chips are rounded rectangles in a light accent tint, each with its x, which brightens on hover. From is a borderless pop-up; the Team address's reason is grey text on its row. Send is a filled accent button showing ⌘↵; the tools sit in grey capsules like the toolbar, Discard on its own; Draft saved is grey.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

@@ -43,7 +43,7 @@ public final class InviteCenter {
         let thread: ThreadKey
         let invite: CalendarInvite
         let title: String
-        let provider: any CalendarProviding
+        var provider: any CalendarProviding
         let response: CalendarResponse
         var previous: CalendarResponse?
         let wholeSeries: Bool
@@ -278,22 +278,28 @@ public final class InviteCenter {
         }
     }
 
+    private struct NotOnCalendar: Error {}
+
     private func send(_ id: UUID) async {
         guard var record = records[id] else { return }
         let invite = record.invite
         do {
             let query = CalendarInviteQuery(uid: invite.uid, title: invite.title ?? "", start: invite.start,
-                                            end: invite.end, organizer: invite.organizer?.email)
-            guard let event = try await record.provider.invitedEvent(query, wholeSeries: record.wholeSeries) else {
-                throw CalendarError.failed(String(localized: "It isn't on your calendar yet. Answer it in your calendar."))
-            }
+                                            end: invite.end, organizer: invite.organizer?.email,
+                                            recurrenceID: invite.recurrenceID, repeats: invite.repeats)
+            guard let found = try await locate(query, for: record) else { throw NotOnCalendar() }
+            record.provider = found.provider
+            let event = found.event.resolvingMyResponse(addresses: found.addresses)
             try Self.checkScope(event, for: invite, wholeSeries: record.wholeSeries)
             if let current = event.myResponse, current != .needsAction { record.previous = current }
             let answer = try await record.provider.respond(to: event, with: record.response, sendUpdates: .all)
             record.stage = .sent(answer)
             records[id] = record
-            if !record.wholeSeries {
-                environment.calendarEvents.applyLocal(CalendarEventStore.key(for: record.provider), upsert: answer)
+            let key = CalendarEventStore.key(for: record.provider)
+            if record.wholeSeries {
+                environment.calendarEvents.applyLocalResponse(key, series: event.id, response: record.response)
+            } else {
+                environment.calendarEvents.applyLocal(key, upsert: answer)
             }
             environment.notices.post(String(localized: "Answered \(record.response.title) to \(record.title)."),
                                      duration: NoticeCenter.infoDuration)
@@ -302,8 +308,45 @@ public final class InviteCenter {
             records[id] = record
             answered[Self.answerKey(invite)] = nil
             show(record.previous, on: record.message)
-            environment.notices.post(String(localized: "Couldn't answer \(record.title). \(CalendarSidebarModel.message(error))"),
-                                     style: .error)
+            if error is NotOnCalendar {
+                postNotFound(record)
+            } else {
+                environment.notices.post(String(localized: "Couldn't answer \(record.title). \(CalendarSidebarModel.message(error))"),
+                                         style: .error)
+            }
+        }
+    }
+
+    // Why: an invitation sent to another connected account's address can sit only on that account's calendar; there
+    // only an iCalUID match counts, never a look-alike
+    private func locate(_ query: CalendarInviteQuery, for record: Record) async throws
+        -> (event: CalendarEvent, provider: any CalendarProviding, addresses: Set<String>)? {
+        let accounts = await AIThreadLoader.first(environment.data.accounts()) ?? []
+        let own = accounts.first { $0.id == record.thread.account }?.myAddresses ?? []
+        if let event = try await record.provider.invitedEvent(query, wholeSeries: record.wholeSeries) {
+            return (event, record.provider, own)
+        }
+        guard let connections = environment.calendarConnections, connections.routesByAccount else { return nil }
+        let guests = Set(record.invite.attendees.map { $0.email.lowercased() })
+        var strict = query
+        strict.matchesTitle = false
+        for other in accounts where other.id != record.thread.account && guests.contains(other.email.lowercased()) {
+            guard let provider = connections.calendarProvider(for: other), Self.answerRefusal(provider) == nil,
+                  let event = try? await provider.invitedEvent(strict, wholeSeries: record.wholeSeries) else { continue }
+            Log(.calendar).notice("invitation found on another account's calendar")
+            return (event, provider, other.myAddresses)
+        }
+        return nil
+    }
+
+    private func postNotFound(_ record: Record) {
+        let account = record.provider.info.account ?? ""
+        let message = account.isEmpty
+            ? String(localized: "Couldn't answer \(record.title). Mail couldn't find it on your calendar; it may have moved. Open it in Calendar to answer.")
+            : String(localized: "Couldn't answer \(record.title). Mail couldn't find it on the calendar of \(account); it may have moved. Open it in Calendar to answer.")
+        let day = record.invite.occurrence
+        environment.notices.post(message, style: .error, actionTitle: String(localized: "Open in Calendar")) { [weak self] in
+            await self?.environment.calendarWindow?.open(around: day)
         }
     }
 
@@ -349,8 +392,11 @@ public final class InviteCenter {
                     let back = try await record.provider.respond(to: event, with: previous, sendUpdates: .all)
                     answered[key] = previous
                     show(previous, on: record.message)
-                    if !record.wholeSeries {
-                        environment.calendarEvents.applyLocal(CalendarEventStore.key(for: record.provider), upsert: back)
+                    let calendarKey = CalendarEventStore.key(for: record.provider)
+                    if record.wholeSeries {
+                        environment.calendarEvents.applyLocalResponse(calendarKey, series: event.id, response: previous)
+                    } else {
+                        environment.calendarEvents.applyLocal(calendarKey, upsert: back)
                     }
                 } catch {
                     environment.notices.post(String(localized: "Couldn't change your answer back: \(CalendarSidebarModel.message(error)) Check your calendar."),
@@ -366,6 +412,16 @@ public final class InviteCenter {
             } catch {
                 environment.notices.post(String(localized: "Couldn't move the conversation back to the Inbox."), style: .error)
             }
+        }
+    }
+
+    public var hasQuitWork: Bool { !held.isEmpty }
+
+    public func prepareForQuit() async {
+        for id in Array(held.keys) {
+            guard let task = held.removeValue(forKey: id) else { continue }
+            task.cancel()
+            await send(id)
         }
     }
 

@@ -169,6 +169,26 @@ func sanitize(_ html: String, allowRemote: Bool = false) -> SanitizedHTML {
     #expect(table.contains("width=\"10000\" colspan=\"5\" height=\"50%\""))
 }
 
+// The reader's viewport is as tall as the message, so a length that follows it would grow the message without end
+@Test func viewportHeightLengthsUseAFixedViewport() {
+    let s = sanitize("<div style=\"height: 100vh\">hero</div><div style=\"min-height: calc(50dvh - 10px); "
+        + "padding: 2VH 5vw; width: 50vmin; max-width: 10vmax; height: 99999svh\">footer</div>"
+        + "<style>.hero { height: 100lvh } .box { inline-size: 20vi; block-size: 10vb; height: 40cqh }</style>")
+    #expect(s.bodyHTML.contains("height:600px"))
+    #expect(s.bodyHTML.contains("min-height:calc(300px - 10px)"))
+    #expect(s.bodyHTML.contains("padding:12px 5vw"))
+    #expect(s.bodyHTML.contains("width:min(50vw,300px)"))
+    #expect(s.bodyHTML.contains("max-width:max(10vw,60px)"))
+    #expect(s.bodyHTML.contains("height:6000px"), "clamped first, then fixed")
+    let css = s.headCSS.joined()
+    #expect(css.contains("height:600px"))
+    #expect(css.contains("inline-size:20vi"), "the viewport's width does not follow the message")
+    #expect(css.contains("block-size:60px") && css.contains("height:240px"))
+    for unit in ["vh", "svh", "lvh", "dvh", "vb", "vmin", "vmax", "cqh"] {
+        #expect(!(s.bodyHTML + css).lowercased().contains("0\(unit)"), "\(unit) is left")
+    }
+}
+
 @Test func invertFiltersAndEditableCSSAreDropped() {
     let s = sanitize("<div style=\"filter: invert(1); opacity: .5; -webkit-user-modify: read-write\">x</div><div style=\"filter: blur(2px)\">y</div>")
     #expect(s.bodyHTML == "<div style=\"opacity:.5\">x</div><div style=\"filter:blur(2px)\">y</div>")

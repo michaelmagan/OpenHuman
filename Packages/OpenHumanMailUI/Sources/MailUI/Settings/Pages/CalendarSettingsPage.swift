@@ -107,12 +107,11 @@ struct CalendarSettingsPage: View {
             }
             if showsGoogleSteps {
                 Text(GoogleClientGuide.plainText)
-                    .themeFont(theme.typeMeta)
-                    .foregroundStyle(theme.textSecondary.color)
+                    .font(.system(size: NativeMetrics.Text.secondary))
+                    .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, theme.space3)
             }
         }
     }

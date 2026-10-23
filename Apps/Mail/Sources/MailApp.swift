@@ -14,6 +14,8 @@ struct MailApp: App {
     @MainActor static let updates = UpdateCheckSupport.makeCenter()
 
     init() {
+        // Why: nothing is open yet, so a plain exit loses nothing.
+        if SingleInstanceGuard.checkAtLaunch() == .quitThisCopy { exit(0) }
         QuietTestHost.installIfTesting()
         _ = Self.devFeedback
     }
@@ -26,12 +28,13 @@ struct MailApp: App {
                 .devFeedbackSheet(Self.devFeedback)
                 #endif
         }
-        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
         .defaultSize(width: 1360, height: 860)
         .defaultLaunchBehavior(.presented)
         .commands {
             AboutCommands(label: .main, updates: Self.updates)
             MailCommands(router: { Self.app.router }, themes: { Self.app.router == nil ? nil : AppThemes.store })
+            ToolbarCommands()
             WindowZoomCommands()
             #if OH_DEV_TOOLS
             DeveloperCommands(center: Self.devFeedback)
@@ -111,7 +114,6 @@ struct MailWindowView: View {
             DebuggingTools.install(in: environment)
             environment.system.logLines = { MailApp.devFeedback.logs.diagnosticLines(now: Date()) }
         }
-        .ignoresSafeArea()
         .modifier(SendFeedbackSheetHost(center: environment.system.sendFeedback, themes: themes))
         .sheet(isPresented: Binding(get: { environment.welcomeGuide.isPresented },
                                     set: { if !$0 { environment.welcomeGuide.dismiss() } })) {

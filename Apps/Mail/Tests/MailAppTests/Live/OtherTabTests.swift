@@ -158,14 +158,14 @@ private func removeSeededCalendarSplit(_ store: MailStore, _ account: AccountID)
     await eventually("tabs") { router.active?.tabs.count == 2 }
     let state = try #require(router.active)
     await eventually("moved to a tab") { state.location == state.tabs.first?.location }
-    #expect(state.isOnTab, "the toolbar draws SplitTabBar, not the location title")
+    #expect(state.isOnTab, "the toolbar draws SplitInboxPicker, not the location title")
     #expect(state.tabs.map(\.title) == ["Important", "Other"])
     await eventually("list") { router.list?.state == .loaded }
 }
 
 @MainActor
 @Test(.timeLimit(.minutes(2)), arguments: [500.0, 800.0, 1_100.0, 1_500.0])
-func theToolbarHoldsTheImportantAndOtherTabsAtEveryWidth(width: Double) async throws {
+func theSplitPickerHoldsTheImportantAndOtherTabsAtEveryWidth(width: Double) async throws {
     let store = try MailStore.openInMemoryForTesting()
     let account = try FixtureStoreSeeder.seedLargeInbox(store, count: 60, now: Date())
     try removeSeededCalendarSplit(store, account)
@@ -175,30 +175,83 @@ func theToolbarHoldsTheImportantAndOtherTabsAtEveryWidth(width: Double) async th
     defer { router.stop() }
     await eventually("tabs") { router.active?.tabs.count == 2 && router.active?.isOnTab == true }
 
-    let hosting = NSHostingView(rootView: ShellToolbar(router: router))
+    let state = try #require(router.active)
+    #expect(SplitInboxPicker.shows(state), "the toolbar shows the split picker on a tab")
+    #expect(SplitInboxPicker.layout(state.tabs, active: state.location).overflow.isEmpty, "two splits need no More menu")
+
+    // The picker in the style this Mac uses is sized for both titles and fits the window
+    let titles = state.tabs.map { SplitInboxPicker.segmentTitle($0, count: state.tabCount($0)) }
+    let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+    let textWidth = titles.reduce(0) { $0 + ($1 as NSString).size(withAttributes: [.font: font]).width }
+    let (window, hosting) = try await hostOffscreen(SplitInboxPicker(router: router, state: state), width: width,
+                                                    appearance: .aqua)
+    defer { window.orderOut(nil) }
+    let ideal = hosting.fittingSize.width
+    #expect(ideal >= textWidth && ideal <= width, "width \(width): the picker wants \(ideal) pt for \(textWidth) pt of \(titles)")
+
+    // cacheDisplay draws the tabs style's glass selection as a blank pill, so the labels are measured on the segmented
+    // style over a solid backing, in light and dark
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+        let picker = SplitInboxPicker(router: router, state: state, features: .macOS26)
+            .frame(width: width, height: 120)
+            .background(Color(nsColor: .windowBackgroundColor))
+        let (segmentedWindow, segmentedHosting) = try await hostOffscreen(picker, width: width, appearance: appearance)
+        defer { segmentedWindow.orderOut(nil) }
+        let control = try #require(segmentedControls(in: segmentedHosting).first,
+                                   "the segmented style draws an NSSegmentedControl")
+        #expect(control.segmentCount == titles.count, "one segment per tab")
+        #expect(control.frame.width >= control.intrinsicContentSize.width - 1, "width \(width): the segments are cut short")
+        let columns = try segmentLabelInk(control, in: segmentedHosting)
+        #expect(columns.count == titles.count && columns.allSatisfy { $0 > 30 } && columns.reduce(0, +) > 60,
+                "width \(width), \(appearance.rawValue): inked label columns per segment \(columns)")
+    }
+}
+
+@MainActor
+private func hostOffscreen<V: View>(_ root: V, width: Double, appearance: NSAppearance.Name) async throws
+    -> (NSWindow, NSHostingView<V>) {
+    let hosting = NSHostingView(rootView: root)
     let window = NSWindow(contentRect: NSRect(x: -5000, y: -5000, width: width, height: 120), styleMask: [.borderless],
                           backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
+    window.appearance = NSAppearance(named: appearance)
     window.contentView = hosting
     window.orderFrontRegardless()
-    defer { window.orderOut(nil) }
     try await Task.sleep(for: .milliseconds(300))
     hosting.layoutSubtreeIfNeeded()
+    return (window, hosting)
+}
+
+@MainActor
+private func segmentedControls(in view: NSView) -> [NSSegmentedControl] {
+    if let control = view as? NSSegmentedControl { return [control] }
+    return view.subviews.flatMap { segmentedControls(in: $0) }
+}
+
+// Inked columns in the middle band of each segment, measured against the segment's own fill so that a selected pill
+// does not count as a label
+@MainActor
+private func segmentLabelInk(_ control: NSSegmentedControl, in hosting: NSView) throws -> [Int] {
+    hosting.displayIfNeeded()
     let rep = try #require(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
     hosting.cacheDisplay(in: hosting.bounds, to: rep)
-    let background = try #require(rep.colorAt(x: 2, y: 2))
-    func inkColumns(_ range: Range<Int>) -> Int {
-        range.filter { x in
-            (0..<rep.pixelsHigh).contains { y in
+    let scale = CGFloat(rep.pixelsWide) / hosting.bounds.width
+    var frame = control.convert(control.bounds, to: hosting)
+    if !hosting.isFlipped { frame.origin.y = hosting.bounds.height - frame.maxY }
+    let rows = Int((frame.minY + frame.height * 0.25) * scale)..<Int((frame.maxY - frame.height * 0.25) * scale)
+    let segmentWidth = frame.width / CGFloat(max(1, control.segmentCount))
+    return (0..<control.segmentCount).map { index in
+        let start = Int((frame.minX + segmentWidth * CGFloat(index)) * scale)
+        let end = Int((frame.minX + segmentWidth * CGFloat(index + 1)) * scale)
+        guard let fill = rep.colorAt(x: start + Int(6 * scale), y: (rows.lowerBound + rows.upperBound) / 2) else { return 0 }
+        return (start..<end).filter { x in
+            rows.contains { y in
                 guard let c = rep.colorAt(x: x, y: y) else { return false }
-                return abs(c.redComponent - background.redComponent) + abs(c.greenComponent - background.greenComponent)
-                    + abs(c.blueComponent - background.blueComponent) > 0.25
+                return abs(c.redComponent - fill.redComponent) + abs(c.greenComponent - fill.greenComponent)
+                    + abs(c.blueComponent - fill.blueComponent) > 0.25
             }
         }.count
     }
-    let tabArea = 84..<min(Int(width) - 150, 700)
-    let columns = inkColumns(tabArea)
-    #expect(columns > 60, "width \(width): only \(columns) inked columns in the tab area")
 }
 
 @MainActor

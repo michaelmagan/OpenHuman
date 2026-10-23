@@ -4,7 +4,7 @@
   "title": "Edit form: every field of an event, one form in the panel and the popover",
   "steps": [
     "With -UseFakeData -UseFakeCalendar open Calendar (2) and click one of your own morning events",
-    "Change the title, tick All day, set the end date two days later, pick another time zone, add a guest (mark Optional), tick Google Meet, add a reminder, set Free, a visibility and a colour",
+    "Change the title, turn on All-day, set the end date two days later, pick another time zone, add a guest (mark Optional), turn on Google Meet, add a reminder, set Free, a visibility and a colour",
     "Press Save (or Cmd+Return), choose Don't send or Send to guests when asked, then press Cmd+Z once",
     "Press n for a new event and compare the fields with the card"
   ],

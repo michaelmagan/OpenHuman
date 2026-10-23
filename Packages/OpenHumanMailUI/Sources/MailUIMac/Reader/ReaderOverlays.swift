@@ -3,23 +3,24 @@ import MailFeatures
 import MailRender
 import MailTheme
 
+/// Find in the conversation: a floating Liquid Glass capsule at the top right of the reader. It covers the
+/// conversation rather than pushing it down.
 @MainActor
 final class ReaderFindBar: NSView, NSSearchFieldDelegate {
     let field = NSSearchField()
     let status: NSTextField
+    let glass = NSGlassEffectView()
     var onFind: ((String, Bool) -> Void)?
     var onClose: (() -> Void)?
+    static let height: CGFloat = 36
 
     init(theme: ThemeTokens) {
         status = readerLabel("", theme.typeMeta, theme.textSecondary)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        wantsLayer = true
-        layer?.backgroundColor = theme.bgElevated.nsColor.cgColor
-        layer?.cornerRadius = theme.radiusMD
-        layer?.borderWidth = theme.borderWidthHairline
-        layer?.borderColor = theme.borderElevated.nsColor.cgColor
-        theme.shadow1.apply(to: layer!)
+        glass.translatesAutoresizingMaskIntoConstraints = false
+        glass.cornerRadius = Self.height / 2
+        addSubview(glass)
         field.placeholderString = "Find in conversation"
         field.sendsSearchStringImmediately = false
         field.sendsWholeSearchString = true
@@ -29,19 +30,32 @@ final class ReaderFindBar: NSView, NSSearchFieldDelegate {
         field.translatesAutoresizingMaskIntoConstraints = false
         field.setAccessibilityLabel("Find in conversation")
         let previous = ReaderButton.icon("chevron.up", help: "Previous match  ⇧⌘G", theme: theme) { [weak self] in self?.find(backwards: true) }
+        previous.setAccessibilityLabel("Previous match")
         let next = ReaderButton.icon("chevron.down", help: "Next match  ⌘G", theme: theme) { [weak self] in self?.find(backwards: false) }
+        next.setAccessibilityLabel("Next match")
         let done = ReaderButton.link("Done", theme: theme) { [weak self] in self?.onClose?() }
         let row = NSStackView(views: [field, status, previous, next, done])
         row.spacing = theme.space2
         row.alignment = .centerY
         row.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(row)
+        let content = NSView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(row)
+        glass.contentView = content
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 36),
+            heightAnchor.constraint(equalToConstant: Self.height),
+            glass.leadingAnchor.constraint(equalTo: leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: trailingAnchor),
+            glass.topAnchor.constraint(equalTo: topAnchor),
+            glass.bottomAnchor.constraint(equalTo: bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: glass.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: glass.trailingAnchor),
+            content.topAnchor.constraint(equalTo: glass.topAnchor),
+            content.bottomAnchor.constraint(equalTo: glass.bottomAnchor),
             field.widthAnchor.constraint(equalToConstant: 220),
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: theme.space3),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -theme.space3),
-            row.centerYAnchor.constraint(equalTo: centerYAnchor),
+            row.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: theme.space3),
+            row.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -theme.space4),
+            row.centerYAnchor.constraint(equalTo: content.centerYAnchor),
         ])
         setAccessibilityElement(true)
         setAccessibilityRole(.group)

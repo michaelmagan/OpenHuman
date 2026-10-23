@@ -168,7 +168,7 @@ final class GatedSummaryProvider: AIProvider, Sendable {
         }
         let reader = try await reader(provider)
         try await wait("the summary settled") { reader.summary.phase == .done && reader.line.stage == .settled }
-        #expect(reader.onScreen(reader.card).width == 760, "the column is 760 pt wide in this window")
+        #expect(reader.onScreen(reader.card).width == 720, "the column is 720 pt wide in this window")
         #expect(abs(reader.textToCard - 16) < 0.5, "16 pt from the text to the first card, was \(reader.textToCard)")
         #expect(abs(reader.onScreen(reader.line).minY - reader.onScreen(reader.line.textLabel).minY) < 0.5,
                 "nothing under the text inside the block")

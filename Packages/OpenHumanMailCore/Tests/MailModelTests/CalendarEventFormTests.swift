@@ -159,6 +159,23 @@ private let full: CalendarAbilities = [.respond, .editDetails, .remove, .editFul
         let back = f.applying(to: draft)
         #expect(back.title == "Team lunch" && back.addMeetLink && back.attendees == [sam] && back.extras.reminders == draft.extras.reminders)
     }
+
+    @Test func theFirstGuestTurnsInvitationsOnAndALaterGuestKeepsTheChoice() {
+        var draft = CalendarEventDraft(title: "Lunch", start: at(12, 4, 12), end: at(12, 4, 13), timeZone: la.identifier)
+        #expect(draft.sendUpdates == .none && CalendarEventDraft.defaultSendUpdates(attendees: []) == .none)
+        var f = CalendarEventForm(draft: draft)
+        f.addGuest(sam)
+        draft = f.applying(to: draft)
+        #expect(draft.attendees == [sam] && draft.sendUpdates == .all && draft.emailsAttendees)
+        draft.sendUpdates = .none
+        f = CalendarEventForm(draft: draft)
+        f.addGuest(robin)
+        draft = f.applying(to: draft)
+        #expect(draft.attendees == [sam, robin] && draft.sendUpdates == .none, "the user's choice stays")
+        draft.setAttendees([])
+        draft.setAttendees([robin])
+        #expect(draft.sendUpdates == .all, "a first guest again turns invitations on")
+    }
 }
 
 
@@ -306,8 +323,23 @@ private let full: CalendarAbilities = [.respond, .editDetails, .remove, .editFul
         #expect(allDay == ["RRULE:FREQ=DAILY;UNTIL=20261203"])
     }
 
-    @Test func theFollowingSeriesKeepsTheRuleWithoutItsEnd() {
-        #expect(CalendarRepeat.continuing(["RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4", "EXDATE:20261201T170000Z"]) == ["RRULE:FREQ=WEEKLY;BYDAY=MO"])
+    @Test func theFollowingSeriesKeepsItsEndAndTheLaterExceptions() {
+        let split = at(12, 4, 18)
+        #expect(CalendarRepeat.continuing(["RRULE:FREQ=WEEKLY;BYDAY=FR;UNTIL=20270101T000000Z"], from: split, isAllDay: false,
+                                          zone: la) == ["RRULE:FREQ=WEEKLY;BYDAY=FR;UNTIL=20270101T000000Z"], "a fixed end stays")
+        #expect(CalendarRepeat.continuing(["RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=4"], from: split, isAllDay: false, zone: la) == nil,
+                "the number of times left is not known, so the split is refused")
+        let rules = ["RRULE:FREQ=WEEKLY", "EXDATE:20261127T020000Z,20261212T020000Z",
+                     "EXDATE;TZID=America/Los_Angeles:20261120T180000,20261218T180000", "RDATE:20261101T020000Z",
+                     "EXDATE:garbage"]
+        #expect(CalendarRepeat.continuing(rules, from: split, isAllDay: false, zone: la)
+                == ["RRULE:FREQ=WEEKLY", "EXDATE:20261212T020000Z", "EXDATE;TZID=America/Los_Angeles:20261218T180000",
+                    "EXDATE:garbage"], "only exceptions on or after the split move to the new series")
+        let days = ["RRULE:FREQ=DAILY", "EXDATE;VALUE=DATE:20261203,20261204,20261210", "RDATE;VALUE=DATE:20261220"]
+        #expect(CalendarRepeat.continuing(days, from: at(12, 4), isAllDay: true, zone: la)
+                == ["RRULE:FREQ=DAILY", "EXDATE;VALUE=DATE:20261204,20261210", "RDATE;VALUE=DATE:20261220"])
+        #expect(CalendarRepeat.continuing(["RRULE:FREQ=DAILY", "RDATE:nonsense"], from: split, isAllDay: false, zone: la)
+                == ["RRULE:FREQ=DAILY"], "an unreadable extra date is never added")
     }
 }
 

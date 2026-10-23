@@ -224,6 +224,8 @@ public final class SyncedTokenStore: SharedTokenStore {
         let key = try normalizedAccount(email)
         try exclusively(key) {
             let now = try resolve(key)
+            // Why: the sign-in was removed while the refresh was out; a refresh never recreates it
+            guard now.token != nil else { throw TokenStoreError.missing }
             guard case .shared(let grant) = now.source else {
                 try local.save(token, account: key)
                 return

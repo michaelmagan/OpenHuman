@@ -2,6 +2,7 @@ import AppKit
 import MailFeatures
 import MailModel
 import MailTheme
+import MailUI
 import OpenHumanCore
 import Testing
 @testable import MailUIMac
@@ -26,29 +27,29 @@ struct FlatCollapsedRowTests {
         return row
     }
 
-    @Test func theCardIsRaisedWhenOpenHoveredFocusedOrHoldingAReply() {
-        var flat: [[Bool]] = []
-        for expanded in [false, true] {
-            for hovering in [false, true] {
-                for focused in [false, true] {
-                    for composer in [false, true] {
-                        let look = MessageCardView.appearance(expanded: expanded, hovering: hovering, focused: focused,
-                                                              hasComposer: composer)
-                        if look == .flat { flat.append([expanded, hovering, focused, composer]) }
-                    }
-                }
-            }
+    @Test func thePlateIsHiddenAtRestTintedOnHoverAndRingedOnlyForFocusUnderIncreaseContrast() {
+        for increaseContrast in [false, true] {
+            var theme = ThemeTokens.light
+            theme.increaseContrast = increaseContrast
+            let plate = ReaderPlateView(theme: theme)
+            #expect(plate.isHidden && plate.look == .none)
+            plate.look = .hover
+            #expect(!plate.isHidden && !plate.showsRing)
+            plate.look = .focus
+            #expect(!plate.isHidden && plate.showsRing == increaseContrast)
+            plate.look = .none
+            #expect(plate.isHidden)
+            #expect(plate.hitTest(.zero) == nil, "the plate never takes a click")
         }
-        #expect(flat == [[false, false, false, false]])
     }
 
-    @Test func aCollapsedRowHasMoreAirAndTheOlderRowItsHeight() {
+    @Test func aCollapsedRowIs36PointsAndTheOlderRowMatchesItUnderItsHairline() {
         for density in ThemeDensity.allCases {
             var theme = ThemeTokens.light
             theme.density = density
-            let expected = CGFloat(theme.collapsedMessageRow + theme.space2)
-            #expect(collapsedRow(theme).fittingSize.height == expected, "\(density): 40 / 44 / 48")
-            #expect(olderRow(theme).fittingSize.height == expected, "\(density): the older-messages row too")
+            let expected = CGFloat(theme.densityScaled(Double(NativeMetrics.Reader.collapsedRowHeight)))
+            #expect(collapsedRow(theme).fittingSize.height == expected, "\(density): 32 / 36 / 40")
+            #expect(olderRow(theme).fittingSize.height == expected + 1, "\(density): the older-messages row and its hairline")
         }
     }
 
@@ -80,18 +81,18 @@ struct FlatCollapsedRowTests {
         }
     }
 
-    @Test func theOlderMessagesRowLiftsUnderThePointer() throws {
+    @Test func theOlderMessagesRowTintsUnderThePointer() throws {
         let row = olderRow(.light)
         let frame = row.frame
-        #expect(row.cardAppearance == .flat)
+        #expect(!row.isHovered && row.plate.isHidden)
         let enter = try #require(NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
                                                         windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0,
                                                         userData: nil))
         row.mouseEntered(with: enter)
-        #expect(row.cardAppearance == .raised)
+        #expect(row.isHovered && !row.plate.isHidden)
         row.layoutSubtreeIfNeeded()
-        #expect(row.frame == frame, "raising never changes a frame")
+        #expect(row.frame == frame, "the tint never changes a frame")
         row.mouseExited(with: enter)
-        #expect(row.cardAppearance == .flat)
+        #expect(!row.isHovered && row.plate.isHidden)
     }
 }

@@ -5,17 +5,23 @@ import Testing
 @Suite struct ResolutionTests {
     let library = ThemeLibrary.builtIn
 
-    @Test func defaultsAreLightPeriwinkleFollowingSystem() {
+    @Test func defaultsAreTheSystemThemesWithTheSystemAccentFollowingSystem() {
         let prefs = ThemePreferences()
-        #expect(prefs.mode == .system)
+        #expect(prefs.mode == .system && prefs.accentID == nil)
         let light = library.resolve(prefs, appearance: prefs.mode.effective(system: .light))
-        #expect(light.themeID == BuiltinThemeID.light && light.accentID == "periwinkle" && light.appearance == .light)
-        #expect(light.tokens == ThemeTokens.light)
+        #expect(light.themeID == BuiltinThemeID.systemLight && light.accentID == "system" && light.appearance == .light)
         #expect(light.issues.isEmpty)
         let dark = library.resolve(prefs, appearance: prefs.mode.effective(system: .dark))
-        #expect(dark.themeID == BuiltinThemeID.dark && dark.appearance == .dark)
-        #expect(dark.tokens == ThemeTokens.dark)
+        #expect(dark.themeID == BuiltinThemeID.systemDark && dark.accentID == "system" && dark.appearance == .dark)
+        #expect(dark.issues.isEmpty)
         #expect(ResolvedTheme.light.tokens == ThemeTokens.light && ResolvedTheme.dark.tokens == ThemeTokens.dark)
+    }
+
+    @Test func theSystemThemesUseAPlainWindowCanvas() {
+        let light = library.resolve(ThemePreferences(), appearance: .light)
+        #expect(light.bgCanvas == ThemeColor(hex: "#FFFFFF") && light.bgCanvas == light.bgWindow)
+        let dark = library.resolve(ThemePreferences(), appearance: .dark)
+        #expect(dark.bgCanvas == ThemeColor(hex: "#1E1E1E") && dark.bgCanvas == dark.bgWindow)
     }
 
     @Test func fixedModesIgnoreTheSystem() {
@@ -59,7 +65,7 @@ import Testing
         resolved = library.resolve(prefs, appearance: .light)
         #expect(resolved.typeReader.size == 20)
         prefs.density = .comfortable
-        #expect(library.resolve(prefs, appearance: .light).rowHeight == 44)
+        #expect(library.resolve(prefs, appearance: .light).rowHeight == 48)
     }
 
     @Test func emailColorsPreferenceWins() {
@@ -68,7 +74,7 @@ import Testing
     }
 
     @Test func increaseContrastMapsBordersAndTertiaryText() {
-        let resolved = library.resolve(ThemePreferences(), appearance: .light, increaseContrast: true)
+        let resolved = library.resolve(ThemePreferences(lightThemeID: BuiltinThemeID.light), appearance: .light, increaseContrast: true)
         #expect(resolved.borderHairline == ThemeTokens.light.borderControl)
         #expect(resolved.textTertiary == ThemeTokens.light.textSecondary)
         #expect(resolved.component.toolbar.divider == ThemeTokens.light.borderControl)
@@ -138,7 +144,7 @@ import Testing
     @Test func preferencesSurviveACorruptStore() throws {
         let json = #"{"mode":"sideways","lightThemeID":"BAD ID","accentID":"iris","density":"compact","uiFont":"Inter;x","readerTextSize":"big"}"#
         let prefs = try JSONDecoder().decode(ThemePreferences.self, from: Data(json.utf8))
-        #expect(prefs.mode == .system && prefs.lightThemeID == BuiltinThemeID.light)
+        #expect(prefs.mode == .system && prefs.lightThemeID == BuiltinThemeID.systemLight)
         #expect(prefs.accentID == "iris" && prefs.density == .compact)
         #expect(prefs.uiFont == nil && prefs.readerTextSize == nil)
         let store = MemoryThemePreferencesStore()

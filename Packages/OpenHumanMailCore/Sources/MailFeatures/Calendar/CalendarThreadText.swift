@@ -107,12 +107,14 @@ public enum CalendarEventDraftBuilder {
             let end = facts.end.map { $0 > facts.start ? $0 : facts.start.addingTimeInterval(defaultDuration) }
                 ?? facts.start.addingTimeInterval(defaultDuration)
             return CalendarEventDraft(title: title(thread?.subject ?? ""), start: facts.start, end: end,
-                                      timeZone: timeZone.identifier, attendees: attendees, location: facts.location,
-                                      provenance: facts.provenance)
+                                      timeZone: timeZone.identifier, attendees: attendees,
+                                      sendUpdates: CalendarEventDraft.defaultSendUpdates(attendees: attendees),
+                                      location: facts.location, provenance: facts.provenance)
         }
         let (start, duration) = time(mentions: mentions, calendar: calendar, now: now)
         return CalendarEventDraft(title: title(thread?.subject ?? ""), start: start, end: start.addingTimeInterval(duration),
-                                  timeZone: timeZone.identifier, attendees: attendees)
+                                  timeZone: timeZone.identifier, attendees: attendees,
+                                  sendUpdates: CalendarEventDraft.defaultSendUpdates(attendees: attendees))
     }
 
     static func hasFutureTimedMention(_ mentions: [CalendarDateMention], now: Date) -> Bool {
