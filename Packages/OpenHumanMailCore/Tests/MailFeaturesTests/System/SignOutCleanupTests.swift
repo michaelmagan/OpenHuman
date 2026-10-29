@@ -73,15 +73,19 @@ struct SignOutCleanupTests {
         let oldAccount = try #require(corpus.accounts.first?.id)
         var previous: AppEnvironment? = AppEnvironment(data: store, commands: store, accounts: store,
                                                         settings: store, isFake: true, featureFlags: FeatureFlags())
-        previous?.system.startUnsubscribe()
+        // Readers in parallel suites must not borrow this accessory during account removal.
+        let accessorySlot = ReaderHeaderAccessoryStore()
+        previous?.system.startUnsubscribe(accessorySlot: accessorySlot)
         weak var removedAccessory = previous?.system.unsubscribe
         try await store.remove(oldAccount)
         previous?.system.unsubscribe?.install()
-        #expect(ReaderHeaderAccessorySlot.current === removedAccessory)
+        #expect(accessorySlot.current === removedAccessory)
         previous?.system.stopAll()
+        #expect(previous?.system.unsubscribe == nil)
+        #expect(previous?.overlays.fallback == nil)
         previous = nil
         #expect(removedAccessory == nil)
-        #expect(ReaderHeaderAccessorySlot.current == nil)
+        #expect(accessorySlot.current == nil)
 
         let client = Data(#"{"installed":{"client_id":"fake","client_secret":"fake"}}"#.utf8)
         try await store.importOAuthClient(json: client)

@@ -84,9 +84,9 @@ public final class SystemCenter {
         launchAtLogin = LaunchAtLoginModel(control: platform.loginItem)
     }
 
-    public func startUnsubscribe() {
+    public func startUnsubscribe(accessorySlot: ReaderHeaderAccessoryStore = ReaderHeaderAccessorySlot.shared) {
         guard unsubscribe == nil else { return }
-        let model = UnsubscribeModel(environment: environment, urlOpener: platform.urlOpener)
+        let model = UnsubscribeModel(environment: environment, urlOpener: platform.urlOpener, accessorySlot: accessorySlot)
         model.install()
         unsubscribe = model
     }
