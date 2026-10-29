@@ -420,9 +420,15 @@ extension CalendarWindowModel {
     func hold(_ id: UUID, title: String, perform: @escaping @MainActor @Sendable () async -> Void) {
         let window = holdWindow
         let sleep = self.sleep
-        held[id] = Task { [weak self] in
+        held[id] = Task { [weak self, weak owner = environment] in
             try? await sleep(window)
             guard let self, self.held.removeValue(forKey: id) != nil else { return }
+            guard let owner else {
+                self.overlays[id] = nil
+                return
+            }
+            // Terminal handling can suspend again in the forced reload after the write.
+            defer { withExtendedLifetime(owner) {} }
             await perform()
         }
         pushUndo(id, title: title)

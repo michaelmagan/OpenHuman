@@ -78,11 +78,18 @@ public final class CalendarWindowModel {
         let today = calendar.startOfDay(for: now())
         focusDay = today
         period = CalendarPeriod.containing(today, kind: .week, calendar: calendar)
-        sidebar.didWrite = { [weak self] in
-            guard let self, self.isOpen else { return }
-            Task { await self.load(force: true) }
+        sidebar.didWrite = { [weak self, weak environment] in
+            guard let self, self.isOpen, let environment else { return }
+            Task {
+                defer { withExtendedLifetime(environment) {} }
+                await self.load(force: true)
+            }
         }
-        storeObserver = eventStore.observe { [weak self] change in self?.cacheChanged(change) }
+        storeObserver = eventStore.observe { [weak self, weak environment] change in
+            guard let self, let environment else { return }
+            defer { withExtendedLifetime(environment) {} }
+            self.cacheChanged(change)
+        }
     }
 
     var calendar: Calendar { CalendarDateMentions.calendar(timeZone) }
@@ -91,7 +98,7 @@ public final class CalendarWindowModel {
         let wasOpen = isOpen
         isOpen = true
         if !wasOpen {
-            sidebar.activeAccount = { [weak router = environment.router] in router?.activeAccountID }
+            sidebar.activeAccount = { [weak status = environment.status] in status?.activeAccount }
             hiddenKeys = Set(await read(AppSettings.calendarHiddenCalendars))
         }
         let stored = wasOpen ? kind : await read(AppSettings.calendarWindowView)

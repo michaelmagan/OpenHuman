@@ -78,6 +78,7 @@ public final class CalendarSidebarModel {
     @ObservationIgnored var loadText: (ThreadKey) async -> CalendarThreadText?
 
     @ObservationIgnored private unowned let environment: AppEnvironment
+    @ObservationIgnored private weak var owner: AppEnvironment?
     @ObservationIgnored private var text: CalendarThreadText?
     @ObservationIgnored private var mentions: [CalendarDateMention] = []
     @ObservationIgnored private var textThread: ThreadKey?
@@ -99,6 +100,7 @@ public final class CalendarSidebarModel {
     public init(environment: AppEnvironment, provider: any CalendarProviding, timeZone: TimeZone = .current,
                 now: @escaping @MainActor () -> Date = Date.init) {
         self.environment = environment
+        owner = environment
         self.provider = provider
         self.timeZone = timeZone
         self.now = now
@@ -1272,9 +1274,15 @@ public final class CalendarSidebarModel {
     private func createHeld(_ draft: CalendarEventDraft, thread: ThreadKey?, key heldKey: PendingEventKey?,
                             on target: any CalendarProviding,
                             placeholder shown: (key: CalendarCacheKey, id: String)? = nil) async {
+        guard let owner else {
+            if let shown { eventStore.removeLocal(shown.key, id: shown.id) }
+            return
+        }
+        // Dispatch authorizes this operation to settle, including helpers that use the unowned environment.
+        defer { withExtendedLifetime(owner) {} }
         if let refusal = target.info.createRefusal {
             if let shown { eventStore.removeLocal(shown.key, id: shown.id) }
-            environment.notices.post(String(localized: "Couldn't create the event. \(refusal)"), style: .error)
+            owner.notices.post(String(localized: "Couldn't create the event. \(refusal)"), style: .error)
             return
         }
         let created: CalendarEvent
@@ -1284,15 +1292,15 @@ public final class CalendarSidebarModel {
             if let shown { eventStore.removeLocal(shown.key, id: shown.id) }
             if await findCreated(draft, on: target) != nil {
                 calendarChanged()
-                environment.notices.post(String(localized: "Event created."), duration: NoticeCenter.infoDuration)
+                owner.notices.post(String(localized: "Event created."), duration: NoticeCenter.infoDuration)
                 await refresh()
             } else {
-                environment.notices.post(Self.unclearWithAttendees, style: .error)
+                owner.notices.post(Self.unclearWithAttendees, style: .error)
             }
             return
         } catch {
             if let shown { eventStore.removeLocal(shown.key, id: shown.id) }
-            environment.notices.post(String(localized: "Couldn't create the event. \(Self.message(error))"), style: .error)
+            owner.notices.post(String(localized: "Couldn't create the event. \(Self.message(error))"), style: .error)
             if self.draft == nil, self.thread == thread {
                 draftThread = thread
                 draftProvider = target
@@ -1305,9 +1313,9 @@ public final class CalendarSidebarModel {
         }
         if let shown { eventStore.replaceLocal(shown.key, id: shown.id, with: created) }
         calendarChanged()
-        environment.notices.post(draft.emailsAttendees ? String(localized: "Event created. Google emails the invitations.")
-                                                       : String(localized: "Event created."),
-                                 duration: NoticeCenter.infoDuration)
+        owner.notices.post(draft.emailsAttendees ? String(localized: "Event created. Google emails the invitations.")
+                                                : String(localized: "Event created."),
+                           duration: NoticeCenter.infoDuration)
         await refresh()
     }
 

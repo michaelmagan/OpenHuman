@@ -3,6 +3,7 @@ import MailActions
 import MailFakes
 import MailModel
 import OpenHumanCore
+import Synchronization
 import Testing
 @testable import MailFeatures
 
@@ -261,8 +262,194 @@ private struct CalendarWindowFixture {
     }
 }
 
+private final class DidWriteReloadCalendar: CalendarProviding, Sendable {
+    let inner: FakeCalendar
+    let reading = Checkpoint()
+    let responding = Checkpoint()
+    private let holdsReads = Mutex(false)
+
+    init(_ inner: FakeCalendar) { self.inner = inner }
+
+    var info: CalendarProviderInfo { inner.info }
+    var abilities: CalendarAbilities { inner.abilities }
+
+    func holdReads() { holdsReads.withLock { $0 = true } }
+
+    func events(from: Date, to: Date) async throws -> [CalendarEvent] {
+        if holdsReads.withLock({ $0 }) { await reading.pass() }
+        return try await inner.events(from: from, to: to)
+    }
+
+    func eventWindow(from: Date, to: Date) async throws -> CalendarEventWindow {
+        if holdsReads.withLock({ $0 }) { await reading.pass() }
+        return try await inner.eventWindow(from: from, to: to)
+    }
+
+    func eventDelta(since token: String) async throws -> CalendarEventDelta {
+        if holdsReads.withLock({ $0 }) { await reading.pass() }
+        return try await inner.eventDelta(since: token)
+    }
+
+    func freeBusy(from: Date, to: Date) async throws -> CalendarFreeBusy {
+        try await inner.freeBusy(from: from, to: to)
+    }
+
+    func createEvent(_ draft: CalendarEventDraft) async throws -> CalendarEvent { try await inner.createEvent(draft) }
+    func deleteEvent(_ event: CalendarEvent) async throws { try await inner.deleteEvent(event) }
+
+    func respond(to event: CalendarEvent, with response: CalendarResponse,
+                 sendUpdates: CalendarSendUpdates) async throws -> CalendarEvent {
+        await responding.pass()
+        return try await inner.respond(to: event, with: response, sendUpdates: sendUpdates)
+    }
+}
+
 @MainActor
 @Suite struct CalendarWindowModelTests {
+    @Test func anOwnerGoneBeforeAHeldAnswerDispatchesLeavesTheCalendarUnchanged() async throws {
+        let corpus = FakeCorpus.make(threadCount: 6, now: fixedNow)
+        let meeting = event("held", la(10, 13, 9), la(10, 13, 10), attendees: [sam, FakeCorpus.me],
+                            organizerIsMe: false, response: .needsAction)
+        let calendar = FakeCalendar(events: [meeting], abilities: [.respond])
+        let notices = NoticeCenter(autoExpire: false)
+        var owner: AppEnvironment? = .fake(corpus: corpus, options: .init(remoteAck: .immediate),
+                                           featureFlags: FeatureFlags(), calendar: calendar, notices: notices)
+        weak var weakOwner = owner
+        let window = try #require(owner?.calendarWindow)
+        let sleeper = Checkpoint()
+        defer { sleeper.release() }
+        window.timeZone = losAngeles
+        window.now = { la(10, 12, 11) }
+        window.sleep = { _ in await sleeper.pass() }
+        await window.open(.week, around: la(10, 12))
+        window.openEvent(try #require(window.events.first))
+        await window.respond(.accepted)
+        #expect(window.heldCount == 1 && window.overlays.count == 1)
+        let settlement = try #require(window.held.values.first)
+        await sleeper.arrived()
+        let calls = calendar.calls
+        let messages = notices.toasts.map(\.message)
+
+        owner = nil
+        #expect(weakOwner == nil)
+        sleeper.release()
+        await settlement.value
+
+        #expect(weakOwner == nil && window.heldCount == 0 && window.overlays.isEmpty)
+        #expect(calendar.calls == calls && notices.toasts.map(\.message) == messages)
+    }
+
+    @Test func aHeldAnswerKeepsItsOwnerThroughTheWriteAndTerminalReload() async throws {
+        let corpus = FakeCorpus.make(threadCount: 6, now: fixedNow)
+        let meeting = event("held", la(10, 13, 9), la(10, 13, 10), attendees: [sam, FakeCorpus.me],
+                            organizerIsMe: false, response: .needsAction)
+        let calendar = FakeCalendar(events: [meeting], abilities: [.respond])
+        let provider = DidWriteReloadCalendar(calendar)
+        var owner: AppEnvironment? = .fake(corpus: corpus, options: .init(remoteAck: .immediate),
+                                           featureFlags: FeatureFlags(), calendar: provider)
+        weak var weakOwner = owner
+        let window = try #require(owner?.calendarWindow)
+        let sleeper = Checkpoint()
+        defer {
+            sleeper.release()
+            provider.responding.release()
+            provider.reading.release()
+        }
+        window.timeZone = losAngeles
+        window.now = { la(10, 12, 11) }
+        window.sleep = { _ in await sleeper.pass() }
+        await window.open(.week, around: la(10, 12))
+        window.openEvent(try #require(window.events.first))
+        await window.respond(.accepted)
+        #expect(window.heldCount == 1)
+        let settlement = try #require(window.held.values.first)
+        await sleeper.arrived()
+        sleeper.release()
+        await provider.responding.arrived()
+
+        owner = nil
+        #expect(weakOwner != nil, "the dispatched answer keeps its owner during the provider write")
+        provider.holdReads()
+        provider.responding.release()
+        await provider.reading.arrived()
+        #expect(weakOwner != nil && window.progress != nil, "the terminal reload is part of the same operation")
+        provider.reading.release()
+        await settlement.value
+
+        #expect(weakOwner == nil && window.heldCount == 0 && window.overlays.isEmpty)
+        #expect(calendar.calls.filter { if case .respond = $0 { true } else { false } }
+                == [.respond(id: "held", response: .accepted, sendUpdates: .all)])
+        #expect(window.events.first?.myResponse == .accepted && window.progress == nil)
+    }
+
+    @Test func didWriteReloadKeepsItsOwnerAfterTheHeldCreateHasFinished() async throws {
+        let corpus = FakeCorpus.rich(threadCount: 12, now: fixedNow)
+        let workAccount = corpus.accounts[0], homeAccount = corpus.accounts[1]
+        let work = FakeCalendar(info: CalendarProviderInfo(name: "Work", account: workAccount.email))
+        let homeInner = FakeCalendar(info: CalendarProviderInfo(name: "Home", account: homeAccount.email))
+        let home = DidWriteReloadCalendar(homeInner)
+        let connections = FakeCalendarConnections(providers: [workAccount.email: work, homeAccount.email: home])
+        let notices = NoticeCenter(autoExpire: false)
+        var owner: AppEnvironment? = .fake(corpus: corpus, options: .init(remoteAck: .immediate),
+                                           featureFlags: FeatureFlags(), calendar: work,
+                                           calendarConnections: connections, notices: notices)
+        weak var weakOwner = owner
+        let sidebar = try #require(owner?.calendarSidebar)
+        let window = try #require(owner?.calendarWindow)
+        let thread = try #require(corpus.threads.first { $0.row.id.account == workAccount.id }?.row.id)
+        defer { home.reading.release() }
+        sidebar.timeZone = losAngeles
+        sidebar.now = { la(10, 12, 11) }
+        sidebar.loadText = { _ in
+            CalendarThreadText(subject: "Lunch?", texts: ["Lunch?", "October 15, 2026 at 12:30 PM"], participants: [sam])
+        }
+        sidebar.sleep = { _ in try await Task.sleep(for: .seconds(3_600)) }
+        window.timeZone = losAngeles
+        window.now = { la(10, 12, 11) }
+        await sidebar.setShowAll(false)
+        await sidebar.show(thread: thread)
+        await sidebar.beginDraft(for: thread)
+        sidebar.draft?.sendUpdates = .all
+        let original = try #require(sidebar.draft)
+        await window.open(.week, around: la(10, 12))
+        #expect(window.isOpen && window.sources.count == 2 && !sidebar.showsAllCalendars)
+
+        // Keep the open week away from prefetch edges. The second provider's read cannot coalesce with
+        // the sidebar's first-provider refresh, so this gate belongs to the real didWrite reload alone.
+        let margin = TimeInterval(CalendarEventStore.prefetchMargin) * 86_400
+        let lastDay = window.period.days.last ?? window.period.start
+        for key in [CalendarEventStore.key(for: work), CalendarEventStore.key(for: home)] {
+            #expect(sidebar.eventStore.ranges(key).contains {
+                window.period.start.timeIntervalSince($0.start) >= margin && $0.end.timeIntervalSince(lastDay) >= margin
+            })
+        }
+        home.holdReads()
+        guard await sidebar.createEvent() else {
+            Issue.record("the open window regression must dispatch the actual held guest create")
+            return
+        }
+        #expect(sidebar.heldCreateCount == 1)
+        let settlement = Task { await sidebar.prepareForQuit() }
+        await home.reading.arrived()
+        await settlement.value
+        #expect(sidebar.heldCreateCount == 0 && work.createCalls == 1)
+        #expect(window.progress != nil, "the real reload is still blocked after the create task has fully settled")
+
+        owner = nil
+        #expect(weakOwner != nil, "only the running reload now leases the owner")
+        home.reading.release()
+        await eventually { weakOwner == nil }
+
+        #expect(weakOwner == nil, "the completed reload releases its owner without an init-time cycle")
+        #expect(window.isOpen && window.progress == nil && window.state == .loaded)
+        #expect(work.calls.compactMap { call -> CalendarEventDraft? in
+            if case .create(let sent) = call { sent } else { nil }
+        } == [original])
+        #expect(homeInner.createCalls == 0)
+        #expect(window.events.map(\.id) == work.created.map(\.id))
+        #expect(!window.events.contains { $0.id.hasPrefix(CalendarSidebarModel.placeholderPrefix) })
+    }
+
     @Test func openingShowsTheWeekOfEveryConnectedCalendarTaggedWithItsAccount() async throws {
         let f = CalendarWindowFixture(work: [event("w1", la(10, 13, 9), la(10, 13, 10))],
                                       home: [event("h1", la(10, 13, 9, 30), la(10, 13, 10, 30))])

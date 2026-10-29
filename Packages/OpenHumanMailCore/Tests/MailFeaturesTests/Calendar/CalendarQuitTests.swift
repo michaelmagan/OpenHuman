@@ -60,6 +60,7 @@ private struct QuitFixture {
 @Suite struct CalendarQuitTests {
     @Test func quittingInsideTheUndoWindowCreatesTheHeldEventOnce() async throws {
         let f = QuitFixture()
+        defer { withExtendedLifetime(f.env) {} }
         let model = f.sidebar()
         await model.beginDraft(for: f.thread)
         model.draft?.sendUpdates = .all
@@ -73,6 +74,7 @@ private struct QuitFixture {
 
     @Test func quittingAfterUndoCreatesNothing() async throws {
         let f = QuitFixture()
+        defer { withExtendedLifetime(f.env) {} }
         let model = f.sidebar()
         await model.beginDraft(for: f.thread)
         model.draft?.sendUpdates = .all
@@ -81,6 +83,30 @@ private struct QuitFixture {
         #expect(model.heldCreateCount == 0 && !model.hasQuitWork)
         await model.prepareForQuit()
         #expect(f.calendar.createCalls == 0 && f.calendar.created.isEmpty)
+    }
+
+    @Test func closingTheWindowAndHidingTheSidebarKeepTheLiveOwnersHeldCreate() async throws {
+        let f = QuitFixture()
+        defer { withExtendedLifetime(f.env) {} }
+        let window = f.window()
+        let sidebar = window.sidebar
+        await sidebar.show(thread: f.thread)
+        await sidebar.beginDraft(for: f.thread)
+        sidebar.draft?.sendUpdates = .all
+        let original = try #require(sidebar.draft)
+        await window.open()
+        #expect(await sidebar.createEvent())
+        await window.close()
+        sidebar.setVisible(false)
+        #expect(!window.isOpen && !sidebar.isVisible)
+        #expect(sidebar.heldCreateCount == 1 && sidebar.hasQuitWork && f.calendar.createCalls == 0)
+        await sidebar.prepareForQuit()
+        #expect(sidebar.heldCreateCount == 0 && !sidebar.hasQuitWork && f.calendar.createCalls == 1)
+        #expect(f.calendar.calls.compactMap { call -> CalendarEventDraft? in
+            if case .create(let sent) = call { sent } else { nil }
+        } == [original])
+        #expect(!sidebar.days.flatMap(\.events).contains { $0.id.hasPrefix(CalendarSidebarModel.placeholderPrefix) })
+        #expect(window.progress == nil)
     }
 
     @Test func quittingInsideTheWindowSendsAHeldMoveAndNeverAnUndoneOne() async throws {
