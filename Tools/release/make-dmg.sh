@@ -281,6 +281,7 @@ if [[ "$ENABLE_UPDATES" == 1 ]]; then
         FEED="${FEED:-https://<your-update-feed>/appcast.xml}"; KEY="${KEY:-<your-SUPublicEDKey>}"
         say "OH_UPDATE_FEED_URL or OH_SPARKLE_PUBLIC_KEY is not set; the dry run uses a placeholder. A real run stops here."
     else
+        # Why: only stdout carries the feed kind; runtime diagnostics on stderr must not bypass the loopback check.
         FEED_KIND="$(python3 -I -c '
 import base64, binascii, sys
 from urllib.parse import urlsplit
@@ -300,7 +301,7 @@ elif parts.scheme == "http" and parts.hostname in ("127.0.0.1", "localhost"):
     print("loopback")
 else:
     sys.exit(f"OH_UPDATE_FEED_URL {feed!r} must start with https:// (http://127.0.0.1 only for a staged test with --sign-only).")
-' "$FEED" "$KEY" 2>&1)" || die "$FEED_KIND Nothing was built."
+' "$FEED" "$KEY")" || die "invalid update settings (above). Nothing was built."
         if [[ "$FEED_KIND" == loopback && "$SIGN_ONLY" == 0 ]]; then
             die "OH_UPDATE_FEED_URL $FEED is on this Mac. That is only for a staged update test: add --sign-only, and never hand the build out. Nothing was built."
         fi

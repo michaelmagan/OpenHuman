@@ -40,6 +40,8 @@ CAN_CODESIGN = ON_MAC and shutil.which("codesign") is not None
 
 
 def run(args, env=None):
+    # The CI crash-diagnostics setting makes system tools emit runtime warnings into captured contract output.
+    env = dict(os.environ if env is None else env, SWIFT_BACKTRACE="enable=no")
     return subprocess.run([str(a) for a in args], capture_output=True, text=True, env=env, check=False)
 
 
@@ -744,6 +746,13 @@ class MakeDmgProfileTests(unittest.TestCase):
         self.assertIn("--updates off", self.line(result, "check-release.sh --"))
 
     def test_update_settings_are_checked_before_building(self):
+        # Diagnostics on stderr must not change the parser's loopback/https result.
+        python = self.bin / "python3"
+        python.write_text('#!/bin/sh\n'
+                          'printf "%s\\n" "swift runtime: backtrace-on-crash is not supported for privileged executables." >&2\n'
+                          'exec "$TEST_PYTHON" "$@"\n')
+        python.chmod(0o755)
+        self.env["TEST_PYTHON"] = sys.executable
         cases = (
             (["--no-icloud"], {"OH_UPDATE_FEED_URL": "http://updates.example.test/appcast.xml"}, "must start with https://"),
             (["--no-icloud"], {"OH_SPARKLE_PUBLIC_KEY": "not a key"}, "not a base64 EdDSA public key"),
