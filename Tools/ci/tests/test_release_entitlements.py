@@ -599,9 +599,10 @@ class MakeDmgProfileTests(unittest.TestCase):
         self.log = self.bin / "calls"
         self.env = dict(os.environ, PATH=f"{self.bin}{os.pathsep}{os.environ['PATH']}", FAKE_LOG=str(self.log),
                         FAKE_IDENTITY=provisioning.certificate_sha1(CERTIFICATE), GIT_CONFIG_GLOBAL=os.devnull,
-                        GIT_CONFIG_NOSYSTEM="1")
+                        GIT_CONFIG_NOSYSTEM="1", OH_RELEASE_ENV=os.devnull)
         for name in ("OH_PROVISIONING_PROFILE", "OH_SIGN_IDENTITY", "OH_NOTARY_PROFILE", "OH_BUNDLE_ID_PREFIX",
-                     "OH_UPDATE_FEED_URL", "OH_SPARKLE_PUBLIC_KEY"):
+                     "OH_SIGNING_KEYCHAIN", "OH_SIGNING_KEYCHAIN_PASSWORD_FILE", "OH_UPDATE_FEED_URL",
+                     "OH_SPARKLE_PUBLIC_KEY"):
             self.env.pop(name, None)
         for args in (["init", "-q"], ["add", "-A"],
                      ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "fixture"]):
@@ -612,7 +613,7 @@ class MakeDmgProfileTests(unittest.TestCase):
     def make_dmg(self, *args, fields=None, profile_path=None, updates=None):
         env = dict(self.env)
         if updates is not None:
-            env.update(updates, OH_RELEASE_ENV=str(self.profiles / "absent.env"))
+            env.update(updates)
         if fields is not None:
             profile_path = self.write_profile(self.profiles / "Mail.provisionprofile", fields)
         if profile_path is not None:
