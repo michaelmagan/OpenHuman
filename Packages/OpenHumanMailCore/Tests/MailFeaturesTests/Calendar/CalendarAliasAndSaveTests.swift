@@ -120,6 +120,24 @@ private struct WindowSetup {
 
 @MainActor
 @Suite struct CalendarOwnAddressTests {
+    @Test func anotherConnectedAccountsAddressIsNotAnAliasForThisCalendar() async throws {
+        let personal = Account(id: AccountID(2), email: "personal@example.test", displayName: nil, alias: nil,
+                               health: .active, sendAs: [SenderIdentity(email: work.email, isDefault: false,
+                                                                         isPrimary: false)])
+        let organizer = CalendarGuest(email: work.email, response: .accepted, isOrganizer: true)
+        let copy = invitation("shared", at(13, 9), guests: [organizer])
+        let calendar = FakeCalendar(events: [copy], info: CalendarProviderInfo(name: "Google Calendar",
+                                                                                account: personal.email))
+        let store = CalendarEventStore(timeZone: utc)
+        let key = CalendarEventStore.key(for: calendar)
+        await store.ensure(key, provider: calendar, from: at(13), to: at(14), today: at(12, 9),
+                           calendar: utcCalendar, now: at(12, 9))
+        store.learnAddresses(of: [work, personal])
+        let shown = try #require(store.events(key, from: at(13), to: at(14), includeDeclined: true)?.first)
+        #expect(store.ownAddresses[personal.email] == [personal.email])
+        #expect(shown.myResponse == nil && shown.respondsAs == nil && !shown.canRespond)
+    }
+
     @Test func anAnswerOnAnAliasEntryIsTheAccountsOwnAndAGroupInvitationSaysSo() {
         let addresses = work.myAddresses
         let toAlias = invitation("a", at(13, 9), guests: [CalendarGuest(sam, isOptional: false),

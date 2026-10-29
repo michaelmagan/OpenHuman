@@ -328,7 +328,8 @@ private struct StoredExtras: Codable {
         CalendarEventExtras(
             guests: guests.map {
                 CalendarGuest(email: $0.email, name: $0.name, isOptional: $0.isOptional,
-                              response: $0.response.flatMap(CalendarResponse.init(rawValue:)))
+                              response: $0.response.flatMap(CalendarResponse.init(rawValue:)),
+                              isOrganizer: nil)
             },
             permissions: permissions.map {
                 CalendarGuestPermissions(canModify: $0.canModify, canInviteOthers: $0.canInviteOthers,

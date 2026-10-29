@@ -83,7 +83,7 @@ struct CalendarDayView: View {
 
     private func allDayBars(_ events: [CalendarEvent]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(events) { event in
+            ForEach(events, id: \.copyKey) { event in
                 let opened = model.isOpened(event)
                 let colors = CalendarPalette.block(CalendarDayTimeline.colorIndex(for: event),
                                                    state: opened ? .selected : .normal, tokens: theme.tokens)
@@ -282,7 +282,7 @@ struct CalendarDayView: View {
         let event = block.event
         let state = CalendarPalette.state(isSelected: opened, isDeclined: event.myResponse == .declined,
                                           needsAnswer: event.canRespond && event.myResponse == .needsAction,
-                                          isTentative: false, isPast: event.end <= model.now())
+                                          isTentative: event.myResponse == .tentative, isPast: event.end <= model.now())
         let colors = CalendarPalette.block(block.colorIndex, state: state, tokens: theme.tokens)
         let ink = struck ? theme.textTertiary : colors.text
         let blockHeight = max(CGFloat(block.height) * height - 1, 14)

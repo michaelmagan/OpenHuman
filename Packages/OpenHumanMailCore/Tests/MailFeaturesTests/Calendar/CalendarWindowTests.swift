@@ -70,6 +70,52 @@ private struct CalendarWindowFixture {
     }
 }
 
+@MainActor
+@Suite struct CalendarCopyIdentityTests {
+    @Test func equalIdsHaveDistinctBlockBarSelectionAndHeldChanges() async throws {
+        for homeID in ["shared", "personal-copy"] {
+            let work = event("shared", la(10, 13, 9), la(10, 13, 10), attendees: [sam], organizerIsMe: true)
+            let personal = event(homeID, la(10, 13, 9), la(10, 13, 10), attendees: [sam], organizerIsMe: false,
+                                 response: .needsAction)
+            let f = CalendarWindowFixture(work: [work], home: [personal])
+            let model = f.window()
+            model.sleep = { _ in try await Task.sleep(for: .seconds(3_600)) }
+            await model.open()
+            let copies = model.timeGrid.blocks
+            #expect(copies.count == 2 && Set(copies.map(\.id)).count == 2)
+            let workCopy = try #require(model.events.first { $0.account == f.workEmail })
+            let homeCopy = try #require(model.events.first { $0.account == f.homeEmail })
+            model.openEvent(homeCopy)
+            #expect(model.selectedEventID == homeCopy.copyKey && model.selectedEventID != workCopy.copyKey)
+            model.openEvent(workCopy)
+            await model.moveEvent(workCopy, to: la(10, 13, 11), end: la(10, 13, 12))
+            #expect(model.shownEvents.first { $0.copyKey == workCopy.copyKey }?.start == la(10, 13, 11))
+            #expect(model.shownEvents.first { $0.copyKey == homeCopy.copyKey }?.start == la(10, 13, 9))
+            await f.env.undo?.undoLast()
+            model.openEvent(workCopy)
+            await model.removeCardEvent()
+            #expect(model.shownEvents.map(\.copyKey) == [homeCopy.copyKey])
+            await f.env.undo?.undoLast()
+            #expect(Set(model.shownEvents.map(\.copyKey)) == [workCopy.copyKey, homeCopy.copyKey])
+            model.openEvent(homeCopy)
+            await model.respond(.tentative)
+            #expect(model.shownEvents.first { $0.copyKey == homeCopy.copyKey }?.myResponse == .tentative)
+            #expect(model.shownEvents.first { $0.copyKey == workCopy.copyKey }?.myResponse == nil)
+            await f.env.undo?.undoLast()
+        }
+    }
+
+    @Test func equalIdsOnAllDayCopiesHaveDistinctBarIds() {
+        var work = event("shared", la(10, 13), la(10, 14), allDay: true)
+        var home = work
+        work.account = "work@example.test"
+        home.account = "personal@example.test"
+        let grid = CalendarTimeGrid(days: [la(10, 13)], events: [work, home], timeZone: losAngeles,
+                                    now: la(10, 12, 11))
+        #expect(grid.allDay.count == 2 && Set(grid.allDay.map(\.id)).count == 2)
+    }
+}
+
 @Suite struct CalendarWindowLayoutTests {
     @Test func theViewsCoverTheirDaysAndMoveByTheirLength() {
         let week = CalendarPeriod.containing(la(10, 14, 15), kind: .week, calendar: laCalendar)
@@ -229,7 +275,8 @@ private struct CalendarWindowFixture {
         #expect(model.events.map(\.account) == [f.workEmail, f.homeEmail], "the account chip and colour")
         #expect(model.progress == nil && model.state == .loaded && model.note == nil)
         #expect(model.timeGrid.blocks.map(\.columns) == [2, 2], "two calendars' overlapping events side by side")
-        #expect(model.sources.map(\.colorIndex) == [CalendarWindowModel.colorOrder[0], CalendarWindowModel.colorOrder[1]])
+        #expect(model.sources.map(\.colorIndex) == [CalendarDayTimeline.colorIndex(forCalendar: f.workEmail),
+                                                      CalendarDayTimeline.colorIndex(forCalendar: f.homeEmail)])
         #expect(model.timeGrid.blocks.map(\.colorIndex) == model.sources.map(\.colorIndex))
         #expect(f.work.readCalls == 1 && f.home.readCalls == 1)
         #expect(model.title == la(10, 14).formatted(Date.FormatStyle(timeZone: losAngeles).month(.wide).year()))
@@ -500,7 +547,7 @@ private struct CalendarWindowFixture {
         await model.open()
         let shown = try #require(model.events.first)
         await model.moveEvent(shown, to: la(10, 13, 11), end: la(10, 13, 12))
-        #expect(model.scopeQuestion?.eventID == "weekly-1013" && f.work.moveCalls == 0)
+        #expect(model.scopeQuestion?.eventID == shown.copyKey && f.work.moveCalls == 0)
         await model.answerScope(.allEvents)
         #expect(model.scopeQuestion == nil && f.work.moveCalls == 0)
         #expect(f.env.notices.toasts.contains { $0.message.hasPrefix("Mail changes one event of a series") })
@@ -559,10 +606,12 @@ private struct CalendarWindowFixture {
         let model = f.window()
         model.sleep = { _ in try await Task.sleep(for: .seconds(3_600)) }
         await model.open()
-        model.openEvent(try #require(model.events.first))
+        let shown = try #require(model.events.first)
+        model.openEvent(shown)
         model.askToRemoveCardEvent()
         let question = try #require(model.removeQuestion)
-        #expect(question.eventID == "own" && !question.emailsPeople && question.text.contains("Undo brings it back"))
+        #expect(question.eventID == shown.copyKey
+                && !question.emailsPeople && question.text.contains("Undo brings it back"))
         #expect(model.heldCount == 0 && model.shownEvents.map(\.id) == ["own"], "asking changes nothing")
         await model.escape()
         #expect(model.removeQuestion == nil && model.card != nil && model.heldCount == 0)

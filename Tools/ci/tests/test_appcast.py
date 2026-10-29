@@ -25,6 +25,7 @@ NOW = datetime(2026, 10, 21, 12, 0, tzinfo=timezone.utc)
 
 spec = importlib.util.spec_from_file_location("update_appcast", RELEASE / "update-appcast.py")
 appcast = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = appcast
 spec.loader.exec_module(appcast)
 
 # RFC 8032, section 7.1, test 1: an Ed25519 public key and its signature of the empty message, in Sparkle's base64 form

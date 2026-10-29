@@ -46,6 +46,8 @@ public struct CalendarEvent: Identifiable, Sendable, Hashable {
 
     public func overlaps(from: Date, to: Date) -> Bool { end > from && start < to }
 
+    public var copyKey: String { "\((account ?? "").lowercased())|\(id)" }
+
     public var isMovableByMe: Bool {
         guard !id.isEmpty, !isAllDay else { return false }
         return organizerIsMe == true || (organizerIsMe == nil && attendees.isEmpty)

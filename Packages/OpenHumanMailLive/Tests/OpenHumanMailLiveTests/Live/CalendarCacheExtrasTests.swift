@@ -32,8 +32,15 @@ import Testing
         let cache = try SQLiteCalendarCache(url: url)
         await cache.apply(.save(Self.key, upserted: [Self.detailed()], removed: [], ranges: [range], syncToken: "t1"))
         let back = try #require(await SQLiteCalendarCache(url: url).load().first?.records.first)
-        #expect(back.event.extras == Self.extras, "guests, permissions, series rules, reminders, busy, visibility and colour")
-        #expect(back == Self.detailed())
+        var expected = Self.detailed()
+        expected.event.extras.guests = expected.event.extras.guests.map { guest in
+            var unknown = guest
+            unknown.isOrganizer = nil
+            return unknown
+        }
+        #expect(back.event.extras == expected.event.extras,
+                "guest roles need a live read; other details survive the cache")
+        #expect(back == expected)
     }
 
     @Test func aFileWrittenWithoutTheDetailsIsReadAgainFromGoogle() async throws {

@@ -112,7 +112,7 @@ private struct ParityFixture {
 
         await model.setShowAll(false)
         let own = model.days.flatMap(\.events)
-        #expect(own.allSatisfy { $0.account == nil } && !own.map(\.title).contains("Dentist"), "the work calendar alone again")
+        #expect(own.allSatisfy { $0.account == f.workEmail } && !own.map(\.title).contains("Dentist"), "the work calendar alone again")
     }
 
     @Test func freeTimesUseTheDraftsAccountsCalendar() async throws {

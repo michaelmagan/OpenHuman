@@ -99,6 +99,7 @@ struct ComposerFloatingPartsTests {
         try await until(timeout: patience) { compose.windowSession?.placement == .modal }
         let session = try #require(compose.windowSession)
         await session.settle()
+        try await until(timeout: patience) { !w.editors.isEmpty }
         let body = try #require(w.editors.first)
         let tip = ComposerEditor.placeholder(for: .new)
         try await until(timeout: patience) { body.placeholder == tip }

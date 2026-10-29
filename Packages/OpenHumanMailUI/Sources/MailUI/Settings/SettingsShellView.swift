@@ -146,21 +146,32 @@ struct SettingsSidebar: View {
     let pages: [SettingsPageEntry]
     @Binding var selection: String
     var build: BuildLabel?
+    var footerFrameProbe: AnyView? = nil
+    @Environment(\.theme) private var theme
     @FocusState private var focused: Bool
 
     var body: some View {
-        List(selection: Binding<String?>(get: { selection }, set: { id in if let id { selection = id } })) {
-            ForEach(pages) { entry in
-                SettingsSidebarRow(entry: entry).tag(Optional(entry.id))
+        VStack(spacing: 0) {
+            List(selection: Binding<String?>(get: { selection }, set: { id in if let id { selection = id } })) {
+                ForEach(pages) { entry in
+                    SettingsSidebarRow(entry: entry).tag(Optional(entry.id))
+                }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(theme.bgSidebar.color)
+            .accessibilityIdentifier("settings.pageList")
+            .accessibilityLabel("Settings pages")
+            .frame(minHeight: 0, maxHeight: .infinity)
+            if let build {
+                SettingsBuildFooter(build: build)
+                    .background(theme.bgSidebar.color)
+                    .background { footerFrameProbe }
             }
         }
-        .listStyle(.sidebar)
+        .accessibilityElement(children: .contain)
         .focused($focused)
         .onAppear { focused = true }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let build { SettingsBuildFooter(build: build) }
-        }
-        .accessibilityLabel("Settings pages")
     }
 }
 
@@ -177,7 +188,7 @@ struct SettingsBuildFooter: View {
             ForEach(Self.lines(build), id: \.self) { Text($0) }
         }
         .font(.system(size: NativeMetrics.Text.caption))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(theme.textSecondary.color)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, theme.space6)
@@ -189,9 +200,11 @@ struct SettingsBuildFooter: View {
 
 struct SettingsSidebarRow: View {
     let entry: SettingsPageEntry
+    @Environment(\.theme) private var theme
 
     var body: some View {
         Label(entry.title, systemImage: entry.symbol)
+            .foregroundStyle(theme.textPrimary.color)
             .lineLimit(1)
             .accessibilityIdentifier("settings.page.\(entry.id)")
     }

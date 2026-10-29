@@ -67,14 +67,17 @@ public struct CalendarGuest: Sendable, Hashable, Identifiable {
     public var name: String?
     public var isOptional: Bool
     public var response: CalendarResponse?
+    public var isOrganizer: Bool?
 
     public var id: String { email.lowercased() }
 
-    public init(email: String, name: String? = nil, isOptional: Bool = false, response: CalendarResponse? = nil) {
+    public init(email: String, name: String? = nil, isOptional: Bool = false, response: CalendarResponse? = nil,
+                isOrganizer: Bool? = false) {
         self.email = email
         self.name = name
         self.isOptional = isOptional
         self.response = response
+        self.isOrganizer = isOrganizer
     }
 
     public init(_ address: EmailAddress, isOptional: Bool = false) {

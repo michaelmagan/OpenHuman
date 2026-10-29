@@ -133,7 +133,7 @@ struct CalendarTimeGridView: View {
                 let columnWidth = geometry.size.width / CGFloat(max(grid.days.count, 1))
                 ZStack(alignment: .topLeading) {
                     ForEach(grid.allDay) { bar in
-                        let selected = model.selectedEventID == bar.event.id
+                        let selected = model.selectedEventID == bar.event.copyKey
                         let colors = CalendarPalette.block(bar.colorIndex, state: selected ? .selected : .normal,
                                                            tokens: theme.tokens)
                         let span = CGFloat(bar.lastDay - bar.firstDay + 1)
@@ -157,7 +157,7 @@ struct CalendarTimeGridView: View {
                         }
                         .buttonStyle(.plain)
                         .onHover { inside in hover("allDay.\(bar.id)", inside) }
-                        .calendarPopoverAnchor(!bar.event.id.isEmpty && model.card?.event.id == bar.event.id)
+                        .calendarPopoverAnchor(!bar.event.id.isEmpty && model.card?.event.copyKey == bar.event.copyKey)
                         .offset(x: CGFloat(bar.firstDay) * columnWidth + 2, y: CGFloat(bar.lane) * Self.laneHeight + 1)
                         .help(bar.event.title)
                         .accessibilityLabel("\(bar.event.title), all day")
@@ -382,7 +382,7 @@ struct CalendarTimeGridView: View {
         }
         let movable = block.event.isMovableByMe && !block.startsBefore && !block.endsAfter
         let hovered = hoveredBlock == block.id
-        return CalendarEventBlockView(block: block, isSelected: model.selectedEventID == block.event.id,
+        return CalendarEventBlockView(block: block, isSelected: model.selectedEventID == block.event.copyKey,
                                       isHovered: hovered, height: blockHeight, model: model)
             .frame(width: max(width, 8), height: blockHeight)
             .overlay(alignment: .bottom) {
@@ -399,7 +399,7 @@ struct CalendarTimeGridView: View {
                 }
             }
             .onHover { inside in hover(block.id, inside) }
-            .calendarPopoverAnchor(!block.event.id.isEmpty && model.card?.event.id == block.event.id)
+            .calendarPopoverAnchor(!block.event.id.isEmpty && model.card?.event.copyKey == block.event.copyKey)
             .onTapGesture { model.openEvent(block.event) }
             .gesture(moveGesture(block, grid: grid, columnWidth: columnWidth, enabled: movable))
             .offset(x: x, y: y)

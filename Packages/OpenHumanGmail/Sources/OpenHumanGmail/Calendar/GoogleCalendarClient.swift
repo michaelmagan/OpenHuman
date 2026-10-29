@@ -358,9 +358,15 @@ public struct GoogleCalendarClient: Sendable {
         }
         let usesAlias = !attendees.contains { Self.isOwnEntry($0, calendarID: calendarID) }
         let answerAs = usesAlias ? alias?.trimmingCharacters(in: .whitespaces).lowercased() : nil
+        let organizerEmail = ((object["organizer"] as? [String: Any])?["email"] as? String)?.lowercased()
+        if answerAs != nil, organizerEmail == nil, !attendees.contains(where: { $0["organizer"] as? Bool == true }) {
+            throw GoogleCalendarError.badRequest(reason: "not_invited")
+        }
         var mine = 0
         let answered = attendees.map { entry -> [String: Any] in
             guard Self.isOwnEntry(entry, calendarID: calendarID, alias: answerAs) else { return entry }
+            guard entry["organizer"] as? Bool != true,
+                  (entry["email"] as? String)?.lowercased() != organizerEmail else { return entry }
             mine += 1
             var own = entry
             own["responseStatus"] = response
@@ -382,13 +388,17 @@ public struct GoogleCalendarClient: Sendable {
 
     public func patchEvent(id: String, patch: GoogleEventPatch, sendUpdates: GoogleSendUpdates) async throws -> GoogleCalendarEvent? {
         var current: [[String: Any]] = []
+        var attendeesOmitted = false
         if patch.guests != nil {
             let read = try await send("GET", url(["calendars", calendarID, "events", id]))
-            if let object = try? JSONSerialization.jsonObject(with: read.body) as? [String: Any] {
-                current = object["attendees"] as? [[String: Any]] ?? []
+            guard let object = try? JSONSerialization.jsonObject(with: read.body) as? [String: Any] else {
+                throw GoogleCalendarError.decoding("events.get attendees")
             }
+            current = object["attendees"] as? [[String: Any]] ?? []
+            attendeesOmitted = object["attendeesOmitted"] as? Bool == true
         }
-        let body = Self.patchBody(patch, currentAttendees: current, zone: timeZone, requestID: makeRequestID())
+        var body = Self.patchBody(patch, currentAttendees: current, zone: timeZone, requestID: makeRequestID())
+        if attendeesOmitted { body["attendeesOmitted"] = true }
         var query = [URLQueryItem(name: "sendUpdates", value: sendUpdates.rawValue)]
         if body["conferenceData"] != nil { query.append(URLQueryItem(name: "conferenceDataVersion", value: "1")) }
         let response = try await send("PATCH", url(["calendars", calendarID, "events", id], query: query),

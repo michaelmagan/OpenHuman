@@ -21,7 +21,7 @@ extension CalendarWindowModel {
         }
         let scopes = CalendarRecurrenceScope.options(for: current.event, patch: patch)
         if !scopes.isEmpty {
-            var question = CalendarScopeQuestion(eventID: current.event.id, action: .save)
+            var question = CalendarScopeQuestion(eventID: current.event.copyKey, action: .save)
             question.scopes = scopes
             scopeQuestion = question
             return
@@ -64,7 +64,7 @@ extension CalendarWindowModel {
         let updates = CalendarSendUpdatesPolicy.effective(chosen: current.sendUpdatesChoice, hasOtherGuests: others, patch: patch)
         let series = event.isRecurring && scope != .thisEvent
         let id = UUID()
-        if let time = patch.time { overlays[id] = .times(id: event.id, start: time.start, end: time.end) }
+        if let time = patch.time { overlays[id] = .times(id: event.copyKey, start: time.start, end: time.end) }
         closeCard()
         if others, patch.touchesGuests {
             let line = updates == .all ? String(localized: "Saving \(event.title)… Google emails the guests.")
@@ -125,7 +125,7 @@ extension CalendarWindowModel {
 
     // Why: a dropped event is only proposed until Accept, so leaving the proposal says the event kept its time
     func noteUnsavedMove(keeping id: String? = nil) {
-        guard let current = card, current.pendingMove != nil, current.event.id != id else { return }
+        guard let current = card, current.pendingMove != nil, current.event.copyKey != id else { return }
         environment.notices.post(String(localized: "Didn't move \(current.event.title). Accept a move to save it."),
                                  duration: NoticeCenter.infoDuration)
     }

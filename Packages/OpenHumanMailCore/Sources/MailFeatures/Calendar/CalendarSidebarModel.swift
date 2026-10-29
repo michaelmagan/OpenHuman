@@ -1454,15 +1454,15 @@ public final class CalendarSidebarModel {
                 }
                 read += 1
                 if store.lastError(source.key) != nil { stale = true }
-                events += mergedSources ? found.map { event in
+                events += found.map { event in
                     var tagged = event
                     tagged.account = source.owner.isEmpty ? nil : source.owner
                     return tagged
-                } : found
+                }
                 busy += blocks
             }
             if read > 0 {
-                day.events = events.sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
+                day.events = events.sorted { $0.start != $1.start ? $0.start < $1.start : $0.copyKey < $1.copyKey }
                 day.busy = CalendarEventStore.merged(busy.sorted { $0.start < $1.start })
                 day.free = Self.free(day: day.start, busy: day.busy, calendar: calendar)
             }

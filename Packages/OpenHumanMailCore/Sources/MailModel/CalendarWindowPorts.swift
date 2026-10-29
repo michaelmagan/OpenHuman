@@ -77,7 +77,7 @@ extension CalendarEvent {
     public func resolvingMyResponse(addresses: Set<String>) -> CalendarEvent {
         guard myResponse == nil, organizerIsMe != true, !id.isEmpty, !addresses.isEmpty else { return self }
         let mine = Set(addresses.map { $0.lowercased() })
-        let entries = extras.guests.filter { mine.contains($0.email.lowercased()) }
+        let entries = extras.guests.filter { $0.isOrganizer == false && mine.contains($0.email.lowercased()) }
         guard entries.count == 1, let entry = entries.first else { return self }
         var resolved = self
         resolved.myResponse = entry.response ?? .needsAction

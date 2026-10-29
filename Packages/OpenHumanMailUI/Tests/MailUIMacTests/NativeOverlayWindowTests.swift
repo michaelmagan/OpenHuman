@@ -60,7 +60,7 @@ private final class SurfaceRecord {
             window.close()
         }
         hosting.layoutSubtreeIfNeeded()
-        try? await until(timeout: .seconds(5)) {
+        try await until(timeout: testBackstop) {
             hosting.layoutSubtreeIfNeeded()
             return record.surface == requested
         }
@@ -69,10 +69,11 @@ private final class SurfaceRecord {
 
     @Test func everyOverlayFloatsOnGlassAndTheRenderFallbackIsTheMaterial() async throws {
         let env = await environment()
+        let glassSurface: NativeOverlaySurface = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency ? .material : .glass
         for (action, name) in Self.opened {
             #expect(env.router.perform(action), "\(name) opens")
             #expect(env.overlays.isShowing, "\(name) is shown")
-            #expect(try await surface(of: env.overlays, requested: .glass) == .glass, "\(name) is drawn on glass")
+            #expect(try await surface(of: env.overlays, requested: .glass) == glassSurface, "\(name) is drawn on glass")
             #expect(try await surface(of: env.overlays, requested: .material) == .material, "\(name) can draw on the material")
             env.overlays.dismiss()
         }

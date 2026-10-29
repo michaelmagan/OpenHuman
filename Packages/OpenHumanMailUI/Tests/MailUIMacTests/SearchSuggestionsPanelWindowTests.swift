@@ -22,8 +22,7 @@ import Testing
 
     private func wait(_ what: String, _ condition: @MainActor () -> Bool) async throws {
         do {
-            // Long enough for a loaded machine, short enough that a panel that never shows fails fast
-            try await until(timeout: .seconds(30), condition)
+            try await until(timeout: testBackstop, condition)
         } catch {
             Issue.record("timed out waiting for \(what)")
             throw error

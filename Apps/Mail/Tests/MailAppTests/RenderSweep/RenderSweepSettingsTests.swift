@@ -54,7 +54,7 @@ struct RenderSweepSettingsTests {
         #expect(semantic != nil, "the smart search rows need a store with semantic reads")
         PromptServices.install(persistent: false, directory: nil)
         let notifications = NotificationsSettingsModel(environment: environment)
-        func hosting(_ tab: AISettingsTab = .overview) -> SettingsHosting {
+        func hosting(_ tab: AISettingsTab = .overview, build: BuildLabel? = nil) -> SettingsHosting {
             SettingsHosting(
                 appearance: { AnyView(AppearanceSettingsView(store: themes, fontFamilies: ["Inter", "New York"])) },
                 notifications: { AnyView(NotificationsSettingsView(model: notifications)) },
@@ -62,7 +62,7 @@ struct RenderSweepSettingsTests {
                 aiProviders: {
                     AISettingsPageContent.view(center: center, environment: environment, showsDeveloperItems: false,
                                                classifier: SweepClassifierPort(), semantic: semantic, initialTab: tab)
-                })
+                }, build: build)
         }
         let pages = SettingsShellModel(environment: environment).pages
         #expect(pages.count >= 10, "every built-in page and the module pages")
@@ -82,6 +82,13 @@ struct RenderSweepSettingsTests {
                 try Self.shoot(tall, screen: "settings-\(page.id)-full", theme: theme, in: directory)
             }
         }
+        environment.settingsNavigator.open(SettingsPageID.advanced.rawValue)
+        let short = Self.window(SettingsShellView(environment: environment, hosting: hosting(build: BuildLabel(
+            version: "0.1.0", build: "1001", channel: BuildLabel.earlyDevelopmentChannel))), themes: themes,
+                                size: NSSize(width: SettingsMetrics.windowWidth, height: 360))
+        defer { short.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(600))
+        try Self.shoot(short, screen: "settings-sidebar-short", theme: theme, in: directory)
         for tab in [AISettingsTab.prompts, .activity] {
             environment.settingsNavigator.open("ai")
             let window = Self.window(SettingsShellView(environment: environment, hosting: hosting(tab)), themes: themes,

@@ -193,6 +193,7 @@ public final class CalendarGuardTransport: HTTPTransport {
                 return false
             }
             guard GoogleCalendarClient.isOwnEntry(entry, calendarID: calendarID, alias: alias) else { continue }
+            guard entry["organizer"] as? Bool != true else { return false }
             own += 1
             guard let answer = entry["responseStatus"] as? String, GoogleCalendarClient.answers.contains(answer) else {
                 return false
@@ -204,6 +205,7 @@ public final class CalendarGuardTransport: HTTPTransport {
     static let detailKeys: Set<String> = [
         "summary", "description", "location", "start", "end", "attendees", "guestsCanModify", "guestsCanInviteOthers",
         "guestsCanSeeOtherGuests", "conferenceData", "recurrence", "reminders", "transparency", "visibility", "colorId",
+        "attendeesOmitted",
     ]
 
     static func isDetailPatch(_ body: Data?) -> Bool {
@@ -216,6 +218,9 @@ public final class CalendarGuardTransport: HTTPTransport {
             guard let list = attendees as? [[String: Any]], list.allSatisfy({ ($0["email"] as? String)?.isEmpty == false }) else {
                 return false
             }
+        }
+        if object["attendeesOmitted"] != nil {
+            guard object["attendees"] != nil, object["attendeesOmitted"] as? Bool == true else { return false }
         }
         if let rules = object["recurrence"] {
             guard let list = rules as? [String], list.allSatisfy({ line in

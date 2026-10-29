@@ -85,7 +85,7 @@ public struct CalendarTimeGrid: Sendable, Hashable {
 
     public struct Block: Identifiable, Sendable, Hashable {
         public let event: CalendarEvent
-        public var id: String { "\(event.id)@\(event.start.timeIntervalSince1970)#\(dayIndex)" }
+        public var id: String { "\(event.copyKey)@\(event.start.timeIntervalSince1970)#\(dayIndex)" }
         public let dayIndex: Int
         public let top: Double
         public let height: Double
@@ -101,7 +101,7 @@ public struct CalendarTimeGrid: Sendable, Hashable {
 
     public struct AllDayBar: Identifiable, Sendable, Hashable {
         public let event: CalendarEvent
-        public var id: String { "\(event.id)@\(event.start.timeIntervalSince1970)" }
+        public var id: String { "\(event.copyKey)@\(event.start.timeIntervalSince1970)" }
         public let firstDay: Int
         public let lastDay: Int
         public let lane: Int
@@ -160,7 +160,7 @@ public struct CalendarTimeGrid: Sendable, Hashable {
         }.sorted { a, b in
             if a.1 != b.1 { return a.1 < b.1 }
             if a.2 != b.2 { return a.2 > b.2 }
-            return a.0.id < b.0.id
+            return a.0.copyKey < b.0.copyKey
         }
         var laneEnds: [Int] = []
         var laid: [AllDayBar] = []

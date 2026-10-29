@@ -376,7 +376,8 @@ final class GoogleCalendarProvider: CalendarProviding {
         var out = CalendarEventExtras()
         out.guests = event.attendees.map {
             CalendarGuest(email: $0.email, name: $0.name, isOptional: $0.isOptional,
-                          response: $0.responseStatus.flatMap(CalendarResponse.init(rawValue:)))
+                          response: $0.responseStatus.flatMap(CalendarResponse.init(rawValue:)),
+                          isOrganizer: $0.isOrganizer)
         }
         if read.guestsCanModify != nil || read.guestsCanInviteOthers != nil || read.guestsCanSeeOtherGuests != nil {
             out.permissions = CalendarGuestPermissions(canModify: read.guestsCanModify ?? false,

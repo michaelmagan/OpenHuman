@@ -172,7 +172,8 @@ private func at(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
     @Test func thePatchReadsTheEventFirstForGuestsAndSendsTheMarkedRequest() async throws {
         let http = FakeHTTPTransport()
         http.on("GET", "/calendar/v3/calendars/robin@example.com/events/ev1") { _ in
-            jsonResponse(200, ["id": "ev1", "attendees": [["email": "sam@example.org", "responseStatus": "accepted"]]])
+            jsonResponse(200, ["id": "ev1", "attendeesOmitted": true,
+                               "attendees": [["email": "sam@example.org", "responseStatus": "accepted"]]])
         }
         http.on("PATCH", "/calendar/v3/calendars/robin@example.com/events/ev1") { _ in
             jsonResponse(200, ["id": "ev1", "status": "confirmed", "summary": "Planning",
@@ -190,6 +191,9 @@ private func at(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
         let query = URLComponents(url: sent.url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         #expect(query.first { $0.name == "sendUpdates" }?.value == "all" && query.first { $0.name == "conferenceDataVersion" }?.value == "1")
         #expect(sent.headers[CalendarGuardTransport.editRuleHeader] == nil, "the marker never leaves the process")
+        let body = try #require(try JSONSerialization.jsonObject(with: sent.body ?? Data()) as? [String: Any])
+        #expect(body["attendeesOmitted"] as? Bool == true)
+        #expect(guardFor().refusalReason(for: patch("?sendUpdates=all", body)) == nil)
     }
 
     @Test func aReadGrantNeverSendsAnEdit() async {

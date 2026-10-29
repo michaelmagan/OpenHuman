@@ -32,6 +32,10 @@ struct ReaderHeaderPolishTests {
         h.controller.view.layoutSubtreeIfNeeded()
         let subject = h.controller.subjectView
         let row = h.controller.subjectContainer
+        try await until {
+            h.controller.view.layoutSubtreeIfNeeded()
+            return row.frame.width > 300 && (width >= 700 || subject.frame.height > 40)
+        }
         #expect(subject.alignmentRect(forFrame: subject.frame).width == row.frame.width, "\(name): the subject is the container width")
         #expect(row.frame.width > 300, "\(name)")
         let inset = ReaderViewController.contentInset(.light)
@@ -61,6 +65,14 @@ struct ReaderHeaderPolishTests {
         defer { h.close() }
         h.window.setFrame(NSRect(x: -5000, y: -5000, width: 1360, height: 900), display: true)
         h.controller.view.layoutSubtreeIfNeeded()
+        try await until {
+            h.controller.view.layoutSubtreeIfNeeded()
+            let subject = h.controller.subjectContainer.convert(h.controller.subjectView.bounds, from: h.controller.subjectView)
+            let meta = h.controller.metaLabelView
+            let metaFrame = h.controller.subjectContainer.convert(meta.bounds, from: meta)
+            guard subject.height > 0, metaFrame.height > 0 else { return false }
+            return h.controller.subjectContainer.isFlipped ? metaFrame.minY >= subject.maxY : metaFrame.maxY <= subject.minY
+        }
         let font = try #require((h.controller.subjectView as? NSTextField)?.font)
         #expect(font.pointSize == NativeMetrics.Reader.subjectSize)
         let weight = (font.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any])?[.weight] as? CGFloat

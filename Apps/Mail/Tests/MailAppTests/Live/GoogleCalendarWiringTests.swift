@@ -693,7 +693,7 @@ private final class CalendarHarness {
         read.extras.reminderOverrides = [GoogleReminder(method: "popup", minutes: 15)]
         read.extras.transparency = "transparent"
         let shown = GoogleCalendarProvider.event(read)
-        #expect(shown.extras.guests == [CalendarGuest(email: "sam@example.org", isOptional: true, response: .accepted)])
+        #expect(shown.extras.guests == [CalendarGuest(email: "sam@example.org", isOptional: true, response: .accepted, isOrganizer: nil)])
         #expect(shown.extras.permissions == CalendarGuestPermissions(canModify: true, canInviteOthers: true, canSeeGuestList: true))
         #expect(shown.extras.reminders == .custom([CalendarReminder(method: .popup, minutesBefore: 15)]) && shown.extras.busy == .free)
     }

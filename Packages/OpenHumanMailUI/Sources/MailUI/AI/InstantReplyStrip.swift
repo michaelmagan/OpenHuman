@@ -14,15 +14,8 @@ public struct InstantReplyStrip: View {
         self.model = model
     }
 
-    enum Fit: CaseIterable { case full, withoutHint, compact, narrow }
-
     public var body: some View {
-        ViewThatFits(in: .horizontal) {
-            row(.full)
-            row(.withoutHint)
-            row(.compact)
-            row(.narrow)
-        }
+        row
         .frame(height: InstantReplyMetrics.rowHeight)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -48,50 +41,40 @@ public struct InstantReplyStrip: View {
         return .linear(duration: theme.motionInstant.seconds)
     }
 
-    private func row(_ fit: Fit) -> some View {
-        HStack(spacing: theme.space3) {
-            switch fit {
-            case .full, .withoutHint:
-                HStack(spacing: 4) {
-                    Image(systemName: "sparkle").font(.system(size: 11))
-                    Text(String(localized: "Quick replies")).font(theme.typeLabel.swiftUIFont)
-                }
+    private var row: some View {
+        let showsHint = revealsHint && !model.hint.isEmpty
+        return InstantReplyRowLayout(spacing: theme.space3, showsHint: showsHint) {
+            Image(systemName: "sparkle")
+                .font(.system(size: 11))
                 .foregroundStyle(theme.textSecondary.color)
-                .accessibilityElement(children: .combine)
+                .accessibilityLabel(String(localized: "Quick replies"))
+            Text(String(localized: "Quick replies"))
+                .font(theme.typeLabel.swiftUIFont)
+                .foregroundStyle(theme.textSecondary.color)
                 .fixedSize()
-            case .compact, .narrow:
-                Image(systemName: "sparkle")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.textSecondary.color)
-                    .accessibilityLabel(String(localized: "Quick replies"))
-            }
-            content(fit)
-            Spacer(minLength: theme.space3)
-            if fit == .full, !model.hint.isEmpty {
-                let shows = revealsHint
-                hint
-                    .opacity(shows ? 1 : 0)
-                    .allowsHitTesting(shows)
-                    .animation(Self.hintMotion(revealing: shows, reduceMotion: reduceMotion || theme.reduceMotion,
-                                               reveal: theme.tokens.motion(theme.motionReveal, transform: false)).animation,
-                               value: shows)
-            }
+            HStack(spacing: 0) { content }
+            hint
+                .opacity(showsHint ? 1 : 0)
+                .allowsHitTesting(showsHint)
+                .animation(Self.hintMotion(revealing: showsHint, reduceMotion: reduceMotion || theme.reduceMotion,
+                                           reveal: theme.tokens.motion(theme.motionReveal, transform: false)).animation,
+                           value: showsHint)
             if let badge = model.badge {
-                AIProviderBadgeView(badge: badge, short: fit == .compact || fit == .narrow)
+                AIProviderBadgeView(badge: badge, short: true)
                     .fixedSize()
-                    .layoutPriority(1)
+            } else {
+                Color.clear.frame(width: 0, height: 0)
             }
             hideButton
-                .layoutPriority(1)
         }
     }
 
-    @ViewBuilder private func content(_ fit: Fit) -> some View {
+    @ViewBuilder private var content: some View {
         switch shown {
         case .waiting:
             waiting
         case .ready:
-            chips(maxWidth: fit == .narrow ? InstantReplyMetrics.narrowChipMaxWidth : InstantReplyMetrics.chipMaxWidth)
+            chips
         case .quiet(let text, let canRetry):
             quiet(text, canRetry: canRetry)
         case .used, .hidden:
@@ -99,9 +82,10 @@ public struct InstantReplyStrip: View {
         }
     }
 
-    private func chips(maxWidth: CGFloat) -> some View {
+    private var chips: some View {
         HStack(spacing: theme.space3) {
-            ChipRowLayout(spacing: theme.space3, maxWidth: maxWidth, floor: InstantReplyMetrics.chipMinWidth) {
+            ChipRowLayout(spacing: theme.space3, maxWidth: InstantReplyMetrics.chipMaxWidth,
+                          floor: InstantReplyMetrics.narrowChipMinWidth) {
                 ForEach(Array(model.options.prefix(3).enumerated()), id: \.element.id) { index, option in
                     chip(option, index: index)
                 }
@@ -274,8 +258,8 @@ public struct InstantReplyStrip: View {
 public enum InstantReplyMetrics {
     public static let rowHeight: CGFloat = 32
     static let chipMaxWidth: CGFloat = 180
-    static let narrowChipMaxWidth: CGFloat = 120
     static let chipMinWidth: CGFloat = 40
+    static let narrowChipMinWidth: CGFloat = 32
     static let placeholderWidth: CGFloat = 96
     static let selectedBorder: CGFloat = 1.5
     static let chipCorner: CGFloat = 4
@@ -301,6 +285,53 @@ struct ChipShape: InsettableShape {
         var shape = self
         shape.inset += amount
         return shape
+    }
+}
+
+struct InstantReplyRowLayout: Layout {
+    let spacing: CGFloat
+    let showsHint: Bool
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let shown = [0, 1, 2, 4, 5] + (showsHint ? [3] : [])
+        let ideal = shown.reduce(CGFloat.zero) { $0 + sizes[$1].width }
+            + spacing * CGFloat(shown.count - 1)
+        return CGSize(width: proposal.width ?? ideal, height: sizes.map(\.height).max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let icon = sizes[0].width
+        let label = sizes[1].width
+        let content = sizes[2].width
+        let hint = sizes[3].width
+        let badge = sizes[4].width
+        let hide = sizes[5].width
+        let badgeGap = badge > 0 ? spacing : 0
+        let hideX = bounds.maxX - hide
+        let badgeX = hideX - badgeGap - badge
+        let contentEnd = badgeX - spacing
+        let contentStart = bounds.minX + icon + spacing
+        let room = max(0, contentEnd - contentStart)
+        let chipFloor = min(content, 3 * InstantReplyMetrics.narrowChipMinWidth + 2 * spacing)
+        let labelFits = room >= chipFloor + spacing + label
+        let hintFits = showsHint && room >= chipFloor + (labelFits ? label + spacing : 0) + hint + spacing
+        let textWidth = labelFits ? label + spacing : 0
+        let hintWidth = hintFits ? hint + spacing : 0
+        let contentWidth = min(content, max(0, room - textWidth - hintWidth))
+
+        func place(_ index: Int, x: CGFloat, width: CGFloat) {
+            subviews[index].place(at: CGPoint(x: x, y: bounds.midY), anchor: .leading,
+                                  proposal: ProposedViewSize(width: width, height: bounds.height))
+        }
+        place(0, x: bounds.minX, width: icon)
+        if labelFits { place(1, x: contentStart, width: label) }
+        let chipsX = contentStart + textWidth
+        place(2, x: chipsX, width: contentWidth)
+        if hintFits { place(3, x: chipsX + contentWidth + spacing, width: hint) }
+        if badge > 0 { place(4, x: badgeX, width: badge) }
+        place(5, x: hideX, width: hide)
     }
 }
 

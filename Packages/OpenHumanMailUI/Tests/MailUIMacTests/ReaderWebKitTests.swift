@@ -446,14 +446,16 @@ struct ReaderWebKitTests {
         let window = TestWindows.window(view, size: NSSize(width: 600, height: 400))
         defer { window.close() }
         view.widthAnchor.constraint(equalToConstant: 600).isActive = true
-        await Reports.heights(of: view).wait { view.isShown }
+        let heights = Reports.heights(of: view)
+        await heights.wait { view.isShown }
+        let measured = try #require(try await view.evaluateJavaScript(
+            "Math.ceil(document.getElementById('oh-root').getBoundingClientRect().height)", in: nil,
+            contentWorld: .defaultClient) as? Double)
+        await heights.wait { abs((view.measuredHeight ?? 0) - CGFloat(measured)) <= 1 }
         let settled = try #require(view.measuredHeight)
         window.contentView?.layoutSubtreeIfNeeded()
         #expect(abs(view.frame.height - settled) <= 1, "the view takes the body's height, and so does its viewport")
-        let measured = try await view.evaluateJavaScript(
-            "Math.ceil(document.getElementById('oh-root').getBoundingClientRect().height)", in: nil,
-            contentWorld: .defaultClient) as? Double
-        #expect(measured.map { CGFloat($0) } == settled, "at that viewport the body is no taller")
+        #expect(CGFloat(measured) == settled, "at that viewport the body is no taller")
         #expect(settled > 600 && settled < 800, "the block at a fixed viewport, height \(settled)")
     }
 

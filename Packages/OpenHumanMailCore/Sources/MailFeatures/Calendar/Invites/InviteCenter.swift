@@ -111,7 +111,7 @@ public final class InviteCenter {
         var seen = newest[thread] ?? [:]
         seen[invite.uid] = max(seen[invite.uid] ?? invite.sequence, invite.sequence)
         newest[thread] = seen
-        var known = answered[Self.answerKey(invite)]
+        var known = answered[Self.answerKey(invite, account: thread.account)]
         var conflicts: [CalendarEvent] = []
         let provider = invite.method == .request && !invite.isCancelled ? await calendar(for: thread.account) : nil
         calendarRefusals[message.id] = provider.flatMap(Self.answerRefusal)
@@ -124,12 +124,16 @@ public final class InviteCenter {
             await store.ensure(key, provider: provider, from: invite.start, to: to, today: now(), calendar: calendar,
                                now: now())
             if let events = store.events(key, from: invite.start, to: to, includeDeclined: true) {
-                let title = invite.title ?? ""
-                if known == nil, let same = events.first(where: { $0.title == title && $0.start == invite.start }) {
-                    known = same.myResponse
-                }
                 conflicts = events
             }
+        }
+        if known == nil, let provider, Self.answerRefusal(provider) == nil,
+           invite.attendees.contains(where: { addresses.contains($0.email) && $0.email != invite.organizer?.email }) {
+            let query = CalendarInviteQuery(uid: invite.uid, title: invite.title ?? "", start: invite.start,
+                                            end: invite.end, organizer: invite.organizer?.email,
+                                            recurrenceID: invite.recurrenceID, repeats: invite.repeats,
+                                            matchesTitle: false)
+            known = (try? await provider.invitedEvent(query, wholeSeries: false))?.myResponse
         }
         let card = InviteCardBuilder.card(invite, message: message.id, myAddresses: addresses, timeZone: timeZone,
                                           locale: locale, known: known, conflicts: conflicts,
@@ -145,7 +149,10 @@ public final class InviteCenter {
 
     private func myAddresses(_ account: AccountID) async -> Set<String> {
         let accounts = await AIThreadLoader.first(environment.data.accounts()) ?? []
-        return accounts.first { $0.id == account }?.myAddresses ?? []
+        guard let owner = accounts.first(where: { $0.id == account }) else { return [] }
+        let connected = Set(accounts.map { $0.email.lowercased() })
+        let own = owner.email.lowercased()
+        return owner.myAddresses.filter { $0 == own || !connected.contains($0) }
     }
 
     func calendar(for account: AccountID) async -> (any CalendarProviding)? {
@@ -174,8 +181,8 @@ public final class InviteCenter {
         return String(decoding: data, as: UTF8.self)
     }
 
-    static func answerKey(_ invite: CalendarInvite) -> String {
-        "\(invite.uid)|\(invite.occurrence.timeIntervalSince1970)"
+    static func answerKey(_ invite: CalendarInvite, account: AccountID) -> String {
+        "\(account.rawValue)|\(invite.uid)|\(invite.occurrence.timeIntervalSince1970)"
     }
 
 
@@ -231,7 +238,7 @@ public final class InviteCenter {
         let previous = card.response
         card.response = response
         entries[key] = .card(card)
-        answered[Self.answerKey(card.invite)] = response
+        answered[Self.answerKey(card.invite, account: thread.account)] = response
         let (token, reopens) = await markDone(thread)
         let id = UUID()
         records[id] = Record(message: key, thread: thread, invite: card.invite, title: card.title, provider: provider,
@@ -301,15 +308,16 @@ public final class InviteCenter {
             } else {
                 environment.calendarEvents.applyLocal(key, upsert: answer)
             }
-            environment.notices.post(String(localized: "Answered \(record.response.title) to \(record.title)."),
+            let account = record.provider.info.account ?? ""
+            environment.notices.post(String(localized: "Answered \(record.response.title) to \(record.title) on \(account)."),
                                      duration: NoticeCenter.infoDuration)
         } catch {
             record.stage = .failed
             records[id] = record
-            answered[Self.answerKey(invite)] = nil
+            answered[Self.answerKey(invite, account: record.thread.account)] = nil
             show(record.previous, on: record.message)
             if error is NotOnCalendar {
-                postNotFound(record)
+                await postNotFound(record)
             } else {
                 environment.notices.post(String(localized: "Couldn't answer \(record.title). \(CalendarSidebarModel.message(error))"),
                                          style: .error)
@@ -317,30 +325,18 @@ public final class InviteCenter {
         }
     }
 
-    // Why: an invitation sent to another connected account's address can sit only on that account's calendar; there
-    // only an iCalUID match counts, never a look-alike
     private func locate(_ query: CalendarInviteQuery, for record: Record) async throws
         -> (event: CalendarEvent, provider: any CalendarProviding, addresses: Set<String>)? {
-        let accounts = await AIThreadLoader.first(environment.data.accounts()) ?? []
-        let own = accounts.first { $0.id == record.thread.account }?.myAddresses ?? []
+        let own = await myAddresses(record.thread.account)
         if let event = try await record.provider.invitedEvent(query, wholeSeries: record.wholeSeries) {
             return (event, record.provider, own)
-        }
-        guard let connections = environment.calendarConnections, connections.routesByAccount else { return nil }
-        let guests = Set(record.invite.attendees.map { $0.email.lowercased() })
-        var strict = query
-        strict.matchesTitle = false
-        for other in accounts where other.id != record.thread.account && guests.contains(other.email.lowercased()) {
-            guard let provider = connections.calendarProvider(for: other), Self.answerRefusal(provider) == nil,
-                  let event = try? await provider.invitedEvent(strict, wholeSeries: record.wholeSeries) else { continue }
-            Log(.calendar).notice("invitation found on another account's calendar")
-            return (event, provider, other.myAddresses)
         }
         return nil
     }
 
-    private func postNotFound(_ record: Record) {
-        let account = record.provider.info.account ?? ""
+    private func postNotFound(_ record: Record) async {
+        let accounts = await AIThreadLoader.first(environment.data.accounts()) ?? []
+        let account = accounts.first { $0.id == record.thread.account }?.email ?? record.provider.info.account ?? ""
         let message = account.isEmpty
             ? String(localized: "Couldn't answer \(record.title). Mail couldn't find it on your calendar; it may have moved. Open it in Calendar to answer.")
             : String(localized: "Couldn't answer \(record.title). Mail couldn't find it on the calendar of \(account); it may have moved. Open it in Calendar to answer.")
@@ -381,7 +377,7 @@ public final class InviteCenter {
 
     func undo(_ id: UUID) async {
         guard let record = records.removeValue(forKey: id) else { return }
-        let key = Self.answerKey(record.invite)
+        let key = Self.answerKey(record.invite, account: record.thread.account)
         if let task = held.removeValue(forKey: id) {
             task.cancel()
             answered[key] = nil

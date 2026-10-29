@@ -96,8 +96,8 @@ public final class SystemCenter {
         let environment = self.environment
         diagnostics = DiagnosticsExporter(
             data: environment.data, info: { [isFake = environment.isFake] in Self.appInfo(isFake: isFake) },
-            modules: { [unowned environment] in
-                Dictionary(uniqueKeysWithValues: FeatureModuleID.mur1.map { ($0.rawValue, environment.modules.modules.contains($0)) })
+            modules: { [weak environment] in
+                Dictionary(uniqueKeysWithValues: FeatureModuleID.mur1.map { ($0.rawValue, environment?.modules.modules.contains($0) == true) })
             },
             logLines: { [weak self] in self?.logLines() ?? [] },
             calendars: { [weak environment] in await environment?.calendarDiagnostics() ?? [] })
@@ -148,6 +148,7 @@ public final class SystemCenter {
     }
 
     public func stopAll() {
+        unsubscribe?.uninstall()
         notifications?.stop()
         reminderMirror?.stop()
         dockBadge?.stop()
@@ -155,6 +156,7 @@ public final class SystemCenter {
         menuBar?.stop()
         globalHotkey?.stop()
         services?.stop()
+        toastOnly?.stop()
         for task in observers { task.cancel() }
         observers = []
         if let preferenceObserver { preferences.removeObserver(preferenceObserver) }
@@ -166,6 +168,9 @@ public final class SystemCenter {
         menuBar = nil
         globalHotkey = nil
         services = nil
+        unsubscribe = nil
+        diagnostics = nil
+        toastOnly = nil
         focus?.onChange = nil
         focus = nil
     }

@@ -19,7 +19,7 @@ public protocol ReaderHeaderAccessory: AnyObject {
 
 @MainActor
 public final class ReaderHeaderAccessoryStore {
-    public var current: (any ReaderHeaderAccessory)?
+    public weak var current: (any ReaderHeaderAccessory)?
     public init(current: (any ReaderHeaderAccessory)? = nil) { self.current = current }
 }
 

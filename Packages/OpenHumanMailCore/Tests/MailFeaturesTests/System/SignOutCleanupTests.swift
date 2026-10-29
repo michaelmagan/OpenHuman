@@ -66,4 +66,36 @@ struct SignOutCleanupTests {
         #expect(f.env.system.preferences.menuBarEnabled && f.env.system.preferences.globalHotkeyEnabled,
                 "the user's choices stay for the next window")
     }
+
+    @Test func removingTheLastAccountThenSigningInCanOpenAMessage() async throws {
+        let corpus = FakeCorpus.make(threadCount: 3, now: fixedNow)
+        let store = FakeMailStore(corpus: corpus)
+        let oldAccount = try #require(corpus.accounts.first?.id)
+        var previous: AppEnvironment? = AppEnvironment(data: store, commands: store, accounts: store,
+                                                        settings: store, isFake: true, featureFlags: FeatureFlags())
+        previous?.system.startUnsubscribe()
+        weak var removedAccessory = previous?.system.unsubscribe
+        try await store.remove(oldAccount)
+        previous?.system.unsubscribe?.install()
+        #expect(ReaderHeaderAccessorySlot.current === removedAccessory)
+        previous?.system.stopAll()
+        previous = nil
+        #expect(removedAccessory == nil)
+        #expect(ReaderHeaderAccessorySlot.current == nil)
+
+        let client = Data(#"{"installed":{"client_id":"fake","client_secret":"fake"}}"#.utf8)
+        try await store.importOAuthClient(json: client)
+        let account = try await store.addAccount(loginHint: "reconnected@example.org")
+        store.deliverMessage(account: account, from: sender, subject: "Welcome back")
+        let next = AppEnvironment(data: store, commands: store, accounts: store, settings: store,
+                                  isFake: true, featureFlags: FeatureFlags().with(.unsubscribe, false))
+        next.router.start()
+        await eventually { next.router.activeAccountID == account }
+        next.router.go(to: .system(.inbox))
+        await eventually { next.router.list?.rows.first != nil }
+        let thread = try #require(next.router.list?.rows.first?.id)
+        next.router.open(thread)
+        await eventually { next.router.reader?.state == .loaded }
+        #expect(next.router.reader?.messages.count == 1)
+    }
 }

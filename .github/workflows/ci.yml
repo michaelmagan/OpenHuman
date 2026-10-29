@@ -21,6 +21,7 @@ jobs:
       # Why: a released Xcode, never the newest installed beta
       XCODE_APP: ${{ vars.XCODE_APP || '/Applications/Xcode_27.0.app' }}
       XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
+      SWIFT_BACKTRACE: enable=yes,sanitize=yes,threads=all
     steps:
       - uses: actions/checkout@v4
 
@@ -64,7 +65,9 @@ jobs:
           python3 -m unittest discover -s Tools/ci/tests -p 'test_*.py'
 
       - name: Build and test packages
-        run: Tools/ci/build-packages.sh --platform macos
+        env:
+          OH_TEST_LOG_DIR: ${{ runner.temp }}/package-test-logs
+        run: Tools/ci/build-packages.sh --platform macos --exclude OpenHumanMailUI
 
       - name: Bootstrap app project
         run: Tools/bootstrap.sh
@@ -80,11 +83,12 @@ jobs:
 
       - name: Test app against fixtures
         run: |
+          set -o pipefail
           mkdir -p build
           xcodebuild test -project Apps/Mail/Mail.xcodeproj -scheme Mail \
             -destination 'platform=macOS,arch=arm64' \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
-            -resultBundlePath build/TestResults.xcresult
+            -resultBundlePath build/TestResults.xcresult 2>&1 | tee "$RUNNER_TEMP/app-test.log"
 
       - name: Build development artifact
         run: Tools/ci/build-app.sh --build-number "${{ github.run_number }}"
@@ -103,3 +107,90 @@ jobs:
         with:
           name: test-results
           path: build/TestResults.xcresult
+
+      - name: Print last started tests
+        if: failure()
+        run: |
+          if [ -d "$RUNNER_TEMP/package-test-logs" ]; then
+            find "$RUNNER_TEMP/package-test-logs" -name '*.log' -type f -print0 \
+              | xargs -0 grep -hE 'Test (Case )?.*started' | tail -n 40 || true
+          fi
+          if [ -f "$RUNNER_TEMP/app-test.log" ]; then
+            grep -E 'Test (Case )?.*started' "$RUNNER_TEMP/app-test.log" | tail -n 40 || true
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: package-diagnostics
+          path: |
+            ${{ runner.temp }}/package-test-logs/*.log
+            ${{ runner.temp }}/app-test.log
+            ~/Library/Logs/DiagnosticReports/*.ips
+            ~/Library/Logs/DiagnosticReports/*.crash
+          if-no-files-found: ignore
+
+  macos-mail-ui:
+    runs-on: ${{ vars.MACOS_RUNNER_LABEL || 'xcode-27' }}
+    timeout-minutes: 120
+    env:
+      XCODE_APP: ${{ vars.XCODE_APP || '/Applications/Xcode_27.0.app' }}
+      XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
+      SWIFT_BACKTRACE: enable=yes,sanitize=yes,threads=all
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        id: xcode
+        run: |
+          if [ ! -d "$XCODE_APP" ]; then
+            echo "::error::$XCODE_APP is not installed on this runner; set the XCODE_APP and XCODE_VERSION repository variables"
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+          found="$(xcodebuild -version | sed -n 's/^Xcode //p')"
+          if [ "$found" != "$XCODE_VERSION" ]; then
+            echo "::error::$XCODE_APP is Xcode $found, expected $XCODE_VERSION"
+            exit 1
+          fi
+          echo "build=$(xcodebuild -version | sed -n 's/^Build version //p')" >> "$GITHUB_OUTPUT"
+          xcrun swift --version
+
+      - name: Install the Metal toolchain
+        run: |
+          if ! xcrun metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun metal --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            Packages/*/.build
+            ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
+          key: macos-spm-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Apps/Mail/project.yml') }}
+
+      - name: Test Mail UI and window layouts
+        env:
+          OH_TEST_LOG_DIR: ${{ runner.temp }}/package-test-logs
+        run: Tools/ci/build-packages.sh --platform macos --serialized-tests OpenHumanMailUI
+
+      - name: Print last started tests
+        if: failure()
+        run: |
+          if [ -d "$RUNNER_TEMP/package-test-logs" ]; then
+            find "$RUNNER_TEMP/package-test-logs" -name '*.log' -type f -print0 \
+              | xargs -0 grep -hE 'Test (Case )?.*started' | tail -n 40 || true
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: mail-ui-diagnostics
+          path: |
+            ${{ runner.temp }}/package-test-logs/*.log
+            ~/Library/Logs/DiagnosticReports/*.ips
+            ~/Library/Logs/DiagnosticReports/*.crash
+          if-no-files-found: ignore

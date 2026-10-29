@@ -109,6 +109,15 @@ private struct InviteFixture {
 
 @MainActor
 @Suite(.serialized) struct InviteCenterTests {
+    @Test func rememberedAnswersUseTheInboxAccountAsPartOfTheirKey() async throws {
+        let f = InviteFixture()
+        let (thread, message) = try await f.invitation()
+        let card = try await f.card(thread, message)
+        let work = InviteCenter.answerKey(card.invite, account: f.corpus.accounts[0].id)
+        let personal = InviteCenter.answerKey(card.invite, account: f.corpus.accounts[1].id)
+        #expect(work != personal)
+    }
+
     @Test func theCardIsReadFromTheCalendarPartThroughTheAttachmentPath() async throws {
         let f = InviteFixture()
         let (thread, message) = try await f.invitation()
@@ -141,6 +150,7 @@ private struct InviteFixture {
         let card = try await f.card(thread, message)
         f.addInvitedEvent(card)
         f.center.sleep = holdUntilCancelled
+        let readsBeforeAnswer = f.calendar?.lookups.count
         #expect(try await f.inInbox(thread))
         await f.center.respond(.accepted, to: message.id)
         #expect(f.center.card(for: message.id)?.response == .accepted, "the answer shows at once")
@@ -155,7 +165,8 @@ private struct InviteFixture {
         for task in held { await task.value }
         #expect(f.center.heldCount == 0 && f.center.card(for: message.id)?.response == nil)
         #expect(try await f.inInbox(thread), "back in the Inbox")
-        #expect(f.answered().isEmpty && !f.lookedUp(), "undone inside the window: nothing reached the calendar")
+        #expect(f.answered().isEmpty && f.calendar?.lookups.count == readsBeforeAnswer,
+                "undone inside the window: no new calendar request")
     }
 
     @Test func aHeldAnswerIsSentOnQuitAndASecondFlushSendsNothing() async throws {
@@ -234,7 +245,7 @@ private struct InviteFixture {
         await f.center.respond(.declined, to: message.id)
         await f.endWindows(gate)
         #expect(f.answered() == [.respond(id: "ev", response: .declined, sendUpdates: .all)])
-        #expect(f.calendar?.lookups == [FakeCalendar.Lookup(iCalUID: card.invite.uid, wholeSeries: false)])
+        #expect(f.calendar?.lookups == Array(repeating: FakeCalendar.Lookup(iCalUID: card.invite.uid, wholeSeries: false), count: 2))
         #expect(f.calendar?.allEvents.first { $0.id == "ev" }?.myResponse == .declined)
         #expect(try await !f.inInbox(thread))
         await f.env.undo?.undoLast()
@@ -405,7 +416,9 @@ private struct InviteFixture {
         await f.center.respond(.accepted, to: message.id, wholeSeries: true)
         #expect(f.env.undo?.nextUndo.map { String(localized: $0.title) } == "Accepted all events — Done")
         await f.endWindows(gate)
-        #expect(f.calendar?.lookups == [FakeCalendar.Lookup(iCalUID: base.invite.uid, wholeSeries: true)])
+        #expect(f.calendar?.lookups == [FakeCalendar.Lookup(iCalUID: base.invite.uid, wholeSeries: false),
+                                        FakeCalendar.Lookup(iCalUID: base.invite.uid, wholeSeries: false),
+                                        FakeCalendar.Lookup(iCalUID: base.invite.uid, wholeSeries: true)])
         #expect(f.answered() == [.respond(id: "ev", response: .accepted, sendUpdates: .all)])
     }
 
@@ -461,7 +474,7 @@ private struct InviteFixture {
         #expect(f.answered().isEmpty && f.center.card(for: message.id)?.response == nil)
     }
 
-    @Test func anInvitationOnlyOnAnotherAccountsCalendarIsAnsweredThereByItsUIDOnly() async throws {
+    @Test func aMissingInboxCopyNeverAnswersFromAnotherConnectedCalendar() async throws {
         let homeAddress = FakeCorpus.personalMe.email
         for withUID in [true, false] {
             let f = InviteFixture()
@@ -482,14 +495,10 @@ private struct InviteFixture {
             await f.endWindows(gate)
             #expect(f.answered().isEmpty, "nothing on the inbox's own calendar")
             let answeredHome = f.home.calls.contains(.respond(id: "home-ev", response: .accepted, sendUpdates: .all))
-            if withUID {
-                #expect(answeredHome, "found on the other account's calendar by its UID")
-                let key = CalendarEventStore.key(for: f.home)
-                #expect(f.env.calendarEvents.record(key, id: "home-ev")?.event.myResponse == .accepted)
-            } else {
-                #expect(!answeredHome, "another calendar's look-alike is never answered")
-                #expect(f.env.notices.toasts.contains { $0.message.contains("couldn't find it") })
-            }
+            #expect(!answeredHome, "the other account is never answered from this inbox")
+            #expect(f.env.notices.toasts.contains {
+                $0.message.contains("couldn't find it on the calendar of \(f.corpus.accounts[0].email)")
+            })
         }
     }
 

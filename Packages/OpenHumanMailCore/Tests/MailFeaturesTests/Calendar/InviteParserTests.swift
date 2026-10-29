@@ -246,6 +246,15 @@ END:VCALENDAR
     private let me: Set<String> = ["robin@example.com"]
     private let enUS = Locale(identifier: "en_US")
 
+    @Test func theOrganizersAttendeeRowIsNeverTheInviteesAnswer() throws {
+        let invite = try #require(ICSParser.parse(googleStyleInvite, defaultZone: losAngeles))
+        let card = InviteCardBuilder.card(invite, message: messageKey, myAddresses: ["dana@example.com"],
+                                          timeZone: losAngeles, locale: enUS)
+        #expect(!card.isInvited && !card.canRespond && card.response == nil)
+        #expect(card.guests.first?.isOrganizer == true && card.guests.first?.isMe == false)
+        #expect(card.guests.first?.title == "Dana Ruiz")
+    }
+
     @Test func theCardShowsWhenWhereWhoAboutAndJoin() throws {
         let invite = try #require(ICSParser.parse(googleStyleInvite, defaultZone: losAngeles))
         let card = InviteCardBuilder.card(invite, message: messageKey, myAddresses: me, timeZone: losAngeles, locale: enUS)

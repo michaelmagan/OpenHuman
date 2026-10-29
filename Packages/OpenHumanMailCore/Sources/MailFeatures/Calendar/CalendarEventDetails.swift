@@ -78,7 +78,8 @@ public struct CalendarEventDetails: Sendable, Hashable {
         if let alias = event.respondsAs { mine.insert(alias.lowercased()) }
         let people = event.extras.guests.isEmpty ? event.attendees.map { CalendarGuest($0) } : event.extras.guests
         let shownGuests = people.map { person in
-            let isMe = mine.contains(person.email.lowercased())
+            let isMe = (person.isOrganizer == false || (event.organizerIsMe == true && person.isOrganizer == true))
+                && mine.contains(person.email.lowercased())
             let answer = isMe ? (myResponse ?? person.response ?? event.myResponse) : person.response
             return Guest(email: person.email, name: person.name, isOptional: person.isOptional, isMe: isMe, response: answer)
         }

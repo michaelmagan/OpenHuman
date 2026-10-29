@@ -11,8 +11,7 @@ import Testing
 
 @MainActor
 enum CalendarEditorProbe {
-    // Every wait here is bounded well under the suite's backstop, so a lost window event fails fast
-    static let patience: Duration = .seconds(10)
+    static let patience: Duration = testBackstop
 
     static func anchor(_ identifier: String, in root: NSView) -> CompletionAnchorView? {
         subviews(of: CompletionAnchorView.self, in: root).first { $0.listIdentifier == identifier && $0.window != nil }

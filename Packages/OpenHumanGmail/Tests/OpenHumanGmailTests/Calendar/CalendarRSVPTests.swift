@@ -206,6 +206,35 @@ private let zone = TimeZone(identifier: "America/Los_Angeles")!
         #expect(attendees[1]["responseStatus"] as? String == "declined")
     }
 
+    @Test func anAliasThatNamesTheOrganizerCannotAnswerItsEntry() async throws {
+        let http = FakeHTTPTransport()
+        http.on("GET", Self.path) { _ in
+            FakeHTTPTransport.json(200, ["id": "ev1", "organizer": ["email": "work@example.test"],
+                                         "start": ["dateTime": "2026-10-13T15:00:00-07:00"],
+                                         "end": ["dateTime": "2026-10-13T15:30:00-07:00"],
+                                         "attendees": [["email": "work@example.test", "responseStatus": "accepted"]]])
+        }
+        await #expect(throws: GoogleCalendarError.badRequest(reason: "not_invited")) {
+            _ = try await client(CalendarScopes.request.write, http).respond(eventID: "ev1", response: "declined",
+                                                                              sendUpdates: .all, as: "work@example.test")
+        }
+        #expect(http.requests.map(\.method) == ["GET"])
+        let marked = answer("accepted", own: ["email": "work@example.test", "organizer": true])
+        var request = patch(Self.event + "?sendUpdates=all", marked)
+        request.headers[CalendarGuardTransport.answerAsHeader] = "work@example.test"
+        #expect(guardFor().refusalReason(for: request) != nil)
+    }
+
+    @Test func anOrganizerOnlyListDoesNotBecomeAnAliasSelfResponse() throws {
+        let body: [String: Any] = ["id": "copy", "organizer": ["email": "work@example.test"],
+                                   "start": ["dateTime": "2026-10-13T15:00:00-07:00"],
+                                   "end": ["dateTime": "2026-10-13T15:30:00-07:00"],
+                                   "attendees": [["email": "work@example.test", "responseStatus": "accepted"]]]
+        let wire = try JSONDecoder().decode(WireEvent.self, from: JSONSerialization.data(withJSONObject: body))
+        let event = try #require(wire.event(defaultZone: zone, selfAddress: "work@example.test"))
+        #expect(event.selfResponse == nil && event.attendees.first?.isOrganizer == true)
+    }
+
     @Test func listingReadsTheOwnAnswerThePlaceTheNotesAndTheSeries() async throws {
         let http = FakeHTTPTransport()
         http.on("GET", "/calendar/v3/calendars/robin@example.com/events") { _ in
@@ -216,6 +245,7 @@ private let zone = TimeZone(identifier: "America/Los_Angeles")!
                                                                                "responseStatus": "tentative"]]],
                 ["id": "b", "summary": "By address", "start": ["dateTime": "2026-10-13T10:00:00-07:00"],
                  "end": ["dateTime": "2026-10-13T10:30:00-07:00"],
+                 "organizer": ["email": "sam@example.org"],
                  "attendees": [["email": "Robin@Example.com", "responseStatus": "declined"]]],
                 ["id": "c", "summary": "Own", "start": ["dateTime": "2026-10-13T11:00:00-07:00"],
                  "end": ["dateTime": "2026-10-13T11:30:00-07:00"], "location": "  "],

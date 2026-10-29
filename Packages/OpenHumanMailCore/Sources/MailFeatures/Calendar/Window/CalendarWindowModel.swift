@@ -209,8 +209,8 @@ public final class CalendarWindowModel {
         providers = Dictionary(all.map { ($0.key, $0.provider) }, uniquingKeysWith: { first, _ in first })
         storeKeys = Dictionary(all.map { ($0.key, CalendarEventStore.key(for: $0.provider)) },
                                uniquingKeysWith: { first, _ in first })
-        sources = all.enumerated().map { position, item in
-            Source(key: item.key, title: item.title, colorIndex: Self.colorIndex(atPosition: position),
+        sources = all.map { item in
+            Source(key: item.key, title: item.title, colorIndex: CalendarDayTimeline.colorIndex(forCalendar: item.key),
                    isVisible: !hiddenKeys.contains(item.key))
         }
         let visible = all.filter { !hiddenKeys.contains($0.key) }
@@ -294,7 +294,7 @@ public final class CalendarWindowModel {
                 return tagged
             }
         }
-        let sorted = merged.sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
+        let sorted = merged.sorted { $0.start != $1.start ? $0.start < $1.start : $0.copyKey < $1.copyKey }
         if events != sorted { events = sorted }
         if any, complete, state != .loaded { state = .loaded }
         return complete
@@ -345,20 +345,20 @@ public final class CalendarWindowModel {
         for overlay in overlays.values {
             switch overlay {
             case .times(let id, let start, let end):
-                if let index = out.firstIndex(where: { $0.id == id }) {
+                if let index = out.firstIndex(where: { $0.copyKey == id }) {
                     let old = out[index]
                     out[index] = old.with(start: start, end: end)
                 }
             case .removed(let id):
-                out.removeAll { $0.id == id }
+                out.removeAll { $0.copyKey == id }
             case .response(let id, let response):
-                if let index = out.firstIndex(where: { $0.id == id }) { out[index].myResponse = response }
+                if let index = out.firstIndex(where: { $0.copyKey == id }) { out[index].myResponse = response }
             }
         }
-        if let card, card.pendingMove != nil, let index = out.firstIndex(where: { $0.id == card.event.id }) {
+        if let card, card.pendingMove != nil, let index = out.firstIndex(where: { $0.copyKey == card.event.copyKey }) {
             out[index] = out[index].with(start: card.form?.start ?? card.start, end: card.form?.end ?? card.end)
         }
-        return out.sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
+        return out.sorted { $0.start != $1.start ? $0.start < $1.start : $0.copyKey < $1.copyKey }
     }
 
     public var timeGrid: CalendarTimeGrid {
@@ -367,15 +367,11 @@ public final class CalendarWindowModel {
                                 colorIndex: { Self.colorIndex(of: $0, in: sources) })
     }
 
-    public static let colorOrder = [0, 2, 3, 4, 1, 5]
-
-    public static func colorIndex(atPosition position: Int) -> Int { colorOrder[position % colorOrder.count] }
-
     public func colorIndex(for event: CalendarEvent) -> Int { Self.colorIndex(of: event, in: sources) }
 
     static func colorIndex(of event: CalendarEvent, in sources: [Source]) -> Int {
         let key = (event.account ?? "").lowercased()
-        return (sources.first { $0.key == key } ?? sources.first)?.colorIndex ?? Self.colorIndex(atPosition: 0)
+        return (sources.first { $0.key == key } ?? sources.first)?.colorIndex ?? 0
     }
 
     public var monthGrid: CalendarMonthGrid {

@@ -53,7 +53,11 @@ public final class NotificationsSettingsModel {
                 for await value in settings.observe(AppSettings.schedulerReminders) { self?.remindersOn = value }
             })
         }
-        Task { await refreshAuthorization() }
+        let notifier = environment.system.platform.notifier
+        Task { [weak self] in
+            let authorization = await notifier.authorization()
+            self?.authorization = authorization
+        }
     }
 
     public func refreshAuthorization() async {

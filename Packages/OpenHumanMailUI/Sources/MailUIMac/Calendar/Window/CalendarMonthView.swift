@@ -66,10 +66,10 @@ struct CalendarMonthView: View {
                 .help("Show this day")
                 Spacer(minLength: 0)
             }
-            ForEach(cell.events) { event in
+            ForEach(cell.events, id: \.copyKey) { event in
                 Button { model.openEvent(event) } label: { chip(event) }
                     .buttonStyle(.plain)
-                    .calendarPopoverAnchor(!event.id.isEmpty && model.card?.event.id == event.id)
+                    .calendarPopoverAnchor(!event.id.isEmpty && model.card?.event.copyKey == event.copyKey)
             }
             if cell.more > 0 {
                 Button { Task { await model.show(day: cell.day, as: .day) } } label: {
@@ -95,7 +95,7 @@ struct CalendarMonthView: View {
 
     private func chip(_ event: CalendarEvent) -> some View {
         let index = model.colorIndex(for: event)
-        let selected = model.selectedEventID == event.id
+        let selected = model.selectedEventID == event.copyKey
         let filled = event.isAllDay || CalendarTimeGrid.belongsInAllDayRow(event)
         let colors = CalendarPalette.block(index, state: selected ? .selected : .normal, tokens: theme.tokens)
         let declined = event.myResponse == .declined

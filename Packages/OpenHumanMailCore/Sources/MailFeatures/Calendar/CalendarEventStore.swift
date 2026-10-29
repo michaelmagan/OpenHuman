@@ -95,7 +95,11 @@ public final class CalendarEventStore {
     // The account's own addresses by calendar account, so an answer given as an alias shows as the account's
     public func learnAddresses(of accounts: [Account]) {
         var known: [String: Set<String>] = [:]
-        for account in accounts { known[account.email.lowercased()] = account.myAddresses }
+        let connected = Set(accounts.map { $0.email.lowercased() })
+        for account in accounts {
+            let own = account.email.lowercased()
+            known[own] = account.myAddresses.filter { $0 == own || !connected.contains($0) }
+        }
         guard known != ownAddresses else { return }
         let before = ownAddresses
         ownAddresses = known

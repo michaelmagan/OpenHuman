@@ -43,6 +43,7 @@ public final class ReaderWebView: WKWebView {
     var awaitsLayoutWidth = false
     private var pendingReport: (cssHeight: CGFloat, loaded: Bool, width: CGFloat?)?
     private var selfGrowth = ReaderSelfGrowthGuard()
+    private var heightRecheck: Task<Void, Never>?
     var inlineParts: InlinePartSource?
     weak var owner: ReaderWebViewOwner?
     public private(set) var hoveredLink: HoveredLink?
@@ -78,6 +79,8 @@ public final class ReaderWebView: WKWebView {
     }
 
     func load(_ message: RenderedMessage, width: CGFloat, zoom: CGFloat) {
+        heightRecheck?.cancel()
+        heightRecheck = nil
         rendered = message
         contentHash = message.contentHash
         shown = false
@@ -140,6 +143,23 @@ public final class ReaderWebView: WKWebView {
             onShown?()
         }
         onHeightChange?(height)
+        if loaded { recheckHeightAfterLayout() }
+    }
+
+    private func recheckHeightAfterLayout() {
+        heightRecheck?.cancel()
+        let navigation = currentNavigation
+        heightRecheck = Task { [weak self] in
+            guard let self,
+                  let actual = try? await evaluateJavaScript(
+                    "Math.ceil(document.getElementById('oh-root').getBoundingClientRect().height)",
+                    in: nil, contentWorld: .defaultClient) as? Double,
+                  !Task.isCancelled, currentNavigation === navigation, committed, rendered != nil else { return }
+            heightRecheck = nil
+            if abs(CGFloat(actual) - (cssHeight ?? 0)) > 1 {
+                contentHeightDidChange(CGFloat(actual), loaded: true)
+            }
+        }
     }
 
     func layoutWidthSettled() {
@@ -194,6 +214,8 @@ public final class ReaderWebView: WKWebView {
     }
 
     func resetForPool() {
+        heightRecheck?.cancel()
+        heightRecheck = nil
         removeFromSuperview()
         stopLoading()
         owner = nil
