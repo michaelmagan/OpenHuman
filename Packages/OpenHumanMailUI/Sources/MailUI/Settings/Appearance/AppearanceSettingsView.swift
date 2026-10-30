@@ -29,8 +29,11 @@ public struct AppearanceSettingsView: View {
 
     public var body: some View {
         SettingsPageScaffold(title: "Appearance") {
-            SettingsSection("Theme") {
+            SettingsSection(footnote: Self.chromeNote) {
                 modeRow
+                accentRow
+            }
+            SettingsSection("Mail theme", footnote: Self.themeNote) {
                 SettingsRow("Theme when light", selection: $store.preferences.lightThemeID) {
                     ForEach(lightThemes) { Text($0.name).tag($0.id) }
                 }
@@ -42,8 +45,7 @@ public struct AppearanceSettingsView: View {
             SettingsSection("Preview") {
                 previews.settingsRowPadding()
             }
-            SettingsSection("Color, size and fonts") {
-                accentRow
+            SettingsSection("Density and text") {
                 densityRow
                 readerSizeRow
                 emailColorsRow
@@ -60,9 +62,11 @@ public struct AppearanceSettingsView: View {
             SettingsSection("Theme files", footnote: message) {
                 folderRows
             }
-            issuesList
+            if !issueLines.isEmpty {
+                Section { issuesList }
+            }
         }
-        .tint(theme.accentFill.color)
+        .tint(theme.controlTint)
         .transaction { $0.animation = nil }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
             guard case .success(let url) = result else { return }
@@ -77,12 +81,16 @@ public struct AppearanceSettingsView: View {
         }
     }
 
+    static let chromeNote = "The window, sidebar and toolbar follow macOS. The accent colours selections, buttons and "
+        + "switches; System follows the accent in System Settings."
+    static let themeNote = "The theme colours the mail itself: the list, the reader and the composer."
+
     private var modeRow: some View {
         SettingsRow("Appearance", labelsControl: true) {
             Picker("Appearance", selection: $store.preferences.mode) {
+                Text("System").tag(AppearanceMode.system)
                 Text("Light").tag(AppearanceMode.light)
                 Text("Dark").tag(AppearanceMode.dark)
-                Text("System").tag(AppearanceMode.system)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -122,10 +130,13 @@ public struct AppearanceSettingsView: View {
                     .stroke(isSelected ? theme.accentRing.color : .clear, lineWidth: theme.borderWidthFocus)
                     .padding(-theme.borderWidthFocusOffset))
                 HStack(spacing: theme.space1) {
-                    Text(summary.name).themeFont(theme.typeLabel).foregroundStyle(theme.textPrimary.color)
-                    if isSelected { Image(systemName: "checkmark").font(theme.typeCaption.swiftUIFont).foregroundStyle(theme.accentText.color) }
+                    Text(summary.name).font(.system(size: NativeMetrics.Text.secondary, weight: .medium))
+                    if isSelected {
+                        Image(systemName: "checkmark").font(.system(size: NativeMetrics.Text.caption, weight: .semibold))
+                            .foregroundStyle(.tint)
+                    }
                     if !summary.issues.isEmpty {
-                        Image(systemName: "exclamationmark.triangle").font(theme.typeCaption.swiftUIFont)
+                        Image(systemName: "exclamationmark.triangle").font(.system(size: NativeMetrics.Text.caption))
                             .foregroundStyle(theme.textWarning.color)
                             .help(summary.issueLines.joined(separator: "\n"))
                     }
@@ -162,13 +173,13 @@ public struct AppearanceSettingsView: View {
                                                                      darkThemeID: store.resolved.themeID, accentID: id),
                                                     appearance: store.resolved.appearance)
                     let isSelected = store.resolved.accentID == id
-                    let name = id.prefix(1).uppercased() + id.dropFirst()
+                    let name = Self.accentName(id)
                     Button { store.preferences.accentID = id } label: {
                         HStack(spacing: theme.space2) {
                             Circle().fill(accentTheme.accentFill.color).frame(width: 24, height: 24)
                                 .overlay(Circle().stroke(isSelected ? theme.accentRing.color : .clear, lineWidth: theme.borderWidthFocus)
                                     .padding(-theme.borderWidthFocusOffset))
-                            Text(name).themeFont(theme.typeBody).foregroundStyle(theme.textPrimary.color)
+                            Text(name)
                         }
                     }
                     .buttonStyle(.plain)
@@ -202,12 +213,12 @@ public struct AppearanceSettingsView: View {
                     .accessibilityLabel("Reader text size")
                     .accessibilityValue("\(Int(store.resolved.typeReader.size)) points")
                 Text("A").font(.system(size: 17)).accessibilityHidden(true)
-                Text("\(Int(store.resolved.typeReader.size)) pt").themeFont(theme.typeMeta)
+                Text("\(Int(store.resolved.typeReader.size)) pt").font(.system(size: NativeMetrics.Text.secondary))
                     .monospacedDigit()
                     .frame(width: 36, alignment: .trailing)
                     .accessibilityHidden(true)
             }
-            .foregroundStyle(theme.textSecondary.color)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -250,19 +261,30 @@ public struct AppearanceSettingsView: View {
         }
     }
 
+    static func accentName(_ id: String) -> String {
+        id.prefix(1).uppercased() + id.dropFirst()
+    }
+
+    private struct IssueLine: Hashable {
+        let text: String
+        let isProblem: Bool
+    }
+
+    private var issueLines: [IssueLine] {
+        store.notices.filter { $0.code != .contrast }.map { IssueLine(text: $0.description, isProblem: false) }
+            + problemFiles.flatMap { summary in summary.issueLines.map { IssueLine(text: $0, isProblem: !summary.isUsable) } }
+    }
+
     private var issuesList: some View {
         VStack(alignment: .leading, spacing: theme.space1) {
-            ForEach(store.notices.filter { $0.code != .contrast }, id: \.self) { notice in
-                Text(notice.description).themeFont(theme.typeMono).foregroundStyle(theme.textWarning.color)
-            }
-            ForEach(problemFiles) { summary in
-                ForEach(summary.issueLines, id: \.self) { line in
-                    Text(line).themeFont(theme.typeMono)
-                        .foregroundStyle((summary.isUsable ? theme.textWarning : theme.textDanger).color)
-                        .textSelection(.enabled)
-                }
+            ForEach(issueLines, id: \.self) { line in
+                Text(line.text)
+                    .font(.system(size: NativeMetrics.Text.secondary).monospaced())
+                    .foregroundStyle((line.isProblem ? theme.textDanger : theme.textWarning).color)
+                    .textSelection(.enabled)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func importTheme(_ url: URL) async {

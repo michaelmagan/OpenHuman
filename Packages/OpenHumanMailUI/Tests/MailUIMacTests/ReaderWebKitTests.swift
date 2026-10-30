@@ -13,6 +13,133 @@ struct ReaderWebKitTests {
         await ReaderWebKit.shared.prepare()
     }
 
+    @Test func correctiveMeasurementsStopWhenTheGuardCannotProgress() async throws {
+        let (view, rendered) = try controlledReader()
+        let measurements = ControlledReaderMeasurements()
+        defer {
+            view.resetForPool()
+            measurements.finish()
+        }
+        view.measureCorrectiveHeight = measurements.measure
+        var notifications: [CGFloat] = []
+        view.onHeightChange = { notifications.append($0) }
+        for step in 0...ReaderSelfGrowthGuard.limit {
+            view.contentHeightDidChange(CGFloat(100 + step * 10), loaded: false, width: 600)
+        }
+        let ceiling = try #require(view.measuredHeight)
+        // An unchanged external loaded report must still receive its first correction.
+        view.contentHeightDidChange(ceiling, loaded: true, width: 600)
+        try await until(timeout: .seconds(5)) { measurements.pending.count == 1 }
+        let before = notifications.count
+        measurements.complete(ceiling + 100)
+        try await until(timeout: .seconds(5)) { !view.isRecheckingHeight }
+        #expect(measurements.calls == 1)
+        #expect(notifications.count == before + 1)
+        #expect(view.measuredHeight == ceiling)
+        #expect(ReaderWebView.cachedHeight(hash: rendered.contentHash, width: 600) == ceiling)
+
+        // Genuine shrink still passes through the same guard/cache/notification path.
+        view.contentHeightDidChange(ceiling, loaded: true, width: 600)
+        try await until(timeout: .seconds(5)) { measurements.pending.count == 1 }
+        measurements.complete(44)
+        try await until(timeout: .seconds(5)) { measurements.pending.count == 1 }
+        #expect(view.measuredHeight == 44)
+        measurements.complete(44)
+        try await until(timeout: .seconds(5)) { !view.isRecheckingHeight }
+        #expect(measurements.calls == 3)
+        #expect(ReaderWebView.cachedHeight(hash: rendered.contentHash, width: 600) == 44)
+    }
+
+    @Test func obsoleteCorrectionsCannotApplyOrClearANewerTask() async throws {
+        for invalidation in ["report", "width", "layout", "load", "pool"] {
+            let (view, rendered) = try controlledReader()
+            let measurements = ControlledReaderMeasurements()
+            defer {
+                view.resetForPool()
+                measurements.finish()
+            }
+            view.measureCorrectiveHeight = measurements.measure
+            view.contentHeightDidChange(100, width: 600)
+            try await until(timeout: .seconds(5)) { measurements.pending.count == 1 }
+            let obsolete = try #require(view.correctiveHeightTask)
+            var obsoleteFinished = false
+            let observation = Task {
+                await obsolete.value
+                obsoleteFinished = true
+            }
+            // Cleanup below drains the measured task even if this observation is cancelled.
+            defer { observation.cancel() }
+            switch invalidation {
+            case "width": view.setFrameSize(NSSize(width: 700, height: view.frame.height))
+            case "layout": view.awaitsLayoutWidth = true; view.layoutWidthSettled()
+            case "load": view.load(rendered, width: 600, zoom: 1)
+            case "pool": view.resetForPool(); view.load(rendered, width: 600, zoom: 1)
+            default: break
+            }
+            view.stopLoading()
+            view.navigationCommitted(view.currentNavigation)
+            view.measureCorrectiveHeight = measurements.measure
+            view.contentHeightDidChange(120, width: view.bounds.width)
+            try await until(timeout: .seconds(5)) { measurements.pending.count == 2 }
+            measurements.complete(999)
+            try await until(timeout: .seconds(5)) { obsoleteFinished }
+            #expect(view.measuredHeight == 120, "\(invalidation): obsolete result")
+            #expect(view.isRecheckingHeight, "\(invalidation): newer task remains owned")
+            measurements.complete(120)
+            try await until(timeout: .seconds(5)) { !view.isRecheckingHeight }
+            #expect(view.measuredHeight == 120)
+        }
+    }
+
+    private func controlledReader() throws -> (ReaderWebView, RenderedMessage) {
+        guard case .html(let rendered) = MessageRenderer().render(MessageContent(html: "<p>controlled</p>", text: nil)) else {
+            throw TimeoutError()
+        }
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        let view = ReaderWebView(mode: .blocked, configuration: configuration, webKit: .shared)
+        view.navigationDelegate = nil
+        view.load(rendered, width: 600, zoom: 1)
+        view.stopLoading()
+        view.navigationDelegate = nil
+        view.navigationCommitted(view.currentNavigation)
+        return (view, rendered)
+    }
+
+    @Test func reportPredicatesSucceedExpireAndCancelWithoutArrivals() async throws {
+        let reports = Reports()
+        try await reports.wait(timeout: .zero) { true }
+        do {
+            try await reports.wait(timeout: .zero, description: { "await collapse; target=44; current=440" }) { false }
+            Issue.record("expected predicate deadline")
+        } catch let error as Reports.DeadlineExceeded {
+            #expect(error.description.contains("await collapse; target=44; current=440"))
+            #expect(error.sourceLocation.line > 0)
+        }
+        var entered = false
+        let waiting = Task {
+            try await reports.wait {
+                entered = true
+                return false
+            }
+        }
+        try await until(timeout: .seconds(5)) { entered }
+        waiting.cancel()
+        do {
+            try await waiting.value
+            Issue.record("expected cancellation with no arrival")
+        } catch is CancellationError {}
+        let cancelledAtEntry = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await reports.wait { true }
+        }
+        do {
+            try await cancelledAtEntry.value
+            Issue.record("expected cancellation before immediate success")
+        } catch is CancellationError {}
+    }
+
     @Test func ruleListsCompileAndConfigurationsAreLockedDown() throws {
         #expect(ReaderWebKit.shared.compileError == nil)
         #expect(ReaderWebKit.shared.imagesCompileError == nil)
@@ -77,7 +204,7 @@ struct ReaderWebKitTests {
         let view = try #require(ReaderWebView.make(for: rendered, width: 600))
         defer { ReaderWebKit.shared.pool.recycle(view) }
         #expect(view.alphaValue == 0, "attached invisible until its height is final")
-        await Reports.heights(of: view).wait { view.isShown }
+        try await Reports.heights(of: view).wait { view.isShown }
         let height = try #require(view.measuredHeight)
         #expect(height > 140 && height < 200, "height \(height)")
         #expect(view.alphaValue == 1)
@@ -90,7 +217,7 @@ struct ReaderWebKitTests {
         let view = try #require(ReaderWebView.make(for: rendered, width: 600))
         defer { ReaderWebKit.shared.pool.recycle(view) }
         view.setFrameSize(NSSize(width: 600, height: 900))
-        await Reports.heights(of: view).wait { view.isShown }
+        try await Reports.heights(of: view).wait { view.isShown }
         #expect((view.measuredHeight ?? 0) < 60, "documentElement.scrollHeight would report 900")
     }
 
@@ -102,7 +229,7 @@ struct ReaderWebKitTests {
         let view = try #require(ReaderWebView.make(for: rendered, width: 600))
         defer { ReaderWebKit.shared.pool.recycle(view) }
         view.setFrameSize(NSSize(width: 600, height: 40))
-        await Reports.heights(of: view).wait { view.measuredHeight != nil }
+        try await Reports.heights(of: view).wait { view.measuredHeight != nil }
         let width = try await view.evaluateJavaScript("""
             document.head.insertAdjacentHTML('beforeend', '<style>::-webkit-scrollbar { width: 17px; }</style>');
             var page = document.documentElement;
@@ -164,7 +291,7 @@ struct ReaderWebKitTests {
         #expect(rendered.hasRemoteContent)
         let view = try #require(ReaderWebView.make(for: rendered, width: 600))
         defer { ReaderWebKit.shared.pool.recycle(view) }
-        await Reports.heights(of: view).wait { view.isShown }
+        try await Reports.heights(of: view).wait { view.isShown }
         #expect(try await documentLoaded(view) == "complete")
         try await server.fence()
         #expect(server.hits.isEmpty, "requests leaked: \(server.hits)")
@@ -192,13 +319,13 @@ struct ReaderWebKitTests {
             Issue.record("expected html"); return
         }
         let first = try #require(ReaderWebView.make(for: one, width: 600, webKit: webKit))
-        await Reports.heights(of: first).wait { first.isShown }
+        try await Reports.heights(of: first).wait { first.isShown }
         webKit.pool.recycle(first)
         #expect(first.rendered == nil && first.alphaValue == 0 && first.owner == nil)
         let again = try #require(ReaderWebView.make(for: two, width: 600, webKit: webKit))
         #expect(again === first, "the idle view is reused")
         #expect(again.alphaValue == 0)
-        await Reports.heights(of: again).wait { again.isShown }
+        try await Reports.heights(of: again).wait { again.isShown }
         #expect(again.rendered?.contentHash == two.contentHash)
         let images = try #require(ReaderWebView.make(for: two, width: 600, webKit: webKit, imagesAllowed: true))
         #expect(images.mode == .imagesAllowed && images !== again)
@@ -224,19 +351,19 @@ struct ReaderWebKitTests {
         view.owner = owner
         let hovers = Reports()
         owner.onEvent = hovers.arrived
-        await Reports.heights(of: view).wait { view.isShown }
+        try await Reports.heights(of: view).wait { view.isShown }
         let hover = "document.querySelectorAll('a')[%d].dispatchEvent(new MouseEvent('mouseover', {bubbles: true})); 0"
         _ = try await view.evaluateJavaScript(String(format: hover, 0), in: nil, contentWorld: .defaultClient)
-        await hovers.wait { owner.hovered.last??.url.host == "login.evil.example" }
+        try await hovers.wait { owner.hovered.last??.url.host == "login.evil.example" }
         let link = try #require(owner.hovered.last ?? nil)
         #expect(link.rect.map { $0.width > 0 && $0.height > 0 } == true)
         #expect(rendered.suspiciousLink(for: link.url)?.displayedDestination == "bank.example")
         _ = try await view.evaluateJavaScript(String(format: hover, 1), in: nil, contentWorld: .defaultClient)
-        await hovers.wait { owner.hovered.last??.url.host == "example.com" }
+        try await hovers.wait { owner.hovered.last??.url.host == "example.com" }
         #expect(rendered.suspiciousLink(for: URL(string: "https://example.com/doc")!) == nil)
         _ = try await view.evaluateJavaScript("document.body.dispatchEvent(new MouseEvent('mouseover', {bubbles: true})); 0",
                                               in: nil, contentWorld: .defaultClient)
-        await hovers.wait { owner.hovered.last.map { $0 == nil } == true }
+        try await hovers.wait { owner.hovered.last.map { $0 == nil } == true }
     }
 
     @Test func heightMessagesAreValidated() {
@@ -419,19 +546,71 @@ struct ReaderWebKitTests {
         defer { window.close() }
         view.widthAnchor.constraint(equalToConstant: 600).isActive = true
         let heights = Reports.heights(of: view)
-        await heights.wait { view.isShown }
+        try await heights.wait { view.isShown }
         let base = try #require(view.measuredHeight)
         view.setZoom(1.5)
-        await heights.wait { (view.measuredHeight ?? 0) > base * 1.3 }
+        try await heights.wait { (view.measuredHeight ?? 0) > base * 1.3 }
         view.setZoom(1)
-        await heights.wait { abs((view.measuredHeight ?? 0) - base) <= 2 }
+        try await heights.wait { abs((view.measuredHeight ?? 0) - base) <= 2 }
         guard case .html(let short) = MessageRenderer().render(MessageContent(html: "<p>Short.</p>", text: nil)) else { return }
         let small = try #require(ReaderWebView.make(for: short, width: 600))
         defer { ReaderWebKit.shared.pool.recycle(small) }
-        await Reports.heights(of: small).wait { small.isShown }
+        try await Reports.heights(of: small).wait { small.isShown }
         let smallBase = try #require(small.measuredHeight)
         small.setZoom(2)
         #expect(small.measuredHeight == (smallBase * 2).rounded(.up))
+    }
+
+    // The view is as tall as the body, so a block as tall as the viewport with a line below it made each report
+    // taller than the last
+    @Test func aViewportTallBlockKeepsTheBodysHeight() async throws {
+        let html = "<div style=\"height: 100vh; background: #eee\">Hero</div><p>A footer line under the hero.</p>"
+        guard case .html(let rendered) = MessageRenderer().render(MessageContent(html: html, text: nil)) else {
+            Issue.record("expected html"); return
+        }
+        let view = try #require(ReaderWebView.make(for: rendered, width: 600))
+        defer { ReaderWebKit.shared.pool.recycle(view) }
+        let window = TestWindows.window(view, size: NSSize(width: 600, height: 400))
+        defer { window.close() }
+        view.widthAnchor.constraint(equalToConstant: 600).isActive = true
+        let heights = Reports.heights(of: view)
+        try await heights.wait { view.isShown }
+        let measured = try #require(try await view.evaluateJavaScript(
+            "Math.ceil(document.getElementById('oh-root').getBoundingClientRect().height)", in: nil,
+            contentWorld: .defaultClient) as? Double)
+        try await heights.wait { abs((view.measuredHeight ?? 0) - CGFloat(measured)) <= 1 }
+        let settled = try #require(view.measuredHeight)
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(abs(view.frame.height - settled) <= 1, "the view takes the body's height, and so does its viewport")
+        #expect(CGFloat(measured) == settled, "at that viewport the body is no taller")
+        #expect(settled > 600 && settled < 800, "the block at a fixed viewport, height \(settled)")
+    }
+
+    @Test func aBodyFollowingItsOwnHeightStopsGrowing() {
+        var guarded = ReaderSelfGrowthGuard()
+        var height: CGFloat = 400
+        var shown: [CGFloat] = []
+        for _ in 0..<200 {
+            height += 20
+            shown.append(guarded.height(for: height, width: 600))
+        }
+        #expect(guarded.stopped)
+        let ceiling = 400 + 20 * CGFloat(ReaderSelfGrowthGuard.limit + 1)
+        #expect(shown.max() == ceiling, "stops after \(ReaderSelfGrowthGuard.limit) equal steps")
+        #expect(guarded.height(for: 300, width: 600) == 300, "it can still shrink")
+        #expect(guarded.height(for: 900, width: 700) == 900, "another width measures afresh")
+        #expect(!guarded.stopped)
+
+        var loading = ReaderSelfGrowthGuard()
+        var tall: CGFloat = 100
+        for step in 0..<200 {
+            tall += CGFloat(40 + step % 7 * 13)
+            #expect(loading.height(for: tall, width: 600) == tall, "growth by different steps, as images load, is kept")
+        }
+        #expect(!loading.stopped)
+        var steady = ReaderSelfGrowthGuard()
+        for value in [100, 120, 120, 140, 140, 160] as [CGFloat] { _ = steady.height(for: value, width: 600) }
+        #expect(!steady.stopped && steady.height(for: 5_000, width: 600) == 5_000, "a repeated height breaks the run")
     }
 
     @Test func quotesToggleFromTheAppWorld() async throws {
@@ -446,12 +625,12 @@ struct ReaderWebKitTests {
         let view = try #require(ReaderWebView.make(for: rendered, width: 600))
         defer { ReaderWebKit.shared.pool.recycle(view) }
         let heights = Reports.heights(of: view)
-        await heights.wait { view.isShown }
+        try await heights.wait(description: { "await quotes shown; target isShown=true; current height=\(String(describing: view.measuredHeight))" }) { view.isShown }
         let folded = try #require(view.measuredHeight)
         await view.setQuotesExpanded(true)
-        await heights.wait { (view.measuredHeight ?? 0) > folded + 100 }
+        try await heights.wait(description: { "await quotes expansion; target > \(folded + 100); current height=\(String(describing: view.measuredHeight))" }) { (view.measuredHeight ?? 0) > folded + 100 }
         await view.setQuotesExpanded(false)
-        await heights.wait { view.measuredHeight == folded }
+        try await heights.wait(description: { "await quotes collapse; target == \(folded); current height=\(String(describing: view.measuredHeight))" }) { view.measuredHeight == folded }
     }
 
     @Test func aMessageWithASignatureAndQuotedTextHasOneFoldControl() async throws {
@@ -470,7 +649,7 @@ struct ReaderWebKitTests {
         var toggles = 0
         let clicks = Reports()
         view.onToggleQuotes = { toggles += 1; clicks.arrived() }
-        await Reports.heights(of: view).wait { view.isShown }
+        try await Reports.heights(of: view).wait { view.isShown }
         func js(_ script: String) async -> Any? { try? await view.evaluateJavaScript(script, in: nil, contentWorld: .defaultClient) }
         let summaries = "document.querySelectorAll('details.oh-quoted > summary')"
         #expect(await js("\(summaries).length") as? Int == 2)
@@ -478,7 +657,7 @@ struct ReaderWebKitTests {
                 "one control")
         #expect(await js("\(summaries)[0].title") as? String == "Show quoted text  .")
         _ = await js("\(summaries)[0].click(); 0")
-        await clicks.wait { toggles == 1 }
+        try await clicks.wait { toggles == 1 }
         let anyOpen = "Array.prototype.some.call(document.querySelectorAll('details.oh-quoted'), function (d) { return d.open; })"
         #expect(await js(anyOpen) as? Bool == false)
         await view.setQuotesExpanded(true)
@@ -498,7 +677,7 @@ struct ReaderWebKitTests {
         let window = TestWindows.window(view, size: NSSize(width: 600, height: 400))
         defer { window.close() }
         view.widthAnchor.constraint(equalToConstant: 600).isActive = true
-        await Reports.heights(of: view).wait { view.isShown }
+        try await Reports.heights(of: view).wait { view.isShown }
         #expect(try await innerWidth(of: view, reaching: 600) == 600)
         #expect(await view.findNext("needle", backwards: false))
         let first = try #require(await selectedMatch(view))
@@ -561,23 +740,71 @@ func until(timeout: Duration = testBackstop, _ condition: @MainActor () async ->
 struct TimeoutError: Error {}
 
 @MainActor
-final class Reports {
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+private final class ControlledReaderMeasurements {
+    private(set) var calls = 0
+    private(set) var pending: [CheckedContinuation<CGFloat, Error>] = []
+    private var finished = false
 
-    func arrived() {
-        let waiting = waiters
-        waiters = []
-        for waiter in waiting { waiter.resume() }
+    func measure() async throws -> CGFloat {
+        calls += 1
+        guard !finished else { throw CancellationError() }
+        // Deliberately allow late results after task cancellation until explicit cleanup.
+        return try await withCheckedThrowingContinuation { pending.append($0) }
     }
 
-    func wait(until condition: () -> Bool) async {
-        while !condition() {
-            await withCheckedContinuation { waiters.append($0) }
+    func complete(_ height: CGFloat, sourceLocation: SourceLocation = #_sourceLocation) {
+        guard !pending.isEmpty else {
+            Issue.record("no controlled reader measurement pending for height \(height)",
+                         sourceLocation: sourceLocation)
+            return
+        }
+        pending.removeFirst().resume(returning: height)
+    }
+
+    func finish() {
+        finished = true
+        let outstanding = pending
+        pending.removeAll()
+        for continuation in outstanding { continuation.resume(throwing: CancellationError()) }
+    }
+
+}
+
+@MainActor
+final class Reports {
+    private var context: () -> String = { "await reader predicate; target=true" }
+
+    // Arrival adapters remain for callers; synchronous predicates are sampled by until.
+    func arrived() {}
+
+    struct DeadlineExceeded: Error, CustomStringConvertible {
+        let description: String
+        let sourceLocation: SourceLocation
+    }
+
+    func wait(timeout: Duration = .seconds(30),
+              description: (() -> String)? = nil,
+              sourceLocation: SourceLocation = #_sourceLocation,
+              until condition: () -> Bool) async throws {
+        try Task.checkCancellation()
+        do {
+            try await until(timeout: timeout) {
+                if Task.isCancelled { return false }
+                return condition()
+            }
+            try Task.checkCancellation()
+        } catch is TimeoutError {
+            try Task.checkCancellation()
+            throw DeadlineExceeded(description: (description?() ?? context()) + " at \(sourceLocation)",
+                                   sourceLocation: sourceLocation)
         }
     }
 
     static func heights(of view: ReaderWebView) -> Reports {
         let reports = Reports()
+        reports.context = { [weak view] in
+            "await reader height predicate; target=true; current height=\(String(describing: view?.measuredHeight))"
+        }
         let previous = view.onHeightChange
         view.onHeightChange = { height in
             previous?(height)

@@ -245,6 +245,17 @@ extension ReaderWebKit {
           var root = document.getElementById('oh-root') || document.body;
           if (!root || root.getAttribute('data-oh-dates') === '1') { return 0; }
           root.setAttribute('data-oh-dates', '1');
+          if (!document.getElementById('oh-date-style')) {
+            var style = document.createElement('style');
+            style.id = 'oh-date-style';
+            style.textContent = '.oh-date { text-decoration-line: underline; text-decoration-style: solid; '
+              + 'text-decoration-thickness: 1px; text-underline-offset: 3px; '
+              + 'text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); cursor: pointer; '
+              + 'border-radius: 3px; transition: background-color 120ms ease, text-decoration-color 120ms ease; } '
+              + '.oh-date:hover { text-decoration-color: currentColor; '
+              + 'background-color: color-mix(in srgb, currentColor 10%, transparent); }';
+            (document.head || document.documentElement).appendChild(style);
+          }
           var handler = window.webkit.messageHandlers.\(dateHandlerName);
           var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
           var nodes = [];
@@ -264,10 +275,8 @@ extension ReaderWebKit {
               var span = document.createElement('span');
               span.className = 'oh-date';
               span.setAttribute('data-oh-date', String(index));
-              span.style.textDecoration = 'underline';
-              span.style.textDecorationStyle = 'dotted';
-              span.style.textUnderlineOffset = '2px';
-              span.style.cursor = 'pointer';
+              span.setAttribute('role', 'link');
+              span.title = 'Show on the calendar';
               match.parentNode.insertBefore(span, match);
               span.appendChild(match);
               nodes.splice(i, 1, rest);

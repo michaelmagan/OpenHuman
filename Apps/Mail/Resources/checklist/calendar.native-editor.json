@@ -1,0 +1,15 @@
+{
+  "id": "calendar.native-editor",
+  "area": "Calendar",
+  "title": "Event editor: a grouped native form in a popover beside the event",
+  "steps": [
+    "With -UseFakeData -UseFakeCalendar open Calendar (2) in Week view; click one of your own events, then a free slot",
+    "Read the form top to bottom, then press Tab through it; hover the labels and buttons",
+    "Type a whole date into Ends (for example tomorrow) and press Command-Return without leaving the field; open the event again",
+    "Repeat in dark appearance, with the window narrow, and in the Mail sidebar's Create event"
+  ],
+  "deepLink": null,
+  "expected": "The card opens beside the event with an arrow, or at the far edge, never over the month, Today or the toolbar. Title; Starts and Ends with the length, time zone, repeat; guests with avatars and answers, Meet; location and notes; then a quieter group (calendar, alert, show as, visibility, colour). No steppers; All-day and Meet are switches; Cancel and Save bottom right. The typed date is kept.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

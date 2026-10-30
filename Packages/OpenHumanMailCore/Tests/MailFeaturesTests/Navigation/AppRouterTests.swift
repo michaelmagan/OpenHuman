@@ -130,9 +130,9 @@ import Testing
         #expect(!titles.contains { $0.hasPrefix("OpenHuman") }, "Mail's own labels stay hidden")
         let atlas = try #require(work.sidebarItems.first { $0.title == "Atlas" })
         #expect(atlas.depth == 1)
-        #expect(!router.isLabelSidebarVisible)
+        #expect(router.isLabelSidebarVisible, "the sidebar is shown by default")
         #expect(router.perform(.toggleLabelSidebar))
-        #expect(router.isLabelSidebarVisible)
+        #expect(!router.isLabelSidebarVisible)
     }
 
     @Test func placesAreRestoredOnRelaunch() async throws {
@@ -150,7 +150,7 @@ import Testing
             router.perform(.nextThread)
             router.perform(.openThread)
             openThread = router.reader?.thread
-            router.isLabelSidebarVisible = true
+            router.isLabelSidebarVisible = false
             router.stop()
         }
         let saved = try #require(navigation.load())
@@ -160,7 +160,7 @@ import Testing
         let (_, second) = await shell(navigation)
         #expect(second.active?.account.alias == "Personal")
         #expect(second.location == .splitOther)
-        #expect(second.isLabelSidebarVisible)
+        #expect(!second.isLabelSidebarVisible, "the hidden sidebar is kept")
         await eventually { second.mode == .reader }
         #expect(second.reader?.thread == openThread)
         await eventually { second.list?.cursor == openThread }

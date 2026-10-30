@@ -10,7 +10,7 @@ import Testing
 @MainActor
 @Suite struct DevFeedbackShortcutTests {
     static let chords = [KeyChord(.character("f"), modifiers: [.command, .option, .control]),
-                         KeyChord(.character("t"), modifiers: [.command, .option])]
+                         KeyChord(.character("t"), modifiers: [.command, .option, .control])]
 
     let window = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: 400, height: 300), styleMask: [.titled],
                           backing: .buffered, defer: false)
@@ -25,7 +25,7 @@ import Testing
         #expect(DevFeedbackShortcuts.giveFeedback.key == KeyEquivalent("f"))
         #expect(DevFeedbackShortcuts.giveFeedback.modifiers == [.command, .option, .control])
         #expect(DevFeedbackShortcuts.checklist.key == KeyEquivalent("t"))
-        #expect(DevFeedbackShortcuts.checklist.modifiers == [.command, .option])
+        #expect(DevFeedbackShortcuts.checklist.modifiers == [.command, .option, .control])
     }
 
     @Test func keyRouterHasNoBindingForThemAndPassesThemToTheMenu() throws {
@@ -41,7 +41,7 @@ import Testing
         for scopes: [ActionScope] in [[.list, .global], [.reader, .global]] {
             router.activeScopes = { scopes }
             #expect(router.route(try key("f", code: 3, modifiers: [.command, .option, .control])) != nil)
-            #expect(router.route(try key("t", code: 17, modifiers: [.command, .option])) != nil)
+            #expect(router.route(try key("t", code: 17, modifiers: [.command, .option, .control])) != nil)
         }
         #expect(performed == 0)
     }
@@ -52,7 +52,7 @@ import Testing
         let design = root.appendingPathComponent("Apps/Mail/Tests/MailAppTests/Fixtures/keyboard-shortcuts.md")
         let text = try String(contentsOf: design, encoding: .utf8)
         #expect(text.contains("### 4.1"))
-        for spelling in ["⌃⌥⌘F", "⌃⌘⌥F", "⌥⌘T", "⌘⌥T", "ctrl+opt+cmd+f", "ctrl+cmd+opt+f", "opt+cmd+t", "cmd+opt+t"] {
+        for spelling in ["⌃⌥⌘F", "⌃⌘⌥F", "⌃⌥⌘T", "⌃⌘⌥T", "ctrl+opt+cmd+f", "ctrl+cmd+opt+f", "ctrl+opt+cmd+t", "ctrl+cmd+opt+t"] {
             #expect(!text.contains(spelling), "the shortcut reference binds \(spelling)")
         }
     }
@@ -66,13 +66,19 @@ import Testing
                 let mods = item.keyEquivalentModifierMask.intersection([.command, .option, .control, .shift])
                 let key = item.keyEquivalent.lowercased()
                 let feedbackKey = mods == [.command, .option, .control] && key == "f"
-                let checklistKey = mods == [.command, .option] && key == "t"
+                let checklistKey = mods == [.command, .option, .control] && key == "t"
+                let isOurs = ["Give feedback…", "Test checklist…"].contains(item.title)
+                if isOurs {
+                    ours.append(item.title)
+                    let expectedKey = item.title == "Give feedback…" ? feedbackKey : checklistKey
+                    #expect(expectedKey, "\(item.title): key=\(String(reflecting: item.keyEquivalent)), modifiers=\(mods.rawValue)")
+                }
                 guard feedbackKey || checklistKey else { continue }
-                if ["Give feedback…", "Test checklist…"].contains(item.title) { ours.append(item.title) } else { conflicts.append(item.title) }
+                if !isOurs { conflicts.append(item.title) }
             }
         }
         if let menu = NSApp.mainMenu { walk(menu) }
-        #expect(conflicts.isEmpty, "other menu items on ⌃⌥⌘F/⌥⌘T: \(conflicts)")
+        #expect(conflicts.isEmpty, "other menu items on ⌃⌥⌘F/⌃⌥⌘T: \(conflicts)")
         #expect(ours.sorted() == ["Give feedback…", "Test checklist…"], "menu bar: \(NSApp.mainMenu?.items.map(\.title) ?? [])")
     }
 

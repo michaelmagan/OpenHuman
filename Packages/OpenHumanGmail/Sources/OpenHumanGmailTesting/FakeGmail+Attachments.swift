@@ -79,3 +79,16 @@ extension FakeGmail {
         return (root, stored)
     }
 }
+
+extension FakeGmail {
+    @discardableResult
+    public func seedDraft(to: String = "bob@example.com", subject: String = "Synthetic draft",
+                          body: String = "Synthetic draft body.",
+                          attachments: [FakeGmailAttachment] = []) -> (draftID: String, messageID: String) {
+        let (messageID, _) = deliver(from: accountEmail, to: to, subject: subject, body: body, labels: ["DRAFT"],
+                                     attachments: attachments)
+        let draftID = "r" + nextID()
+        drafts[draftID] = messageID
+        return (draftID, messageID)
+    }
+}

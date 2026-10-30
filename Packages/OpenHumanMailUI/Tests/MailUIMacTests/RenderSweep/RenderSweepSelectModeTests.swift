@@ -43,6 +43,27 @@ extension RenderSweepTests {
     }
 
     @Test(arguments: SweepTheme.selected(SweepTheme.allBuiltIns, slugs: "light,dark"))
+    func selectBeforeHintStaysOffTheCalendar(_ theme: SweepTheme) async throws {
+        let (environment, now) = CalendarWindowSweep.environment()
+        let w = try await SweepWindow.make(environment, theme: theme)
+        defer { w.close() }
+        let list = try #require(w.router.list)
+        try #require(list.rows.count >= 3)
+        list.setCursor(list.rows[1].id)
+        list.checkFromHere()
+        #expect(list.offersCheckBefore)
+        #expect(CheckBeforeHint.shows(router: w.router) != nil, "the list offers the conversation above")
+
+        let model = try #require(environment.calendarWindow)
+        model.now = { now }
+        environment.calendarSidebar?.now = { now }
+        await model.open(.week, source: .keyboard)
+        #expect(model.state == .loaded)
+        #expect(CheckBeforeHint.shows(router: w.router) == nil, "the hint stays with the list behind the Calendar")
+        try await sweepShoot(w.window, screen: "select-cmd-a-middle-calendar", theme: theme)
+    }
+
+    @Test(arguments: SweepTheme.selected(SweepTheme.allBuiltIns, slugs: "light,dark"))
     func recentOpensWithContactPane(_ theme: SweepTheme) async throws {
         let environment = SweepWindow.environment()
         let w = try await SweepWindow.make(environment, theme: theme)

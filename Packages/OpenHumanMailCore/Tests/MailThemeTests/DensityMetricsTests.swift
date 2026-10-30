@@ -11,8 +11,8 @@ import Testing
     @Test func theDesignTableHoldsAtEveryDensity() {
         let table: [(ThemeDensity, [Double])] = [
             (.compact, [32, 1, 6, 22, 36, 12, 12, 32, 28, 32, 24]),
-            (.default, [36, 2, 6, 24, 40, 16, 16, 36, 32, 36, 28]),
-            (.comfortable, [44, 4, 8, 28, 44, 20, 20, 40, 36, 40, 28]),
+            (.default, [40, 2, 6, 24, 40, 16, 16, 36, 32, 36, 28]),
+            (.comfortable, [48, 4, 8, 28, 44, 20, 20, 40, 36, 40, 28]),
         ]
         for (density, expected) in table {
             for base in [ThemeTokens.light, .dark, .paper, .midnight] {

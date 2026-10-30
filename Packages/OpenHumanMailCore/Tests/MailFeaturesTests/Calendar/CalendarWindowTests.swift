@@ -3,6 +3,7 @@ import MailActions
 import MailFakes
 import MailModel
 import OpenHumanCore
+import Synchronization
 import Testing
 @testable import MailFeatures
 
@@ -67,6 +68,52 @@ private struct CalendarWindowFixture {
 
     func run(_ id: ActionID, source: ActionSource = .keyboard) async -> Bool {
         await env.actions.run(id, source: source, host: env.router)
+    }
+}
+
+@MainActor
+@Suite struct CalendarCopyIdentityTests {
+    @Test func equalIdsHaveDistinctBlockBarSelectionAndHeldChanges() async throws {
+        for homeID in ["shared", "personal-copy"] {
+            let work = event("shared", la(10, 13, 9), la(10, 13, 10), attendees: [sam], organizerIsMe: true)
+            let personal = event(homeID, la(10, 13, 9), la(10, 13, 10), attendees: [sam], organizerIsMe: false,
+                                 response: .needsAction)
+            let f = CalendarWindowFixture(work: [work], home: [personal])
+            let model = f.window()
+            model.sleep = { _ in try await Task.sleep(for: .seconds(3_600)) }
+            await model.open()
+            let copies = model.timeGrid.blocks
+            #expect(copies.count == 2 && Set(copies.map(\.id)).count == 2)
+            let workCopy = try #require(model.events.first { $0.account == f.workEmail })
+            let homeCopy = try #require(model.events.first { $0.account == f.homeEmail })
+            model.openEvent(homeCopy)
+            #expect(model.selectedEventID == homeCopy.copyKey && model.selectedEventID != workCopy.copyKey)
+            model.openEvent(workCopy)
+            await model.moveEvent(workCopy, to: la(10, 13, 11), end: la(10, 13, 12))
+            #expect(model.shownEvents.first { $0.copyKey == workCopy.copyKey }?.start == la(10, 13, 11))
+            #expect(model.shownEvents.first { $0.copyKey == homeCopy.copyKey }?.start == la(10, 13, 9))
+            await f.env.undo?.undoLast()
+            model.openEvent(workCopy)
+            await model.removeCardEvent()
+            #expect(model.shownEvents.map(\.copyKey) == [homeCopy.copyKey])
+            await f.env.undo?.undoLast()
+            #expect(Set(model.shownEvents.map(\.copyKey)) == [workCopy.copyKey, homeCopy.copyKey])
+            model.openEvent(homeCopy)
+            await model.respond(.tentative)
+            #expect(model.shownEvents.first { $0.copyKey == homeCopy.copyKey }?.myResponse == .tentative)
+            #expect(model.shownEvents.first { $0.copyKey == workCopy.copyKey }?.myResponse == nil)
+            await f.env.undo?.undoLast()
+        }
+    }
+
+    @Test func equalIdsOnAllDayCopiesHaveDistinctBarIds() {
+        var work = event("shared", la(10, 13), la(10, 14), allDay: true)
+        var home = work
+        work.account = "work@example.test"
+        home.account = "personal@example.test"
+        let grid = CalendarTimeGrid(days: [la(10, 13)], events: [work, home], timeZone: losAngeles,
+                                    now: la(10, 12, 11))
+        #expect(grid.allDay.count == 2 && Set(grid.allDay.map(\.id)).count == 2)
     }
 }
 
@@ -156,17 +203,19 @@ private struct CalendarWindowFixture {
         #expect(abs(empty.scrollTarget - 8.0 / 24) < 0.0001)
     }
 
-    @Test func inPersonAndExternalEventsAreOutlined() {
-        let inPerson = event("p", la(10, 13, 9), la(10, 13, 10), location: "Corner cafe")
-        let inside = event("i", la(10, 13, 9), la(10, 13, 10), attendees: [EmailAddress(name: nil, email: "dana@example.com")])
-        let external = event("e", la(10, 13, 9), la(10, 13, 10), attendees: [sam])
-        #expect(CalendarTimeGrid.isOutlined(inPerson, owner: nil))
-        #expect(!CalendarTimeGrid.isOutlined(inside, owner: "robin@example.com"))
-        #expect(CalendarTimeGrid.isOutlined(external, owner: "robin@example.com"))
-        #expect(!CalendarTimeGrid.isOutlined(external, owner: nil), "without an owner only a place counts")
-        let declined = event("d", la(10, 13, 9), la(10, 13, 10), response: .declined)
-        let grid = CalendarTimeGrid(days: [la(10, 13)], events: [declined], timeZone: losAngeles, now: la(10, 12, 11))
-        #expect(grid.blocks.first?.isDeclined == true)
+    @Test func onlyAMaybeAnswerIsOutlined() {
+        func block(_ response: CalendarResponse?, location: String? = nil, attendees: [EmailAddress] = [],
+                   organizerIsMe: Bool? = nil) -> CalendarTimeGrid.Block? {
+            let item = event("b", la(10, 13, 9), la(10, 13, 10), attendees: attendees, organizerIsMe: organizerIsMe,
+                             location: location, response: response)
+            return CalendarTimeGrid(days: [la(10, 13)], events: [item], timeZone: losAngeles, now: la(10, 12, 11)).blocks.first
+        }
+        #expect(block(.accepted, location: "Corner cafe", attendees: [sam])?.isTentative == false,
+                "a place or an outside guest does not outline an accepted event")
+        #expect(block(nil, location: "Corner cafe", attendees: [sam], organizerIsMe: true)?.isTentative == false)
+        #expect(block(.tentative)?.isTentative == true)
+        #expect(block(.needsAction)?.isTentative == false)
+        #expect(block(.declined)?.isDeclined == true)
     }
 
     @Test func theMonthGridHoldsWholeWeeksAndSaysHowManyMore() {
@@ -213,8 +262,194 @@ private struct CalendarWindowFixture {
     }
 }
 
+private final class DidWriteReloadCalendar: CalendarProviding, Sendable {
+    let inner: FakeCalendar
+    let reading = Checkpoint()
+    let responding = Checkpoint()
+    private let holdsReads = Mutex(false)
+
+    init(_ inner: FakeCalendar) { self.inner = inner }
+
+    var info: CalendarProviderInfo { inner.info }
+    var abilities: CalendarAbilities { inner.abilities }
+
+    func holdReads() { holdsReads.withLock { $0 = true } }
+
+    func events(from: Date, to: Date) async throws -> [CalendarEvent] {
+        if holdsReads.withLock({ $0 }) { await reading.pass() }
+        return try await inner.events(from: from, to: to)
+    }
+
+    func eventWindow(from: Date, to: Date) async throws -> CalendarEventWindow {
+        if holdsReads.withLock({ $0 }) { await reading.pass() }
+        return try await inner.eventWindow(from: from, to: to)
+    }
+
+    func eventDelta(since token: String) async throws -> CalendarEventDelta {
+        if holdsReads.withLock({ $0 }) { await reading.pass() }
+        return try await inner.eventDelta(since: token)
+    }
+
+    func freeBusy(from: Date, to: Date) async throws -> CalendarFreeBusy {
+        try await inner.freeBusy(from: from, to: to)
+    }
+
+    func createEvent(_ draft: CalendarEventDraft) async throws -> CalendarEvent { try await inner.createEvent(draft) }
+    func deleteEvent(_ event: CalendarEvent) async throws { try await inner.deleteEvent(event) }
+
+    func respond(to event: CalendarEvent, with response: CalendarResponse,
+                 sendUpdates: CalendarSendUpdates) async throws -> CalendarEvent {
+        await responding.pass()
+        return try await inner.respond(to: event, with: response, sendUpdates: sendUpdates)
+    }
+}
+
 @MainActor
 @Suite struct CalendarWindowModelTests {
+    @Test func anOwnerGoneBeforeAHeldAnswerDispatchesLeavesTheCalendarUnchanged() async throws {
+        let corpus = FakeCorpus.make(threadCount: 6, now: fixedNow)
+        let meeting = event("held", la(10, 13, 9), la(10, 13, 10), attendees: [sam, FakeCorpus.me],
+                            organizerIsMe: false, response: .needsAction)
+        let calendar = FakeCalendar(events: [meeting], abilities: [.respond])
+        let notices = NoticeCenter(autoExpire: false)
+        var owner: AppEnvironment? = .fake(corpus: corpus, options: .init(remoteAck: .immediate),
+                                           featureFlags: FeatureFlags(), calendar: calendar, notices: notices)
+        weak var weakOwner = owner
+        let window = try #require(owner?.calendarWindow)
+        let sleeper = Checkpoint()
+        defer { sleeper.release() }
+        window.timeZone = losAngeles
+        window.now = { la(10, 12, 11) }
+        window.sleep = { _ in await sleeper.pass() }
+        await window.open(.week, around: la(10, 12))
+        window.openEvent(try #require(window.events.first))
+        await window.respond(.accepted)
+        #expect(window.heldCount == 1 && window.overlays.count == 1)
+        let settlement = try #require(window.held.values.first)
+        await sleeper.arrived()
+        let calls = calendar.calls
+        let messages = notices.toasts.map(\.message)
+
+        owner = nil
+        #expect(weakOwner == nil)
+        sleeper.release()
+        await settlement.value
+
+        #expect(weakOwner == nil && window.heldCount == 0 && window.overlays.isEmpty)
+        #expect(calendar.calls == calls && notices.toasts.map(\.message) == messages)
+    }
+
+    @Test func aHeldAnswerKeepsItsOwnerThroughTheWriteAndTerminalReload() async throws {
+        let corpus = FakeCorpus.make(threadCount: 6, now: fixedNow)
+        let meeting = event("held", la(10, 13, 9), la(10, 13, 10), attendees: [sam, FakeCorpus.me],
+                            organizerIsMe: false, response: .needsAction)
+        let calendar = FakeCalendar(events: [meeting], abilities: [.respond])
+        let provider = DidWriteReloadCalendar(calendar)
+        var owner: AppEnvironment? = .fake(corpus: corpus, options: .init(remoteAck: .immediate),
+                                           featureFlags: FeatureFlags(), calendar: provider)
+        weak var weakOwner = owner
+        let window = try #require(owner?.calendarWindow)
+        let sleeper = Checkpoint()
+        defer {
+            sleeper.release()
+            provider.responding.release()
+            provider.reading.release()
+        }
+        window.timeZone = losAngeles
+        window.now = { la(10, 12, 11) }
+        window.sleep = { _ in await sleeper.pass() }
+        await window.open(.week, around: la(10, 12))
+        window.openEvent(try #require(window.events.first))
+        await window.respond(.accepted)
+        #expect(window.heldCount == 1)
+        let settlement = try #require(window.held.values.first)
+        await sleeper.arrived()
+        sleeper.release()
+        await provider.responding.arrived()
+
+        owner = nil
+        #expect(weakOwner != nil, "the dispatched answer keeps its owner during the provider write")
+        provider.holdReads()
+        provider.responding.release()
+        await provider.reading.arrived()
+        #expect(weakOwner != nil && window.progress != nil, "the terminal reload is part of the same operation")
+        provider.reading.release()
+        await settlement.value
+
+        #expect(weakOwner == nil && window.heldCount == 0 && window.overlays.isEmpty)
+        #expect(calendar.calls.filter { if case .respond = $0 { true } else { false } }
+                == [.respond(id: "held", response: .accepted, sendUpdates: .all)])
+        #expect(window.events.first?.myResponse == .accepted && window.progress == nil)
+    }
+
+    @Test func didWriteReloadKeepsItsOwnerAfterTheHeldCreateHasFinished() async throws {
+        let corpus = FakeCorpus.rich(threadCount: 12, now: fixedNow)
+        let workAccount = corpus.accounts[0], homeAccount = corpus.accounts[1]
+        let work = FakeCalendar(info: CalendarProviderInfo(name: "Work", account: workAccount.email))
+        let homeInner = FakeCalendar(info: CalendarProviderInfo(name: "Home", account: homeAccount.email))
+        let home = DidWriteReloadCalendar(homeInner)
+        let connections = FakeCalendarConnections(providers: [workAccount.email: work, homeAccount.email: home])
+        let notices = NoticeCenter(autoExpire: false)
+        var owner: AppEnvironment? = .fake(corpus: corpus, options: .init(remoteAck: .immediate),
+                                           featureFlags: FeatureFlags(), calendar: work,
+                                           calendarConnections: connections, notices: notices)
+        weak var weakOwner = owner
+        let sidebar = try #require(owner?.calendarSidebar)
+        let window = try #require(owner?.calendarWindow)
+        let thread = try #require(corpus.threads.first { $0.row.id.account == workAccount.id }?.row.id)
+        defer { home.reading.release() }
+        sidebar.timeZone = losAngeles
+        sidebar.now = { la(10, 12, 11) }
+        sidebar.loadText = { _ in
+            CalendarThreadText(subject: "Lunch?", texts: ["Lunch?", "October 15, 2026 at 12:30 PM"], participants: [sam])
+        }
+        sidebar.sleep = { _ in try await Task.sleep(for: .seconds(3_600)) }
+        window.timeZone = losAngeles
+        window.now = { la(10, 12, 11) }
+        await sidebar.setShowAll(false)
+        await sidebar.show(thread: thread)
+        await sidebar.beginDraft(for: thread)
+        sidebar.draft?.sendUpdates = .all
+        let original = try #require(sidebar.draft)
+        await window.open(.week, around: la(10, 12))
+        #expect(window.isOpen && window.sources.count == 2 && !sidebar.showsAllCalendars)
+
+        // Keep the open week away from prefetch edges. The second provider's read cannot coalesce with
+        // the sidebar's first-provider refresh, so this gate belongs to the real didWrite reload alone.
+        let margin = TimeInterval(CalendarEventStore.prefetchMargin) * 86_400
+        let lastDay = window.period.days.last ?? window.period.start
+        for key in [CalendarEventStore.key(for: work), CalendarEventStore.key(for: home)] {
+            #expect(sidebar.eventStore.ranges(key).contains {
+                window.period.start.timeIntervalSince($0.start) >= margin && $0.end.timeIntervalSince(lastDay) >= margin
+            })
+        }
+        home.holdReads()
+        guard await sidebar.createEvent() else {
+            Issue.record("the open window regression must dispatch the actual held guest create")
+            return
+        }
+        #expect(sidebar.heldCreateCount == 1)
+        let settlement = Task { await sidebar.prepareForQuit() }
+        await home.reading.arrived()
+        await settlement.value
+        #expect(sidebar.heldCreateCount == 0 && work.createCalls == 1)
+        #expect(window.progress != nil, "the real reload is still blocked after the create task has fully settled")
+
+        owner = nil
+        #expect(weakOwner != nil, "only the running reload now leases the owner")
+        home.reading.release()
+        await eventually { weakOwner == nil }
+
+        #expect(weakOwner == nil, "the completed reload releases its owner without an init-time cycle")
+        #expect(window.isOpen && window.progress == nil && window.state == .loaded)
+        #expect(work.calls.compactMap { call -> CalendarEventDraft? in
+            if case .create(let sent) = call { sent } else { nil }
+        } == [original])
+        #expect(homeInner.createCalls == 0)
+        #expect(window.events.map(\.id) == work.created.map(\.id))
+        #expect(!window.events.contains { $0.id.hasPrefix(CalendarSidebarModel.placeholderPrefix) })
+    }
+
     @Test func openingShowsTheWeekOfEveryConnectedCalendarTaggedWithItsAccount() async throws {
         let f = CalendarWindowFixture(work: [event("w1", la(10, 13, 9), la(10, 13, 10))],
                                       home: [event("h1", la(10, 13, 9, 30), la(10, 13, 10, 30))])
@@ -227,7 +462,8 @@ private struct CalendarWindowFixture {
         #expect(model.events.map(\.account) == [f.workEmail, f.homeEmail], "the account chip and colour")
         #expect(model.progress == nil && model.state == .loaded && model.note == nil)
         #expect(model.timeGrid.blocks.map(\.columns) == [2, 2], "two calendars' overlapping events side by side")
-        #expect(model.sources.map(\.colorIndex) == [CalendarWindowModel.colorOrder[0], CalendarWindowModel.colorOrder[1]])
+        #expect(model.sources.map(\.colorIndex) == [CalendarDayTimeline.colorIndex(forCalendar: f.workEmail),
+                                                      CalendarDayTimeline.colorIndex(forCalendar: f.homeEmail)])
         #expect(model.timeGrid.blocks.map(\.colorIndex) == model.sources.map(\.colorIndex))
         #expect(f.work.readCalls == 1 && f.home.readCalls == 1)
         #expect(model.title == la(10, 14).formatted(Date.FormatStyle(timeZone: losAngeles).month(.wide).year()))
@@ -375,6 +611,41 @@ private struct CalendarWindowFixture {
         #expect(model.events.first { $0.title == "Focus" }?.account == f.workEmail)
     }
 
+    @Test func draggingTheEventBeingPreparedMovesItToAnotherDayAndKeepsItsLength() async throws {
+        let f = CalendarWindowFixture()
+        let model = f.window()
+        let sidebar = model.sidebar
+        await model.open()
+        await model.newEvent(start: la(10, 14, 13), end: la(10, 14, 14))
+        sidebar.draft?.title = "Focus"
+        let key = try #require(sidebar.draftKey)
+        #expect(model.pendingPlacement?.dayIndex == 3)
+        model.movePending(to: la(10, 15, 15))
+        #expect(sidebar.draft?.start == la(10, 15, 15) && sidebar.draft?.end == la(10, 15, 16), "the same hour, a day later")
+        #expect(sidebar.draft?.title == "Focus")
+        #expect(model.pendingSlot == DateInterval(start: la(10, 15, 15), end: la(10, 15, 16)))
+        #expect(model.pendingPlacement?.dayIndex == 4 && model.showsPendingCard, "the editor stays with the moved event")
+        let saved = try #require(f.env.pendingEvents.pending(for: key))
+        #expect(saved.draft.start == la(10, 15, 15) && saved.draft.end == la(10, 15, 16) && saved.draft.title == "Focus")
+        #expect(f.work.createCalls == 0 && f.work.created.isEmpty, "moving the draft creates nothing")
+    }
+
+    @Test func theBottomEdgeOfTheEventBeingPreparedChangesOnlyItsEnd() async throws {
+        let f = CalendarWindowFixture()
+        let model = f.window()
+        let sidebar = model.sidebar
+        await model.open()
+        await model.newEvent(start: la(10, 14, 13), end: la(10, 14, 14))
+        let key = try #require(sidebar.draftKey)
+        model.resizePending(to: la(10, 14, 15, 30))
+        #expect(sidebar.draft?.start == la(10, 14, 13) && sidebar.draft?.end == la(10, 14, 15, 30))
+        #expect(model.pendingSlot == DateInterval(start: la(10, 14, 13), end: la(10, 14, 15, 30)) && model.showsPendingCard)
+        #expect(f.env.pendingEvents.pending(for: key)?.draft.end == la(10, 14, 15, 30))
+        model.resizePending(to: la(10, 14, 12))
+        #expect(sidebar.draft?.end == la(10, 14, 13, 15), "never shorter than a quarter hour")
+        #expect(f.work.createCalls == 0)
+    }
+
     @Test func meetFindsTheFirstFreeHalfHourWithThatPerson() async throws {
         let f = CalendarWindowFixture(work: [event("busy", la(10, 12, 11), la(10, 12, 12, 30))])
         let model = f.window()
@@ -384,6 +655,7 @@ private struct CalendarWindowFixture {
         #expect(await model.meet(with: "Sam Rivera <sam@example.org>") == nil)
         #expect(model.sidebar.draft?.start == la(10, 12, 12, 30), "after now and the busy block")
         #expect(model.sidebar.draft?.attendees.map(\.email) == ["sam@example.org"])
+        #expect(model.sidebar.draft?.sendUpdates == .all, "the person is invited by email")
     }
 
     @Test func draggingAnOwnEventMovesItAtOnceAndUndoPutsItBack() async throws {
@@ -462,7 +734,7 @@ private struct CalendarWindowFixture {
         await model.open()
         let shown = try #require(model.events.first)
         await model.moveEvent(shown, to: la(10, 13, 11), end: la(10, 13, 12))
-        #expect(model.scopeQuestion?.eventID == "weekly-1013" && f.work.moveCalls == 0)
+        #expect(model.scopeQuestion?.eventID == shown.copyKey && f.work.moveCalls == 0)
         await model.answerScope(.allEvents)
         #expect(model.scopeQuestion == nil && f.work.moveCalls == 0)
         #expect(f.env.notices.toasts.contains { $0.message.hasPrefix("Mail changes one event of a series") })
@@ -521,10 +793,12 @@ private struct CalendarWindowFixture {
         let model = f.window()
         model.sleep = { _ in try await Task.sleep(for: .seconds(3_600)) }
         await model.open()
-        model.openEvent(try #require(model.events.first))
+        let shown = try #require(model.events.first)
+        model.openEvent(shown)
         model.askToRemoveCardEvent()
         let question = try #require(model.removeQuestion)
-        #expect(question.eventID == "own" && !question.emailsPeople && question.text.contains("Undo brings it back"))
+        #expect(question.eventID == shown.copyKey
+                && !question.emailsPeople && question.text.contains("Undo brings it back"))
         #expect(model.heldCount == 0 && model.shownEvents.map(\.id) == ["own"], "asking changes nothing")
         await model.escape()
         #expect(model.removeQuestion == nil && model.card != nil && model.heldCount == 0)
@@ -888,6 +1162,15 @@ private final class StoreChanges {
         #expect(cancelled.end(translation: CGSize(width: 0, height: 60), hourHeight: 44, columnWidth: 100) == nil)
     }
 
+    @Test func aMovedDraftKeepsItsLengthAndAResizedOneItsStart() {
+        let moved = CalendarDragMath.moved(from: la(10, 14, 13), until: la(10, 14, 14), to: la(10, 15, 15))
+        #expect(moved.start == la(10, 15, 15) && moved.end == la(10, 15, 16))
+        let tiny = CalendarDragMath.moved(from: la(10, 14, 13), until: la(10, 14, 13), to: la(10, 14, 9))
+        #expect(tiny.end == la(10, 14, 9, 15), "at least a quarter hour")
+        let resized = CalendarDragMath.resized(from: la(10, 14, 13), to: la(10, 14, 12))
+        #expect(resized.start == la(10, 14, 13) && resized.end == la(10, 14, 13, 15))
+    }
+
     @Test func aResizeNeverChangesTheDay() {
         let p = CalendarDragState.proposal(translation: CGSize(width: 250, height: -22), kind: .resize, hourHeight: 44, columnWidth: 100)
         #expect(p == .init(dayDelta: 0, quarterDelta: -2))
@@ -965,6 +1248,29 @@ private final class StoreChanges {
         gate.release()
         await eventually { !patches(f).isEmpty }
         #expect(patches(f).first?.updates == .all, "the explicit choice wins")
+    }
+
+    @Test func anAddressLeftInTheGuestFieldIsAddedWhenTheCardSaves() async throws {
+        let own = event("own", la(10, 13, 9), la(10, 13, 10), organizerIsMe: true)
+        let f = CalendarWindowFixture(work: [own], workAbilities: fullAbilities)
+        let model = f.window()
+        let gate = TestGate()
+        model.sleep = { _ in await gate.wait() }
+        await model.open()
+        model.openEvent(try #require(model.events.first))
+        model.card?.pendingGuest = "Sam"
+        #expect(model.card?.hasChanges == true, "typed text is something Save acts on")
+        await model.saveCard()
+        #expect(model.card?.pendingGuestNote == CalendarPendingGuest.notAnAddress && model.card?.pendingGuest == "Sam")
+        #expect(patches(f).isEmpty, "text that is not an address stops the save")
+        model.card?.pendingGuest = "sam@example.org"
+        #expect(model.card?.pendingGuestNote == nil)
+        await model.saveCard()
+        #expect(model.card == nil && model.heldCount == 1)
+        gate.release()
+        await eventually { !patches(f).isEmpty }
+        let sent = try #require(patches(f).first)
+        #expect(sent.patch.guestsAdded == ["sam@example.org"] && sent.updates == .all)
     }
 
     @Test func aRecurringEventAsksThisThisAndFollowingOrAllEvents() async throws {
@@ -1059,6 +1365,7 @@ private final class StoreChanges {
         await model.duplicateCardEvent()
         #expect(model.card == nil && model.sidebar.draft?.title == "Event own" && model.sidebar.draft?.location == "Room 4")
         #expect(model.sidebar.draft?.attendees == [sam] && f.work.created.isEmpty, "nothing is created until Save")
+        #expect(model.sidebar.draft?.sendUpdates == .all, "the copy's guests are invited by email")
     }
 
     @Test func decliningStandsInForDeletingSomeoneElsesEvent() async throws {

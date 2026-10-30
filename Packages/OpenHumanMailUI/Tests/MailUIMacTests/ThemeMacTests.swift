@@ -91,11 +91,26 @@ final class EventCounter {
         #expect(SystemAppearanceMonitor.appearance(of: try #require(NSAppearance(named: .accessibilityHighContrastDarkAqua))) == .dark)
     }
 
-    @Test func monitorFeedsTheStore() {
+    @Test func monitorFeedsTheStore() async {
         let store = ThemeStore()
         let monitor = SystemAppearanceMonitor(store: store)
         #expect(store.systemAppearance == SystemAppearanceMonitor.appearance(of: NSApplication.shared.effectiveAppearance))
+        #expect(store.liveAccent == SystemAppearanceMonitor.liveAccent())
+        let version = store.version
+        NotificationCenter.default.post(name: NSColor.systemColorsDidChangeNotification, object: nil)
+        await untilObserved { store.version > version }
         _ = monitor
+    }
+
+    @Test func theLiveAccentIsReadPerAppearance() throws {
+        let accent = try #require(SystemAppearanceMonitor.liveAccent(NSColor(srgbRed: 0.5, green: 0.25, blue: 0.75, alpha: 1)))
+        #expect(accent.light == ThemeColor(red: 0.5, green: 0.25, blue: 0.75) && accent.dark == accent.light)
+        let dynamic = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1) : NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
+        }
+        let pair = try #require(SystemAppearanceMonitor.liveAccent(dynamic))
+        #expect(pair.light == ThemeColor(red: 0, green: 0, blue: 0) && pair.dark == ThemeColor(red: 1, green: 1, blue: 1))
     }
 
     @Test func windowAppearanceFollowsTheResolvedTheme() {
@@ -128,9 +143,9 @@ final class EventCounter {
         let view = NSView()
         view.wantsLayer = true
         let observation = store.observe { theme in view.layer?.backgroundColor = theme.bgWindow.nsColor.cgColor }
-        #expect(view.layer?.backgroundColor == ThemeTokens.light.bgWindow.nsColor.cgColor)
+        #expect(view.layer?.backgroundColor == ThemeLibrary.builtIn.resolve(themeID: BuiltinThemeID.systemLight, appearance: .light).bgWindow.nsColor.cgColor)
         store.preferences.mode = .dark
-        try await until { view.layer?.backgroundColor == ThemeTokens.dark.bgWindow.nsColor.cgColor }
+        try await until { view.layer?.backgroundColor == ThemeLibrary.builtIn.resolve(themeID: BuiltinThemeID.systemDark, appearance: .dark).bgWindow.nsColor.cgColor }
         #expect(ReaderCSS.replaceScript(css: store.readerCSS).contains("color-scheme: dark"))
         observation.cancel()
     }

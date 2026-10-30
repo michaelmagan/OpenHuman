@@ -78,11 +78,18 @@ public final class CalendarWindowModel {
         let today = calendar.startOfDay(for: now())
         focusDay = today
         period = CalendarPeriod.containing(today, kind: .week, calendar: calendar)
-        sidebar.didWrite = { [weak self] in
-            guard let self, self.isOpen else { return }
-            Task { await self.load(force: true) }
+        sidebar.didWrite = { [weak self, weak environment] in
+            guard let self, self.isOpen, let environment else { return }
+            Task {
+                defer { withExtendedLifetime(environment) {} }
+                await self.load(force: true)
+            }
         }
-        storeObserver = eventStore.observe { [weak self] change in self?.cacheChanged(change) }
+        storeObserver = eventStore.observe { [weak self, weak environment] change in
+            guard let self, let environment else { return }
+            defer { withExtendedLifetime(environment) {} }
+            self.cacheChanged(change)
+        }
     }
 
     var calendar: Calendar { CalendarDateMentions.calendar(timeZone) }
@@ -91,7 +98,7 @@ public final class CalendarWindowModel {
         let wasOpen = isOpen
         isOpen = true
         if !wasOpen {
-            sidebar.activeAccount = { [weak router = environment.router] in router?.activeAccountID }
+            sidebar.activeAccount = { [weak status = environment.status] in status?.activeAccount }
             hiddenKeys = Set(await read(AppSettings.calendarHiddenCalendars))
         }
         let stored = wasOpen ? kind : await read(AppSettings.calendarWindowView)
@@ -122,6 +129,7 @@ public final class CalendarWindowModel {
     public func stepAside() {
         guard isOpen else { return }
         isOpen = false
+        noteUnsavedMove()
         card = nil
         scopeQuestion = nil
         removeQuestion = nil
@@ -188,6 +196,7 @@ public final class CalendarWindowModel {
     func calendarSources() async -> [(key: String, title: String, provider: any CalendarProviding)] {
         if let connections = environment.calendarConnections, connections.routesByAccount {
             let accounts = await AIThreadLoader.first(environment.data.accounts()) ?? []
+            eventStore.learnAddresses(of: accounts)
             return accounts.compactMap { owner in
                 connections.calendarProvider(for: owner).map { (owner.email.lowercased(), owner.email, $0) }
             }
@@ -207,8 +216,8 @@ public final class CalendarWindowModel {
         providers = Dictionary(all.map { ($0.key, $0.provider) }, uniquingKeysWith: { first, _ in first })
         storeKeys = Dictionary(all.map { ($0.key, CalendarEventStore.key(for: $0.provider)) },
                                uniquingKeysWith: { first, _ in first })
-        sources = all.enumerated().map { position, item in
-            Source(key: item.key, title: item.title, colorIndex: Self.colorIndex(atPosition: position),
+        sources = all.map { item in
+            Source(key: item.key, title: item.title, colorIndex: CalendarDayTimeline.colorIndex(forCalendar: item.key),
                    isVisible: !hiddenKeys.contains(item.key))
         }
         let visible = all.filter { !hiddenKeys.contains($0.key) }
@@ -292,7 +301,7 @@ public final class CalendarWindowModel {
                 return tagged
             }
         }
-        let sorted = merged.sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
+        let sorted = merged.sorted { $0.start != $1.start ? $0.start < $1.start : $0.copyKey < $1.copyKey }
         if events != sorted { events = sorted }
         if any, complete, state != .loaded { state = .loaded }
         return complete
@@ -343,38 +352,33 @@ public final class CalendarWindowModel {
         for overlay in overlays.values {
             switch overlay {
             case .times(let id, let start, let end):
-                if let index = out.firstIndex(where: { $0.id == id }) {
+                if let index = out.firstIndex(where: { $0.copyKey == id }) {
                     let old = out[index]
                     out[index] = old.with(start: start, end: end)
                 }
             case .removed(let id):
-                out.removeAll { $0.id == id }
+                out.removeAll { $0.copyKey == id }
             case .response(let id, let response):
-                if let index = out.firstIndex(where: { $0.id == id }) { out[index].myResponse = response }
+                if let index = out.firstIndex(where: { $0.copyKey == id }) { out[index].myResponse = response }
             }
         }
-        if let card, card.pendingMove != nil, let index = out.firstIndex(where: { $0.id == card.event.id }) {
+        if let card, card.pendingMove != nil, let index = out.firstIndex(where: { $0.copyKey == card.event.copyKey }) {
             out[index] = out[index].with(start: card.form?.start ?? card.start, end: card.form?.end ?? card.end)
         }
-        return out.sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
+        return out.sorted { $0.start != $1.start ? $0.start < $1.start : $0.copyKey < $1.copyKey }
     }
 
     public var timeGrid: CalendarTimeGrid {
         let sources = sources
         return CalendarTimeGrid(days: period.days, events: shownEvents, timeZone: timeZone, now: now(),
-                                owner: sidebar.provider.info.account,
                                 colorIndex: { Self.colorIndex(of: $0, in: sources) })
     }
-
-    public static let colorOrder = [0, 2, 3, 4, 1, 5]
-
-    public static func colorIndex(atPosition position: Int) -> Int { colorOrder[position % colorOrder.count] }
 
     public func colorIndex(for event: CalendarEvent) -> Int { Self.colorIndex(of: event, in: sources) }
 
     static func colorIndex(of event: CalendarEvent, in sources: [Source]) -> Int {
         let key = (event.account ?? "").lowercased()
-        return (sources.first { $0.key == key } ?? sources.first)?.colorIndex ?? Self.colorIndex(atPosition: 0)
+        return (sources.first { $0.key == key } ?? sources.first)?.colorIndex ?? 0
     }
 
     public var monthGrid: CalendarMonthGrid {
@@ -416,6 +420,7 @@ public final class CalendarWindowModel {
     }
 
     public func newEvent(start: Date, end: Date) async {
+        noteUnsavedMove()
         card = nil
         selectedEventID = nil
         if sidebar.draft != nil {
@@ -426,6 +431,24 @@ public final class CalendarWindowModel {
         let key = PendingEventKey.draft(UUID())
         slotKeys.insert(key)
         await sidebar.beginDraft(start: start, end: end, key: key)
+    }
+
+    // Dragging the event being prepared keeps its length; only a timed draft moves on the grid
+    public func movePending(to start: Date) {
+        guard card == nil, var made = sidebar.draft, !made.isAllDay else { return }
+        let moved = CalendarDragMath.moved(from: made.start, until: made.end, to: start)
+        guard moved.start != made.start || moved.end != made.end else { return }
+        made.start = moved.start
+        made.end = moved.end
+        sidebar.draft = made
+    }
+
+    public func resizePending(to end: Date) {
+        guard card == nil, var made = sidebar.draft, !made.isAllDay else { return }
+        let resized = CalendarDragMath.resized(from: made.start, to: end)
+        guard resized.end != made.end else { return }
+        made.end = resized.end
+        sidebar.draft = made
     }
 
     public func newEvent() async {
@@ -468,8 +491,8 @@ public final class CalendarWindowModel {
             return meetNote
         }
         await newEvent(start: slot.start, end: slot.end)
-        if sidebar.draft?.attendees.contains(where: { $0.email.lowercased() == person.email.lowercased() }) == false {
-            sidebar.draft?.attendees.append(person)
+        if let people = sidebar.draft?.attendees, !people.contains(where: { $0.email.lowercased() == person.email.lowercased() }) {
+            sidebar.draft?.setAttendees(people + [person])
         }
         let accounts = await AIThreadLoader.first(environment.data.accounts()) ?? []
         let me = accounts.first { $0.id == environment.router.activeAccountID } ?? accounts.first
@@ -577,9 +600,11 @@ public struct CalendarRefreshSchedule: Sendable, Hashable {
 
 extension CalendarEvent {
     func with(start: Date, end: Date) -> CalendarEvent {
-        CalendarEvent(id: id, title: title, start: start, end: end, isAllDay: isAllDay, timeZone: timeZone,
-                      attendees: attendees, calendarName: calendarName, meetLink: meetLink, organizerIsMe: organizerIsMe,
-                      account: account, location: location, notes: notes, myResponse: myResponse,
-                      recurringEventID: recurringEventID, extras: extras)
+        var moved = CalendarEvent(id: id, title: title, start: start, end: end, isAllDay: isAllDay, timeZone: timeZone,
+                                  attendees: attendees, calendarName: calendarName, meetLink: meetLink,
+                                  organizerIsMe: organizerIsMe, account: account, location: location, notes: notes,
+                                  myResponse: myResponse, recurringEventID: recurringEventID, extras: extras)
+        moved.respondsAs = respondsAs
+        return moved
     }
 }

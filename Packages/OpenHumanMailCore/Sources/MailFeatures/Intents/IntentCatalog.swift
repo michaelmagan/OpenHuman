@@ -44,6 +44,7 @@ public enum IntentCatalog {
     public static let neverExposed: [ActionID] = [
         .send, .sendLater, .reviewSend, .unsubscribe, .trash, .spam, .discardDraft, .reviewDiscard,
         .alwaysImportantSender, .alwaysImportantDomain, .neverImportant, .removeFromSplit, .notAPitch,
+        .neverImportantDomain, .blockSender, .blockDomain,
     ]
 
     public static var writeTitles: [String] { all.filter { $0.tier == .write }.map(\.title) }

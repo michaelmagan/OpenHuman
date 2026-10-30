@@ -9,6 +9,25 @@ extension RichTextDocument {
         RichTextDocument(blocks: Self.keeping(blocks, ids))
     }
 
+    public func mappingImages(_ transform: (InlineImageRef) -> InlineImageRef) -> RichTextDocument {
+        RichTextDocument(blocks: Self.mapping(blocks, transform))
+    }
+
+    static func mapping(_ blocks: [Block], _ transform: (InlineImageRef) -> InlineImageRef) -> [Block] {
+        blocks.map { block in
+            switch block {
+            case .paragraph:
+                block
+            case .list(let ordered, let items, let start):
+                .list(ordered: ordered, items: items.map { mapping($0, transform) }, start: start)
+            case .quote(let inner):
+                .quote(mapping(inner, transform))
+            case .image(let ref):
+                .image(transform(ref))
+            }
+        }
+    }
+
     static func imageIDs(_ blocks: [Block]) -> [String] {
         var ids: [String] = []
         for block in blocks {

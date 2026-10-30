@@ -120,17 +120,43 @@ private func row(_ n: Int64, minutesAgo: Double) -> ThreadRow {
 
 @Suite struct SearchHeaderScopeTests {
     @Test func theSearchLinesShowOnlyOverTheSearchResults() {
-        #expect(SearchHeaderScope.shows(searchOpen: true, location: .search("quince"), unifiedInboxShown: false,
-                                        calendarShown: false))
-        #expect(!SearchHeaderScope.shows(searchOpen: true, location: .search("quince"), unifiedInboxShown: false,
-                                         calendarShown: true))
-        #expect(!SearchHeaderScope.shows(searchOpen: true, location: .search("quince"), unifiedInboxShown: true,
-                                         calendarShown: false))
-        #expect(!SearchHeaderScope.shows(searchOpen: true, location: .system(.inbox), unifiedInboxShown: false,
-                                         calendarShown: false))
-        #expect(!SearchHeaderScope.shows(searchOpen: false, location: .search("quince"), unifiedInboxShown: false,
-                                         calendarShown: false))
-        #expect(!SearchHeaderScope.shows(searchOpen: true, location: nil, unifiedInboxShown: false, calendarShown: false))
+        func shows(searchOpen: Bool = true, location: MailLocation? = .search("quince"), readerShown: Bool = false,
+                   unifiedInboxShown: Bool = false, calendarShown: Bool = false) -> Bool {
+            SearchHeaderScope.shows(searchOpen: searchOpen, location: location, readerShown: readerShown,
+                                    unifiedInboxShown: unifiedInboxShown, calendarShown: calendarShown)
+        }
+        #expect(shows())
+        #expect(!shows(readerShown: true), "an opened result shows no search lines")
+        #expect(!shows(calendarShown: true))
+        #expect(!shows(unifiedInboxShown: true))
+        #expect(!shows(location: .system(.inbox)))
+        #expect(!shows(searchOpen: false))
+        #expect(!shows(location: nil))
+    }
+}
+
+@MainActor @Suite struct SearchHeaderInTheReaderTests {
+    @Test func anOpenedResultHidesTheSearchLinesAndBackBringsThemBack() async throws {
+        let f = OverlayFixture()
+        await f.loaded()
+        let words = f.rows.flatMap { $0.subject.split(separator: " ") }
+        let word = try #require(words.first { $0.count >= 4 && $0.allSatisfy(\.isLetter) }.map(String.init))
+        let search = f.center.search
+        search.liveDelay = nil
+        search.open()
+        search.text = word
+        search.submit()
+        await eventually { f.router.active?.location == .search(word) && f.router.list?.state == .loaded && !f.rows.isEmpty }
+        #expect(f.router.showsSearchResultsHeader)
+        let opened = try #require(f.rows.first?.id)
+        f.router.open(opened)
+        await eventually { f.router.mode == .reader && f.router.reader?.thread == opened }
+        #expect(!f.router.showsSearchResultsHeader, "no search lines over the conversation")
+        #expect(await f.run(.backToList))
+        await eventually { f.router.mode == .list }
+        #expect(f.router.showsSearchResultsHeader)
+        #expect(search.shownQuery == word && f.router.active?.location == .search(word))
+        #expect(f.router.list?.cursor == opened)
     }
 }
 

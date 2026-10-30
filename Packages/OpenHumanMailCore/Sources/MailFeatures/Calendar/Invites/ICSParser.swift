@@ -357,8 +357,11 @@ public enum ICSParser {
             default: return nil
             }
         }
-        return any && number.isEmpty ? sign * total : nil
+        guard any, number.isEmpty, total.isFinite, total <= maxDuration else { return nil }
+        return sign * total
     }
+
+    static let maxDuration: TimeInterval = 366 * 86_400 * 10
 
     struct Wall: Hashable {
         let year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int
@@ -422,6 +425,8 @@ public enum ICSParser {
                     }
                 }
             }
+            if let value = month, !(1...12).contains(value) { month = nil }
+            if let value = ordinal, !Self.ordinals.contains(value) { ordinal = nil }
             if month != nil, weekday != nil, ordinal != nil {
                 self.month = month; self.weekday = weekday; self.ordinal = ordinal
             } else {
@@ -441,20 +446,23 @@ public enum ICSParser {
             return nil
         }
 
+        static let ordinals: Set<Int> = [-5, -4, -3, -2, -1, 1, 2, 3, 4, 5]
+
         static func day(year: Int, month: Int, weekday: Int, ordinal: Int) -> Int? {
+            guard (1...12).contains(month), (1...7).contains(weekday), ordinals.contains(ordinal),
+                  (1...9_999).contains(year) else { return nil }
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
             guard let first = calendar.date(from: DateComponents(year: year, month: month, day: 1)),
                   let days = calendar.range(of: .day, in: .month, for: first)?.count else { return nil }
             if ordinal > 0 {
                 let firstWeekday = calendar.component(.weekday, from: first)
-                var day = 1 + (weekday - firstWeekday + 7) % 7 + (ordinal - 1) * 7
-                while day > days { day -= 7 }
-                return day
+                let day = 1 + (weekday - firstWeekday + 7) % 7 + (ordinal - 1) * 7
+                return day > days ? day - ((day - days + 6) / 7) * 7 : day
             }
             guard let last = calendar.date(from: DateComponents(year: year, month: month, day: days)) else { return nil }
             let lastWeekday = calendar.component(.weekday, from: last)
-            let day = days - (lastWeekday - weekday + 7) % 7 - (abs(ordinal) - 1) * 7
+            let day = days - (lastWeekday - weekday + 7) % 7 - (-ordinal - 1) * 7
             return day >= 1 ? day : nil
         }
     }

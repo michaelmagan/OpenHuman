@@ -15,12 +15,20 @@ struct CalendarDayView: View {
     var compact = false
     @Environment(\.theme) private var theme
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let hourHeight: CGFloat = 44
     static let axisWidth: CGFloat = 46
     static let focusAnchor = "calendar.day.focus"
     static let eventAnchor = "calendar.day.event"
     static let labelRoom: CGFloat = 8
+    static let hoursMinHeight: CGFloat = 220
+    static let hoursIdealHeight: CGFloat = 360
+    static let hoursMaxHeight: CGFloat = 420
+    // How much of their ideal height the hours give up in the sidebar so the free times under them stay in view
+    static let hoursGiveUp: CGFloat = hoursIdealHeight - hoursMinHeight
+    // With a clicked time over events, the events keep this share of the column on the left
+    static let besidePickedShare: CGFloat = 0.42
 
     var body: some View {
         let timeline = model.timeline(for: day)
@@ -35,6 +43,9 @@ struct CalendarDayView: View {
                     .accessibilityIdentifier("calendar.day.couldNotRefresh")
             }
             if !timeline.allDay.isEmpty { allDayBars(timeline.allDay) }
+            if showsPicked, timeline.focus == nil, let picked = model.pickedTime {
+                CalendarPickedTimeChip(model: model, picked: picked, takeKeys: takeKeys)
+            }
             axis(timeline)
             if let note = day.note {
                 Text(note).themeFont(theme.typeMeta).foregroundStyle(theme.textWarning.color)
@@ -72,7 +83,7 @@ struct CalendarDayView: View {
 
     private func allDayBars(_ events: [CalendarEvent]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            ForEach(events) { event in
+            ForEach(events, id: \.copyKey) { event in
                 let opened = model.isOpened(event)
                 let colors = CalendarPalette.block(CalendarDayTimeline.colorIndex(for: event),
                                                    state: opened ? .selected : .normal, tokens: theme.tokens)
@@ -133,17 +144,28 @@ struct CalendarDayView: View {
                         let width = geometry.size.width
                         ZStack(alignment: .topLeading) {
                             hourLines(timeline, width: width, height: height)
-                            if let focus = timeline.focus { focusSlot(focus, width: width, height: height) }
-                            ForEach(timeline.blocks) { block in eventBlock(block, width: width, height: height) }
+                            let beside = showsPicked && !timeline.conflicts.isEmpty
+                            if let focus = timeline.focus, !showsPicked { focusSlot(focus, width: width, height: height) }
+                            ForEach(timeline.blocks) { block in
+                                eventBlock(block, width: beside && block.isConflict ? eventLane(width) : width,
+                                           height: height)
+                            }
                             if let now = timeline.now { nowLine(at: now, width: width, height: height) }
+                            if let focus = timeline.focus, showsPicked {
+                                pickedBlock(focus, beside: beside, width: width, height: height)
+                                    .transition(pickedTransition)
+                            }
                         }
                     }
                     .frame(height: height)
                 }
                 .padding(.top, Self.labelRoom)
                 .padding(.bottom, theme.space2)
+                .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.18), value: model.pickedTime)
             }
-            .frame(minHeight: compact ? 132 : 220, idealHeight: compact ? 176 : 360, maxHeight: compact ? 176 : 420)
+            .frame(minHeight: compact ? 132 : Self.hoursMinHeight,
+                   idealHeight: compact ? 176 : Self.hoursIdealHeight,
+                   maxHeight: compact ? 176 : Self.hoursMaxHeight)
             .onAppear { scrollToFocus(timeline, proxy) }
             .onChange(of: timeline.focus) { scrollToFocus(timeline, proxy) }
             .onChange(of: day.start) { scrollToFocus(timeline, proxy) }
@@ -224,6 +246,34 @@ struct CalendarDayView: View {
             .accessibilityIdentifier("calendar.dayView.focus")
     }
 
+    private var showsPicked: Bool { !compact && model.showsPickedTime }
+
+    private var pickedTransition: AnyTransition {
+        reduceMotion ? .opacity : .scale(scale: 0.96, anchor: .center).combined(with: .opacity)
+    }
+
+    private static let laneGap: CGFloat = 3
+
+    private func eventLane(_ width: CGFloat) -> CGFloat {
+        (width * Self.besidePickedShare).rounded(.down)
+    }
+
+    // The clicked time, drawn as a finished block: it reads as a new event and creates one when clicked.
+    // Over events it takes the free right part of the column, and those events move to the left part, so no
+    // title sits under it.
+    private func pickedBlock(_ focus: CalendarDayTimeline.Span, beside: Bool, width: CGFloat,
+                             height: CGFloat) -> some View {
+        let blockHeight = max(CGFloat(focus.height) * height - 1, 22)
+        let blockWidth = beside ? width - eventLane(width) - Self.laneGap : width
+        let time = model.timeText(focus.start, focus.end)
+        return CalendarPickedBlock(time: time, tall: blockHeight >= 38,
+                                   create: { takeKeys(); Task { await model.createEventAtPickedTime() } },
+                                   dismiss: { takeKeys(); model.dismissPickedTime() })
+            .frame(width: blockWidth, height: blockHeight)
+            .offset(x: width - blockWidth, y: CGFloat(focus.top) * height)
+            .accessibilityIdentifier("calendar.dayView.pickedTime")
+    }
+
     private func eventBlock(_ block: CalendarDayTimeline.Block, width: CGFloat, height: CGFloat) -> some View {
         let gap: CGFloat = 2
         let columnWidth = (width - gap * CGFloat(block.columns - 1)) / CGFloat(max(block.columns, 1))
@@ -232,7 +282,7 @@ struct CalendarDayView: View {
         let event = block.event
         let state = CalendarPalette.state(isSelected: opened, isDeclined: event.myResponse == .declined,
                                           needsAnswer: event.canRespond && event.myResponse == .needsAction,
-                                          isOutlined: false, isPast: event.end <= model.now())
+                                          isTentative: event.myResponse == .tentative, isPast: event.end <= model.now())
         let colors = CalendarPalette.block(block.colorIndex, state: state, tokens: theme.tokens)
         let ink = struck ? theme.textTertiary : colors.text
         let blockHeight = max(CGFloat(block.height) * height - 1, 14)
@@ -313,6 +363,97 @@ struct CalendarDayView: View {
 
     static func calendarColor(_ index: Int, theme: ResolvedTheme) -> Color {
         CalendarPalette.ink(index, tokens: theme.tokens).color
+    }
+}
+
+struct CalendarPickedBlock: View {
+    let time: String
+    let tall: Bool
+    let create: () -> Void
+    let dismiss: () -> Void
+    @Environment(\.theme) private var theme
+    @State private var hovered = false
+
+    var body: some View {
+        let accent = theme.accentFill.color
+        let shape = RoundedRectangle(cornerRadius: theme.radiusSM + 1, style: .continuous)
+        Button(action: create) {
+            HStack(alignment: tall ? .top : .center, spacing: theme.space2) {
+                Capsule().fill(accent).frame(width: 3).padding(.vertical, 3)
+                if tall {
+                    VStack(alignment: .leading, spacing: 1) {
+                        title
+                        Text(verbatim: time).themeFont(theme.typeCaption).foregroundStyle(theme.textSecondary.color)
+                            .lineLimit(1)
+                    }
+                    .padding(.top, 3)
+                } else {
+                    HStack(spacing: theme.space2) {
+                        title
+                        Text(verbatim: time).themeFont(theme.typeCaption).foregroundStyle(theme.textSecondary.color)
+                            .lineLimit(1).layoutPriority(-1)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.trailing, 20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(shape.fill(accent.opacity(hovered ? 0.22 : 0.14)))
+            .background(shape.fill(theme.component.sidebar.bg.color))
+            .overlay(shape.strokeBorder(accent.opacity(hovered ? 0.9 : 0.6), lineWidth: 1))
+            .clipShape(shape)
+            .shadow(color: accent.opacity(hovered ? 0.28 : 0.16), radius: hovered ? 8 : 5, y: hovered ? 3 : 2)
+            .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: tall ? .topTrailing : .trailing) {
+            Button(action: dismiss) {
+                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.textSecondary.color)
+                    .frame(width: 18, height: 18).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 2).padding(.top, tall ? 2 : 0)
+            .help("Hide this time")
+            .accessibilityLabel("Hide this time")
+            .accessibilityIdentifier("calendar.dayView.pickedTime.dismiss")
+        }
+        .onHover { inside in
+            withAnimation(.easeOut(duration: 0.12)) { hovered = inside }
+        }
+        .help("Create an event at \(time)  ↵")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Create event, \(time)")
+        .accessibilityHint("Opens a new event at this time, filled in from the conversation")
+    }
+
+    private var title: some View {
+        Label {
+            Text("Create event").themeFont(theme.typeCaption).fontWeight(.semibold)
+                .foregroundStyle(theme.textPrimary.color)
+        } icon: {
+            Image(systemName: "plus").font(.system(size: 9, weight: .bold)).foregroundStyle(theme.accentFill.color)
+        }
+        .labelStyle(.titleAndIcon)
+        .lineLimit(1)
+    }
+}
+
+// The clicked time when it falls outside the hours the day view draws
+struct CalendarPickedTimeChip: View {
+    let model: CalendarSidebarModel
+    let picked: CalendarSidebarModel.PickedTime
+    var takeKeys: () -> Void = {}
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        let time = model.timeText(picked.start, picked.end)
+        CalendarPickedBlock(time: time, tall: false,
+                            create: { takeKeys(); Task { await model.createEventAtPickedTime() } },
+                            dismiss: { takeKeys(); model.dismissPickedTime() })
+            .frame(height: 26)
+            .padding(.leading, CalendarDayView.axisWidth)
+            .accessibilityIdentifier("calendar.dayView.pickedTime")
     }
 }
 

@@ -7,23 +7,22 @@ actor SQLiteCalendarCache: CalendarCachePersisting {
     enum StoreError: Error { case open(Int32) }
 
     static let fileName = "calendar-cache.sqlite"
-    // Why: a version 1 file is emptied once and re-read from Google, since it lacks the new row fields
-    private static let schemaVersion: Int32 = 2
+    // Why: an older file is emptied once and re-read from Google, since it lacks the new row fields
+    static let schemaVersion: Int32 = 3
 
     private var db: OpaquePointer?
 
     init(url: URL) throws {
-        do {
-            db = try Self.open(url)
-        } catch {
-            let aside = url.deletingPathExtension().appendingPathExtension("damaged-\(Int(Date().timeIntervalSince1970)).sqlite")
-            try? FileManager.default.moveItem(at: url, to: aside)
-            db = try Self.open(url)
-        }
+        db = try SQLiteFileRecovery.open(url, status: Self.openStatus, Self.open)
     }
 
     isolated deinit {
         sqlite3_close_v2(db)
+    }
+
+    private static func openStatus(_ error: any Error) -> Int32? {
+        guard case .open(let status)? = error as? StoreError else { return nil }
+        return status
     }
 
     private static func open(_ url: URL) throws -> OpaquePointer? {
@@ -43,7 +42,7 @@ actor SQLiteCalendarCache: CalendarCachePersisting {
             throw StoreError.open(status)
         }
         sqlite3_busy_timeout(handle, 2_000)
-        let upgrade = userVersion(handle) == 1
+        let upgrade = (1..<schemaVersion).contains(userVersion(handle))
             ? "DELETE FROM calendar_events; DELETE FROM calendar_ranges; DELETE FROM calendar_state;" : ""
         let setup = """
             CREATE TABLE IF NOT EXISTS calendar_events (
@@ -74,9 +73,10 @@ actor SQLiteCalendarCache: CalendarCachePersisting {
             PRAGMA user_version = \(schemaVersion);
             PRAGMA secure_delete = ON;
             """
-        guard sqlite3_exec(handle, "PRAGMA quick_check;", nil, nil, nil) == SQLITE_OK,
+        let check = SQLiteFileRecovery.quickCheck(handle)
+        guard check == SQLITE_OK,
               sqlite3_exec(handle, setup, nil, nil, nil) == SQLITE_OK else {
-            let code = sqlite3_errcode(handle)
+            let code = check == SQLITE_OK ? sqlite3_errcode(handle) : check
             sqlite3_close_v2(handle)
             throw StoreError.open(code)
         }
@@ -245,6 +245,7 @@ private struct StoredEvent: Codable {
     var isBusy: Bool
     var declinedByMe: Bool
     var allDayDates: CalendarAllDayDates?
+    var extras: StoredExtras?
 
     init(_ record: CalendarEventRecord) {
         let event = record.event
@@ -263,6 +264,7 @@ private struct StoredEvent: Codable {
         isBusy = record.isBusy
         declinedByMe = record.declinedByMe
         allDayDates = record.allDayDates
+        extras = StoredExtras(event.extras)
     }
 
     func record(id: String, etag: String?, updated: Date?, start: Date, end: Date) -> CalendarEventRecord {
@@ -270,11 +272,78 @@ private struct StoredEvent: Codable {
                                   attendees: attendees, calendarName: calendarName, meetLink: meetLink.flatMap(URL.init(string:)),
                                   organizerIsMe: organizerIsMe, location: location, notes: notes,
                                   myResponse: myResponse.flatMap(CalendarResponse.init(rawValue:)),
-                                  recurringEventID: eventSeries)
+                                  recurringEventID: eventSeries, extras: extras?.value ?? CalendarEventExtras())
         var record = CalendarEventRecord(event: event, etag: etag, updated: updated, recurringEventID: recurringEventID,
                                          isBusy: isBusy, declinedByMe: declinedByMe)
         record.allDayDates = allDayDates ?? record.allDayDates
         return record
+    }
+}
+
+private struct StoredExtras: Codable {
+    struct Guest: Codable {
+        var email: String
+        var name: String?
+        var isOptional: Bool
+        var response: String?
+    }
+
+    struct Permissions: Codable {
+        var canModify: Bool
+        var canInviteOthers: Bool
+        var canSeeGuestList: Bool
+    }
+
+    struct Reminder: Codable {
+        var method: String
+        var minutes: Int
+    }
+
+    var guests: [Guest]
+    var permissions: Permissions?
+    var recurrence: [String]
+    var reminders: [Reminder]?
+    var free: Bool
+    var visibility: String
+    var colorID: String?
+
+    init(_ extras: CalendarEventExtras) {
+        guests = extras.guests.map {
+            Guest(email: $0.email, name: $0.name, isOptional: $0.isOptional, response: $0.response?.rawValue)
+        }
+        permissions = extras.permissions.map {
+            Permissions(canModify: $0.canModify, canInviteOthers: $0.canInviteOthers, canSeeGuestList: $0.canSeeGuestList)
+        }
+        recurrence = extras.recurrence
+        switch extras.reminders {
+        case .calendarDefault: reminders = nil
+        case .custom(let list): reminders = list.map { Reminder(method: $0.method.rawValue, minutes: $0.minutesBefore) }
+        }
+        free = extras.busy == .free
+        visibility = extras.visibility.rawValue
+        colorID = extras.colorID
+    }
+
+    var value: CalendarEventExtras {
+        CalendarEventExtras(
+            guests: guests.map {
+                CalendarGuest(email: $0.email, name: $0.name, isOptional: $0.isOptional,
+                              response: $0.response.flatMap(CalendarResponse.init(rawValue:)),
+                              isOrganizer: nil)
+            },
+            permissions: permissions.map {
+                CalendarGuestPermissions(canModify: $0.canModify, canInviteOthers: $0.canInviteOthers,
+                                         canSeeGuestList: $0.canSeeGuestList)
+            },
+            recurrence: recurrence,
+            reminders: reminders.map { list in
+                .custom(list.map {
+                    CalendarReminder(method: CalendarReminder.Method(rawValue: $0.method) ?? .popup, minutesBefore: $0.minutes)
+                })
+            } ?? .calendarDefault,
+            busy: free ? .free : .busy,
+            visibility: CalendarVisibility(rawValue: visibility) ?? .calendarDefault,
+            colorID: colorID)
     }
 }
 

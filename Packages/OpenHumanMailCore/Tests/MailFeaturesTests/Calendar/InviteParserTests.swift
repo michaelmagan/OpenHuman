@@ -208,12 +208,52 @@ END:VCALENDAR
         #expect(ICSParser.Observance.day(year: 2026, month: 3, weekday: 1, ordinal: 2) == 8)
         #expect(ICSParser.Observance.day(year: 2026, month: 10, weekday: 1, ordinal: -1) == 25)
         #expect(ICSParser.offset("+0530") == 19_800 && ICSParser.offset("-0800") == -28_800 && ICSParser.offset("8") == nil)
+        #expect(ICSParser.Observance.day(year: 2026, month: 3, weekday: 1, ordinal: 5) == 29)
+        #expect(ICSParser.Observance.day(year: 2026, month: 2, weekday: 1, ordinal: 5) == 22, "a missing fifth is the last")
+        for ordinal in [0, 6, -6, 1_000_000_000_000, Int.max, Int.min] {
+            #expect(ICSParser.Observance.day(year: 2026, month: 3, weekday: 1, ordinal: ordinal) == nil)
+        }
+        #expect(ICSParser.Observance.day(year: 2026, month: 13, weekday: 1, ordinal: 1) == nil)
+        #expect(ICSParser.Observance.day(year: 2026, month: 3, weekday: 8, ordinal: 1) == nil)
+    }
+
+    @Test func aHostileZoneRuleNeitherTrapsNorSpins() throws {
+        let hostile = ["9223372036854775807MO", "-9223372036854775808MO", "1000000000000MO", "-1000000000000MO", "0MO",
+                       "+0MO", "6SU", "-6SU", "99999999999999999999999SU"]
+        for byday in hostile {
+            let text = outlookStyleInvite.replacingOccurrences(of: "BYDAY=1SU", with: "BYDAY=\(byday)")
+            let invite = try #require(ICSParser.parse(text, defaultZone: utc), "\(byday)")
+            #expect(invite.timeZoneID == "Example Pacific Time")
+        }
+        let badMonth = outlookStyleInvite.replacingOccurrences(of: "BYMONTH=11", with: "BYMONTH=9223372036854775807")
+        #expect(ICSParser.parse(badMonth, defaultZone: utc) != nil)
+        let observance = try #require(ICSParser.Observance([
+            ICSParser.Line(name: "DTSTART", params: [:], value: "16010101T020000"),
+            ICSParser.Line(name: "TZOFFSETTO", params: [:], value: "-0800"),
+            ICSParser.Line(name: "RRULE", params: [:], value: "FREQ=YEARLY;BYDAY=9223372036854775807MO;BYMONTH=1"),
+        ]))
+        #expect(observance.ordinal == nil && observance.month == nil, "an out-of-range rule is a fixed offset")
+        #expect(ICSParser.seconds(duration: "P" + String(repeating: "9", count: 400) + "W") == nil)
+        #expect(ICSParser.seconds(duration: "P99999999D") == nil)
+        let endless = "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:u@example.com\nDTSTART:20261020T160000Z\nDURATION:P"
+            + String(repeating: "9", count: 400) + "W\nEND:VEVENT\nEND:VCALENDAR\n"
+        let parsed = try #require(ICSParser.parse(endless, defaultZone: utc))
+        #expect(parsed.end == parsed.start, "an unreadable duration is ignored")
     }
 }
 
 @Suite struct InviteCardBuilderTests {
     private let me: Set<String> = ["robin@example.com"]
     private let enUS = Locale(identifier: "en_US")
+
+    @Test func theOrganizersAttendeeRowIsNeverTheInviteesAnswer() throws {
+        let invite = try #require(ICSParser.parse(googleStyleInvite, defaultZone: losAngeles))
+        let card = InviteCardBuilder.card(invite, message: messageKey, myAddresses: ["dana@example.com"],
+                                          timeZone: losAngeles, locale: enUS)
+        #expect(!card.isInvited && !card.canRespond && card.response == nil)
+        #expect(card.guests.first?.isOrganizer == true && card.guests.first?.isMe == false)
+        #expect(card.guests.first?.title == "Dana Ruiz")
+    }
 
     @Test func theCardShowsWhenWhereWhoAboutAndJoin() throws {
         let invite = try #require(ICSParser.parse(googleStyleInvite, defaultZone: losAngeles))

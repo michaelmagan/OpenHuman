@@ -17,6 +17,10 @@ CODE_SIGN_IDENTITY = -
 // Empty, so a build without a provisioning profile launches. Tools/release/make-dmg.sh adds the iCloud entitlements.
 OH_ENTITLEMENTS = Entitlements/Mail.entitlements
 CURRENT_PROJECT_VERSION = 1
+// Empty, so no build checks for updates. Tools/release/make-dmg.sh --enable-updates sets both on its command line for a
+// Developer ID build. Never put the values here: "//" in a URL or a base64 key starts a comment in this file.
+OH_UPDATE_FEED_URL =
+OH_SPARKLE_PUBLIC_KEY =
 GENERATE_INFOPLIST_FILE = NO
 
 COMPILATION_CACHE_ENABLE_CACHING = YES

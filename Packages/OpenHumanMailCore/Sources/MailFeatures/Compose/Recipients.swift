@@ -150,6 +150,18 @@ public final class RecipientFieldModel {
         suggestionCursor = min(max(suggestionCursor + delta, 0), suggestions.count - 1)
     }
 
+    public func selectSuggestion(_ index: Int) {
+        guard suggestions.indices.contains(index), index != suggestionCursor else { return }
+        suggestionCursor = index
+    }
+
+    // Escape closes the list and keeps the typed text; the next keystroke looks people up again
+    public func dismissSuggestions() {
+        suggestTask?.cancel()
+        suggestions = []
+        suggestionCursor = 0
+    }
+
     public func settle() async { await suggestTask?.value }
 
     private func add(_ addresses: [EmailAddress]) {

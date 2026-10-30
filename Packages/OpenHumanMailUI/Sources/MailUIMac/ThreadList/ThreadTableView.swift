@@ -3,8 +3,33 @@ import AppKit
 @MainActor
 public final class ThreadTableView: NSTableView {
     weak var listController: ThreadListViewController?
+    private var pointerArea: NSTrackingArea?
 
     public override var acceptsFirstResponder: Bool { true }
+
+    public override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let pointerArea { removeTrackingArea(pointerArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self)
+        addTrackingArea(area)
+        pointerArea = area
+    }
+
+    public override func mouseEntered(with event: NSEvent) {
+        guard event.trackingArea === pointerArea else { return super.mouseEntered(with: event) }
+        listController?.pointerMoved(to: convert(event.locationInWindow, from: nil))
+    }
+
+    public override func mouseMoved(with event: NSEvent) {
+        listController?.pointerMoved(to: convert(event.locationInWindow, from: nil))
+        super.mouseMoved(with: event)
+    }
+
+    public override func mouseExited(with event: NSEvent) {
+        guard event.trackingArea === pointerArea else { return super.mouseExited(with: event) }
+        listController?.pointerExited()
+    }
 
     public override func keyDown(with event: NSEvent) {
         if listController?.handleKey(event) == true { return }

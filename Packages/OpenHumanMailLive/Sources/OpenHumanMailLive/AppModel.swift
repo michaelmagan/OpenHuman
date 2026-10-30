@@ -168,12 +168,12 @@ public final class AppModel {
     private func link(for session: SyncSession) -> LiveAccountManager.SessionLink {
         LiveAccountManager.SessionLink(
             engine: session.engine,
-            forgetInWindow: { [weak environment = session.environment, weak session] account in
+            forgetInWindow: { [weak environment = session.environment, weak session] account, email in
                 if let session, session.account == account { await session.calendar?.forget() }
                 await session?.calendarConnections?.forget(account)
                 guard let environment else { return }
                 await environment.ai?.clearCache()
-                await environment.ai?.forgetTraces(for: account)
+                await environment.ai?.forgetTraces(email: email)
                 await environment.system.removeAccount(account)
             },
             removed: { [weak self] account in await self?.accountRemoved(account) })

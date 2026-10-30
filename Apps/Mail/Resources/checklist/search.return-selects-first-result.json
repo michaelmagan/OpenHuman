@@ -1,0 +1,15 @@
+{
+  "id": "search.return-selects-first-result",
+  "area": "Search",
+  "title": "Return runs the search and selects the first result",
+  "steps": [
+    "Press / and type re",
+    "Press Return",
+    "Press Down, then E",
+    "Press / again, type zzqx and press Return"
+  ],
+  "deepLink": null,
+  "expected": "Return closes the suggestions, keeps the query in the field and selects the first result, so Down moves to the second result and E acts on it without a click. When nothing matches, the caret stays in the search field.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

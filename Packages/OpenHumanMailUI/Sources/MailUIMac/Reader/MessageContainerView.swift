@@ -11,10 +11,9 @@ final class MessageContainerView: NSView {
     private weak var controller: ReaderViewController?
     private let theme: ThemeTokens
     private let stack = NSStackView()
-    let card: MessageCardView
-    let focusBar: FocusBarView
-    let focusPlate: FocusPlateView
-    private var plateBottom: NSLayoutConstraint?
+    let separator: HairlineView
+    let focusPlate: ReaderPlateView
+    private var plateEdges: [NSLayoutConstraint] = []
     private var stackTop: NSLayoutConstraint!
     private var slotBottom: NSLayoutConstraint!
     private let composerSlot = NSView()
@@ -40,14 +39,9 @@ final class MessageContainerView: NSView {
     private var loadingTimer: Timer?
     private var hovering = false
     private var focused = false
+    private var marksFocus = true
     private var message: ReaderModel.Message?
     private var baseLabel = ""
-    var cardSegment: CardSegment = .single {
-        didSet {
-            guard cardSegment != oldValue else { return }
-            card.segment = cardSegment
-        }
-    }
 
     private enum BannerState: Equatable {
         case none
@@ -59,9 +53,8 @@ final class MessageContainerView: NSView {
         self.key = key
         self.controller = controller
         theme = controller.theme
-        card = MessageCardView(theme: controller.theme)
-        focusBar = FocusBarView(theme: controller.theme)
-        focusPlate = FocusPlateView(theme: controller.theme)
+        separator = HairlineView(theme: controller.theme)
+        focusPlate = ReaderPlateView(theme: controller.theme)
         composerDivider = HairlineView(theme: controller.theme)
         note = readerLabel("This message is too large to show in full.", controller.theme.typeMeta, controller.theme.textTertiary)
         super.init(frame: .zero)
@@ -72,17 +65,12 @@ final class MessageContainerView: NSView {
         stack.detachesHiddenViews = true
         stack.translatesAutoresizingMaskIntoConstraints = false
         composerSlot.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(card)
+        addSubview(separator)
         addSubview(focusPlate)
         addSubview(stack)
         addSubview(composerSlot)
-        addSubview(focusBar)
-        card.pin(around: self)
-        focusPlate.isHidden = true
-        focusBar.isHidden = true
         let padding = Self.horizontalPadding(theme)
-        let inset = theme.borderWidthHairline
-        stackTop = stack.topAnchor.constraint(equalTo: topAnchor, constant: theme.cardContentInsetY)
+        stackTop = stack.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: theme.cardContentInsetY)
         slotBottom = composerSlot.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -theme.cardContentInsetY)
         emptySlot = composerSlot.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
@@ -94,12 +82,11 @@ final class MessageContainerView: NSView {
             composerSlot.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
             slotBottom,
             emptySlot,
-            focusPlate.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            focusPlate.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            focusPlate.topAnchor.constraint(equalTo: topAnchor, constant: inset),
-            focusBar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            focusBar.topAnchor.constraint(equalTo: topAnchor),
-            focusBar.bottomAnchor.constraint(equalTo: bottomAnchor),
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            separator.topAnchor.constraint(equalTo: topAnchor),
+            focusPlate.leadingAnchor.constraint(equalTo: leadingAnchor),
+            focusPlate.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
         bannerHost.translatesAutoresizingMaskIntoConstraints = false
         bodyHost.translatesAutoresizingMaskIntoConstraints = false
@@ -113,12 +100,10 @@ final class MessageContainerView: NSView {
     var isExpanded: Bool { shownExpanded == true }
     var isFocused: Bool { focused }
 
-    static let platesExpandedHeader = false
-    static let platesCollapsedRow = false
+    /// The content inset inside the column: room for the focus and hover plate around the text.
+    static func horizontalPadding(_ theme: ThemeTokens) -> CGFloat { theme.space3 }
 
-    var cardAppearance: MessageCardView.Appearance { card.look }
-
-    static func horizontalPadding(_ theme: ThemeTokens) -> CGFloat { theme.space6 }
+    var plateLook: ReaderPlateView.Look { focusPlate.look }
 
     func attachComposer(_ view: NSView?) {
         guard view !== attachedComposer else { return }
@@ -129,7 +114,6 @@ final class MessageContainerView: NSView {
         defer {
             updateVerticalPadding()
             updatePlate()
-            updateAppearance()
         }
         guard let view else { return }
         view.removeFromSuperview()
@@ -146,25 +130,28 @@ final class MessageContainerView: NSView {
         ])
     }
 
-    private func updatePlate() {
-        plateBottom?.isActive = false
-        plateBottom = nil
+    private func placePlate() {
+        NSLayoutConstraint.deactivate(plateEdges)
         if let header {
-            plateBottom = focusPlate.bottomAnchor.constraint(equalTo: header.bottomAnchor, constant: theme.space4)
-            focusPlate.roundsBottom = false
+            plateEdges = [focusPlate.topAnchor.constraint(equalTo: header.topAnchor, constant: -theme.space3),
+                          focusPlate.bottomAnchor.constraint(equalTo: header.bandBottomAnchor, constant: theme.space3)]
         } else if let collapsedRow {
-            plateBottom = focusPlate.bottomAnchor.constraint(equalTo: collapsedRow.bottomAnchor,
-                                                             constant: attachedComposer == nil ? -theme.borderWidthHairline : 0)
-            focusPlate.roundsBottom = attachedComposer == nil
+            plateEdges = [focusPlate.topAnchor.constraint(equalTo: collapsedRow.topAnchor, constant: theme.space1),
+                          focusPlate.bottomAnchor.constraint(equalTo: collapsedRow.bottomAnchor, constant: -theme.space1)]
+        } else {
+            plateEdges = []
         }
-        focusPlate.roundsTop = true
-        plateBottom?.isActive = true
-        focusPlate.isHidden = !focused || !(header != nil ? Self.platesExpandedHeader : Self.platesCollapsedRow)
+        NSLayoutConstraint.activate(plateEdges)
     }
 
-    private func updateAppearance() {
-        card.look = MessageCardView.appearance(expanded: shownExpanded == true, hovering: hovering, focused: focused,
-                                                     hasComposer: attachedComposer != nil)
+    private func updatePlate() {
+        if focused && marksFocus {
+            focusPlate.look = .focus
+        } else if hovering, collapsedRow != nil {
+            focusPlate.look = .hover
+        } else {
+            focusPlate.look = .none
+        }
     }
 
     private func updateVerticalPadding() {
@@ -200,7 +187,7 @@ final class MessageContainerView: NSView {
         append(view)
     }
 
-    func update(_ message: ReaderModel.Message, focused: Bool, now: Date) {
+    func update(_ message: ReaderModel.Message, focused: Bool, marksFocus: Bool = true, now: Date) {
         guard let controller else { return }
         defer { keepAccessoryLast() }
         self.message = message
@@ -208,15 +195,16 @@ final class MessageContainerView: NSView {
             shownExpanded = message.isExpanded
             rebuild(message, controller: controller, now: now)
         }
+        if self.marksFocus != marksFocus {
+            self.marksFocus = marksFocus
+            updatePlate()
+        }
         if self.focused != focused {
             self.focused = focused
-            focusBar.isHidden = !focused
-            card.showsFocusRing = focused
             updatePlate()
             setAccessibilityLabel(focused ? baseLabel + ", focused" : baseLabel)
             setAccessibilitySelected(focused)
             updateActionsVisibility()
-            updateAppearance()
         }
         guard message.isExpanded else { return }
         header?.setAccessory(message.accessory)
@@ -275,11 +263,11 @@ final class MessageContainerView: NSView {
             append(row)
             baseLabel = "Collapsed message from \(sender)"
         }
+        placePlate()
         updatePlate()
         updateVerticalPadding()
         setAccessibilityLabel(focused ? baseLabel + ", focused" : baseLabel)
         updateActionsVisibility()
-        updateAppearance()
     }
 
     private func append(_ view: NSView) {
@@ -384,17 +372,17 @@ final class MessageContainerView: NSView {
     override func mouseEntered(with event: NSEvent) {
         hovering = true
         updateActionsVisibility()
-        updateAppearance()
+        updatePlate()
     }
 
     override func mouseExited(with event: NSEvent) {
         hovering = false
         updateActionsVisibility()
-        updateAppearance()
+        updatePlate()
     }
 
     private func updateActionsVisibility() {
-        header?.setActionsVisible(hovering || focused)
+        header?.setActionsRaised(hovering || focused)
     }
 
     private func updateBanner(_ message: ReaderModel.Message) {
@@ -457,7 +445,9 @@ final class MessageContainerView: NSView {
                     await webKit.prepare()
                     guard let self, self.shownBody == body else { return }
                     self.shownBody = nil
-                    if let message = self.message { self.update(message, focused: self.focused, now: controller.now()) }
+                    if let message = self.message {
+                        self.update(message, focused: self.focused, marksFocus: self.marksFocus, now: controller.now())
+                    }
                 }
                 return
             }

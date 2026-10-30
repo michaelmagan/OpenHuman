@@ -186,14 +186,17 @@ final class OverlayFocusKeeper: OverlayFocusKeeping {
         return responder as? NSView
     }
 
+    /// The window's editable fields: those in the content view, then those in the toolbar (the search field).
     static func editableFields(in window: NSWindow) -> [NSTextField] {
-        guard let root = window.contentView else { return [] }
         var result: [NSTextField] = []
         func walk(_ view: NSView) {
             if let field = view as? NSTextField, field.isEditable { result.append(field) }
             for child in view.subviews { walk(child) }
         }
-        walk(root)
+        if let root = window.contentView { walk(root) }
+        for field in MainContentViewController.toolbarFields(of: window) where !result.contains(where: { $0 === field }) {
+            result.append(field)
+        }
         return result
     }
 }

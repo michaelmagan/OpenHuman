@@ -1,0 +1,15 @@
+{
+  "id": "calendar.all-inboxes-not-over-calendar",
+  "area": "Calendar",
+  "title": "All Inboxes and the Calendar never show at once",
+  "steps": [
+    "With two accounts, open All Inboxes, then open the Calendar from the toolbar",
+    "Go back to Mail and press J and K",
+    "Open the Calendar again and click All Inboxes in the sidebar",
+    "Click Inbox"
+  ],
+  "deepLink": null,
+  "expected": "The Calendar replaces All Inboxes completely, with no All Inboxes rows or search bar over it. Back to Mail shows All Inboxes again with J and K moving its selection. All Inboxes from the sidebar closes the Calendar. Inbox shows the mail list.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

@@ -49,10 +49,12 @@ struct InlineReplyWindow {
                                 reduceMotion: reduceMotion)
         var attached: MainContentViewController?
         let hosting = NSHostingView(rootView: MainWindowRoot(environment: environment, themes: themes) { attached = $0 })
+        hosting.sceneBridgingOptions = [.toolbars, .title]
         let frame = NSRect(origin: NSPoint(x: -6000, y: -6000), size: size)
         UserDefaults.standard.removeObject(forKey: "NSWindow Frame \(frameName)")
-        let window = UnconstrainedTestWindow(contentRect: frame, styleMask: [.titled, .resizable], backing: .buffered,
-                                             defer: false)
+        let window = UnconstrainedTestWindow(contentRect: frame, styleMask: [.titled, .resizable, .fullSizeContentView],
+                                             backing: .buffered, defer: false)
+        window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
         #expect(window.setFrameAutosaveName(frameName), "the frame name \(frameName) is free")
         window.contentView = hosting
@@ -60,7 +62,7 @@ struct InlineReplyWindow {
         window.orderFrontRegardless()
         try await until { attached != nil && environment.router.list?.state == .loaded }
         let content = try #require(attached)
-        try await settleTitleBarStrip(of: window)
+        try await settleWindowChrome(of: window)
         content.keyRouter.isMailWindow = { $0 === window }
         return InlineReplyWindow(environment: environment, window: window, content: content)
     }
@@ -106,7 +108,7 @@ struct InlineReplyWindow {
         try await until { router.reader?.thread == thread && router.reader?.state == .loaded }
         let model = try #require(router.reader)
         try await until { reader.messageViews.count == model.items.filter { if case .message = $0 { true } else { false } }.count }
-        try await settleTitleBarStrip(of: window)
+        try await settleWindowChrome(of: window)
         return model
     }
 
@@ -256,17 +258,16 @@ struct InlineReplyWindow {
     }
 }
 
+// Waits until SwiftUI has installed the window's toolbar and the content has stopped moving under it, so frames
+// measured afterwards are the ones the user sees
 @MainActor
-func settleTitleBarStrip(of window: NSWindow) async throws {
-    try await until {
+func settleWindowChrome(of window: NSWindow) async throws {
+    var last: NSRect?
+    try await until(timeout: .seconds(10)) {
         window.contentView?.layoutSubtreeIfNeeded()
-        let strip = TitleBarMetrics.stripHeight(of: window)
-        guard strip > 0, let root = window.contentView else { return true }
-        func hasStrip(_ view: NSView) -> Bool {
-            (String(describing: type(of: view)).contains("DragView") && abs(view.frame.height - strip) < 1)
-                || view.subviews.contains(where: hasStrip)
-        }
-        return hasStrip(root)
+        let layout = window.contentLayoutRect
+        defer { last = layout }
+        return window.toolbar != nil && layout == last
     }
 }
 

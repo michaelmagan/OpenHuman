@@ -40,22 +40,23 @@ struct RenderSweepTests {
     }
 
     @Test(arguments: SweepTheme.builtIns)
-    func titleBarStrip(_ theme: SweepTheme) async throws {
+    func toolbar(_ theme: SweepTheme) async throws {
         let w = try await SweepWindow.make(SweepWindow.environment(), theme: theme)
         defer { w.close() }
-        try await sweepShoot(w.window, screen: "title-bar-strip", theme: theme)
+        try await settleWindowChrome(of: w.window)
+        try await sweepShoot(w.window, screen: "toolbar", theme: theme)
         let strip = TitleBarMetrics.stripHeight(of: w.window)
-        #expect(strip > 0, "the sweep window has a title bar over its content (content \(w.window.contentView?.bounds.height ?? -1), layout \(w.window.contentLayoutRect), frame \(w.window.frame))")
+        #expect(strip > 0, "the toolbar reaches over the full-size content (content \(w.window.contentView?.bounds.height ?? -1), layout \(w.window.contentLayoutRect), frame \(w.window.frame))")
         let directory = try SweepOutput.directory()
-        let source = directory.appendingPathComponent("title-bar-strip--\(theme.slug).png")
+        let source = directory.appendingPathComponent("toolbar--\(theme.slug).png")
         let rep = try #require(NSBitmapImageRep(data: try Data(contentsOf: source)))
         let scale = CGFloat(rep.pixelsWide) / SweepWindow.size.width
-        let crop = CGRect(x: 0, y: 0, width: 640 * scale, height: (strip + 120) * scale)
+        let crop = CGRect(x: 0, y: 0, width: SweepWindow.size.width * scale, height: (strip + 120) * scale)
         let cropped = try #require(rep.cgImage?.cropping(to: crop))
         let png = try #require(NSBitmapImageRep(cgImage: cropped).representation(using: .png, properties: [:]))
-        let name = "title-bar-strip-crop--\(theme.slug).png"
+        let name = "toolbar-crop--\(theme.slug).png"
         try png.write(to: directory.appendingPathComponent(name))
-        try SweepIndex.record(SweepIndexEntry(screen: "title-bar-strip-crop", theme: theme.name, file: name), in: directory)
+        try SweepIndex.record(SweepIndexEntry(screen: "toolbar-crop", theme: theme.name, file: name), in: directory)
     }
 
     @Test(arguments: SweepTheme.builtIns)
@@ -67,6 +68,7 @@ struct RenderSweepTests {
                                      preferences: preferences)
             let w = try await SweepWindow.make(SweepWindow.environment(), theme: variant)
             defer { w.close() }
+            w.content.tableView.listController?.selectionEmphasisOverride = true
             try await w.cursorAndHover(steps: 2, offset: 2)
             try await w.hoverCursorRow()
             try await sweepShoot(w.window, screen: "list-row-actions", theme: variant)
@@ -301,7 +303,7 @@ struct RenderSweepTests {
         let store = theme.makeStore()
         let hints = HintBarModel(router: w.router)
         hints.start()
-        let height = CGFloat(store.resolved.component.footer.height)
+        let height = FooterView.height
         let strip = sweepStandaloneWindow(FooterView(status: w.environment.status, hints: hints, theme: store.resolved.tokens),
                                           store: store, size: NSSize(width: SweepWindow.size.width, height: height))
         defer { strip.orderOut(nil) }

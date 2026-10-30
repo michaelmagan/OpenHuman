@@ -98,6 +98,11 @@ public final class OverlayCenter: ActionPresenting {
             overlay = .shortcuts(ShortcutHelpModel(descriptors: registry.descriptors))
         case .search:
             dismiss()
+            // All Inboxes has its own field; the account's search would open out of sight behind it
+            if let unified = router.unifiedInbox {
+                unified.requestSearchFocus()
+                return
+            }
             search.open()
         case .labelPicker(let targets, let mode):
             showLabelPicker(targets: targets, mode: mode)
@@ -216,11 +221,12 @@ public final class OverlayCenter: ActionPresenting {
         presentSendLater(draftTargets: draftTargets, scheduleWithCondition: { date, _ in schedule(date) })
     }
 
-    public func presentSendLater(draftTargets: [ThreadKey] = [],
+    public func presentSendLater(draftTargets: [ThreadKey] = [], condition: SendLaterCondition = .always,
                                  scheduleWithCondition schedule: @escaping @MainActor (Date, SendLaterCondition) -> Void) {
-        _ = makeTimePicker(kind: .sendLater, targets: draftTargets) { choice in
+        let model = makeTimePicker(kind: .sendLater, targets: draftTargets) { choice in
             if case .at(let date, let kind) = choice { schedule(date, kind == .ifNoReply ? .ifNoReply : .always) }
         }
+        model.onlyIfNoReply = condition == .ifNoReply
     }
 
     public func presentDraftReminder(thread: ThreadKey?, current: ComposeSession.PendingReminder?,

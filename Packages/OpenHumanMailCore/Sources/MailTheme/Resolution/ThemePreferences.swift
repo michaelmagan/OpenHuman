@@ -11,12 +11,14 @@ public struct ThemePreferences: Sendable, Hashable, Codable {
     public var uiFont: FontFamily?
     public var readerFont: FontFamily?
     public var emailColors: EmailColors?
+    public private(set) var version: Int
 
+    public static let currentVersion = 1
     public static let defaultReaderTextSize: Double = 14
     public static let readerTextSizeRange: ClosedRange<Double> = 12...20
 
-    public init(mode: AppearanceMode = .system, lightThemeID: String = BuiltinThemeID.light,
-                darkThemeID: String = BuiltinThemeID.dark, accentID: String? = nil, density: ThemeDensity = .default,
+    public init(mode: AppearanceMode = .system, lightThemeID: String = BuiltinThemeID.systemLight,
+                darkThemeID: String = BuiltinThemeID.systemDark, accentID: String? = nil, density: ThemeDensity = .default,
                 readerTextSize: Double? = nil, uiFont: FontFamily? = nil,
                 readerFont: FontFamily? = nil, emailColors: EmailColors? = nil) {
         self.mode = mode
@@ -28,6 +30,7 @@ public struct ThemePreferences: Sendable, Hashable, Codable {
         self.uiFont = uiFont
         self.readerFont = readerFont
         self.emailColors = emailColors
+        self.version = Self.currentVersion
     }
 
     public func themeID(for appearance: ThemeAppearance) -> String {
@@ -40,8 +43,21 @@ public struct ThemePreferences: Sendable, Hashable, Codable {
 
     public static func readerLineHeight(for size: Double) -> Double { (size * 1.57).rounded() }
 
+    /// Brings preferences saved by an older version up to date. Version 1 moves the built-in Light and Dark themes to
+    /// System Light and System Dark; Paper, Midnight and custom themes are kept. Runs once: the result carries the
+    /// current version, so a later choice of Light or Dark is respected.
+    public func migrated() -> ThemePreferences {
+        var next = self
+        if version < 1 {
+            if next.lightThemeID == BuiltinThemeID.light { next.lightThemeID = BuiltinThemeID.systemLight }
+            if next.darkThemeID == BuiltinThemeID.dark { next.darkThemeID = BuiltinThemeID.systemDark }
+        }
+        next.version = max(version, Self.currentVersion)
+        return next
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case mode, lightThemeID, darkThemeID, accentID, density, readerTextSize, uiFont, readerFont, emailColors
+        case mode, lightThemeID, darkThemeID, accentID, density, readerTextSize, uiFont, readerFont, emailColors, version
     }
 
     public init(from decoder: any Decoder) throws {
@@ -56,6 +72,7 @@ public struct ThemePreferences: Sendable, Hashable, Codable {
         uiFont = (try? c.decode(String.self, forKey: .uiFont)).flatMap(FontFamily.init(token:))
         readerFont = (try? c.decode(String.self, forKey: .readerFont)).flatMap(FontFamily.init(token:))
         emailColors = try? c.decode(EmailColors.self, forKey: .emailColors)
+        version = (try? c.decode(Int.self, forKey: .version)).map { max(0, $0) } ?? 0
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -69,6 +86,7 @@ public struct ThemePreferences: Sendable, Hashable, Codable {
         try c.encodeIfPresent(uiFont?.token, forKey: .uiFont)
         try c.encodeIfPresent(readerFont?.token, forKey: .readerFont)
         try c.encodeIfPresent(emailColors, forKey: .emailColors)
+        try c.encode(version, forKey: .version)
     }
 }
 

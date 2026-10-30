@@ -183,7 +183,7 @@ public struct GoogleCalendarClient: Sendable {
                     if let id = item.id, !id.isEmpty { removed.append(id) } else { skipped += 1 }
                     continue
                 }
-                guard let event = item.event(defaultZone: timeZone) else {
+                guard let event = item.event(defaultZone: timeZone, selfAddress: calendarID) else {
                     skipped += 1
                     continue
                 }
@@ -206,12 +206,16 @@ public struct GoogleCalendarClient: Sendable {
     }
 
 
-    public func inviteCandidates(iCalUID: String?, from: Date, to: Date) async throws -> [GoogleInviteCandidate] {
-        var query = [URLQueryItem(name: "timeMin", value: RFC3339.string(from, in: .gmt)),
-                     URLQueryItem(name: "timeMax", value: RFC3339.string(to, in: .gmt)),
-                     URLQueryItem(name: "singleEvents", value: "true"),
-                     URLQueryItem(name: "maxResults", value: "50")]
-        if let iCalUID { query.insert(URLQueryItem(name: "iCalUID", value: iCalUID), at: 0) }
+    // With singleEvents off and no window, a UID read lists the series itself, a single event and each moved occurrence,
+    // wherever they now start
+    public func inviteCandidates(iCalUID: String?, from: Date?, to: Date?,
+                                 singleEvents: Bool = true) async throws -> [GoogleInviteCandidate] {
+        var query: [URLQueryItem] = []
+        if let iCalUID { query.append(URLQueryItem(name: "iCalUID", value: iCalUID)) }
+        if let from { query.append(URLQueryItem(name: "timeMin", value: RFC3339.string(from, in: .gmt))) }
+        if let to { query.append(URLQueryItem(name: "timeMax", value: RFC3339.string(to, in: .gmt))) }
+        query.append(URLQueryItem(name: "singleEvents", value: singleEvents ? "true" : "false"))
+        query.append(URLQueryItem(name: "maxResults", value: "50"))
         let response = try await send("GET", url(["calendars", calendarID, "events"], query: query))
         let page: WireEventList = try decode(response.body, "events.list")
         let identities: WireInviteIdentityList = try decode(response.body, "events.list")
@@ -221,10 +225,17 @@ public struct GoogleCalendarClient: Sendable {
         }
         let candidates = (page.items ?? []).compactMap { $0.event(defaultZone: timeZone, selfAddress: calendarID) }
             .map { event in
-                GoogleInviteCandidate(event: event, iCalUID: byID[event.id]?.iCalUID,
-                                      organizerEmail: byID[event.id]?.organizer?.email?.lowercased())
+                let identity = byID[event.id]
+                let original = identity?.originalStartTime.flatMap { time in
+                    time.dateTime.flatMap(RFC3339.date) ?? time.date.flatMap { RFC3339.day($0, in: timeZone) }
+                }
+                return GoogleInviteCandidate(event: event, iCalUID: identity?.iCalUID,
+                                             organizerEmail: identity?.organizer?.email?.lowercased(),
+                                             originalStart: original,
+                                             isSeries: identity?.recurrence?.isEmpty == false && event.recurringEventID == nil)
             }
-        Log(.gmail).notice("calendar events.list (invitation\(iCalUID == nil ? ", by time" : "")): \(candidates.count) event(s)")
+        let kind = iCalUID == nil ? ", by time" : singleEvents ? "" : ", series"
+        Log(.gmail).notice("calendar events.list (invitation\(kind)): \(candidates.count) event(s)")
         return candidates.sorted { $0.event.start != $1.event.start ? $0.event.start < $1.event.start : $0.event.id < $1.event.id }
     }
 
@@ -336,40 +347,58 @@ public struct GoogleCalendarClient: Sendable {
         return wire?.event(defaultZone: zone)
     }
 
-    public func respond(eventID id: String, response: String,
-                        sendUpdates: GoogleSendUpdates) async throws -> GoogleCalendarEvent? {
+    // `alias` is the account's other address the invitation was sent to; it answers only when no entry is the calendar's own
+    public func respond(eventID id: String, response: String, sendUpdates: GoogleSendUpdates,
+                        as alias: String? = nil) async throws -> GoogleCalendarEvent? {
         guard Self.answers.contains(response) else { throw GoogleCalendarError.badRequest(reason: "response") }
         let current = try await send("GET", url(["calendars", calendarID, "events", id]))
         guard let object = try? JSONSerialization.jsonObject(with: current.body) as? [String: Any],
               let attendees = object["attendees"] as? [[String: Any]], !attendees.isEmpty else {
             throw GoogleCalendarError.decoding("events.get attendees")
         }
+        let usesAlias = !attendees.contains { Self.isOwnEntry($0, calendarID: calendarID) }
+        let answerAs = usesAlias ? alias?.trimmingCharacters(in: .whitespaces).lowercased() : nil
+        let organizerEmail = ((object["organizer"] as? [String: Any])?["email"] as? String)?.lowercased()
+        if answerAs != nil, organizerEmail == nil, !attendees.contains(where: { $0["organizer"] as? Bool == true }) {
+            throw GoogleCalendarError.badRequest(reason: "not_invited")
+        }
         var mine = 0
         let answered = attendees.map { entry -> [String: Any] in
-            guard Self.isOwnEntry(entry, calendarID: calendarID) else { return entry }
+            guard Self.isOwnEntry(entry, calendarID: calendarID, alias: answerAs) else { return entry }
+            guard entry["organizer"] as? Bool != true,
+                  (entry["email"] as? String)?.lowercased() != organizerEmail else { return entry }
             mine += 1
             var own = entry
             own["responseStatus"] = response
             return own
         }
         guard mine == 1 else { throw GoogleCalendarError.badRequest(reason: "not_invited") }
+        var body: [String: Any] = ["attendees": answered]
+        // Why: a shortened guest list sent back as it is would drop the guests Google left out
+        if object["attendeesOmitted"] as? Bool == true { body["attendeesOmitted"] = true }
         let query = [URLQueryItem(name: "sendUpdates", value: sendUpdates.rawValue)]
+        let headers = answerAs.map { [CalendarGuardTransport.answerAsHeader: $0] } ?? [:]
         let answer = try await send("PATCH", url(["calendars", calendarID, "events", id], query: query),
-                                    body: try json(["attendees": answered]), isWrite: true)
-        Log(.gmail).notice("calendar invitation answered (sendUpdates \(sendUpdates.rawValue))")
+                                    body: try json(body), isWrite: true, extraHeaders: headers)
+        Log(.gmail).notice("calendar invitation answered (sendUpdates \(sendUpdates.rawValue)"
+                           + (answerAs == nil ? ")" : ", as an alias)"))
         let wire = try? JSONDecoder().decode(WireEvent.self, from: answer.body)
-        return wire?.event(defaultZone: timeZone, selfAddress: calendarID)
+        return wire?.event(defaultZone: timeZone, selfAddress: answerAs ?? calendarID)
     }
 
     public func patchEvent(id: String, patch: GoogleEventPatch, sendUpdates: GoogleSendUpdates) async throws -> GoogleCalendarEvent? {
         var current: [[String: Any]] = []
+        var attendeesOmitted = false
         if patch.guests != nil {
             let read = try await send("GET", url(["calendars", calendarID, "events", id]))
-            if let object = try? JSONSerialization.jsonObject(with: read.body) as? [String: Any] {
-                current = object["attendees"] as? [[String: Any]] ?? []
+            guard let object = try? JSONSerialization.jsonObject(with: read.body) as? [String: Any] else {
+                throw GoogleCalendarError.decoding("events.get attendees")
             }
+            current = object["attendees"] as? [[String: Any]] ?? []
+            attendeesOmitted = object["attendeesOmitted"] as? Bool == true
         }
-        let body = Self.patchBody(patch, currentAttendees: current, zone: timeZone, requestID: makeRequestID())
+        var body = Self.patchBody(patch, currentAttendees: current, zone: timeZone, requestID: makeRequestID())
+        if attendeesOmitted { body["attendeesOmitted"] = true }
         var query = [URLQueryItem(name: "sendUpdates", value: sendUpdates.rawValue)]
         if body["conferenceData"] != nil { query.append(URLQueryItem(name: "conferenceDataVersion", value: "1")) }
         let response = try await send("PATCH", url(["calendars", calendarID, "events", id], query: query),
@@ -442,9 +471,12 @@ public struct GoogleCalendarClient: Sendable {
 
     public static let answers: Set<String> = ["accepted", "declined", "tentative"]
 
-    static func isOwnEntry(_ entry: [String: Any], calendarID: String) -> Bool {
+    static func isOwnEntry(_ entry: [String: Any], calendarID: String, alias: String? = nil) -> Bool {
         if entry["self"] as? Bool == true { return true }
-        return (entry["email"] as? String)?.lowercased() == calendarID.lowercased()
+        let email = (entry["email"] as? String)?.lowercased()
+        if email == calendarID.lowercased() { return true }
+        guard let alias, !alias.isEmpty else { return false }
+        return email == alias.lowercased()
     }
 
     // Why: URLComponents leaves `+` in a query value and Google would read it as a space, so it is encoded

@@ -5,7 +5,7 @@ import MailUI
 import SwiftUI
 
 enum DevFeedbackShortcuts {
-    static let checklist = KeyboardShortcut("t", modifiers: [.command, .option])
+    static let checklist = KeyboardShortcut("t", modifiers: [.command, .option, .control])
     static let giveFeedback = KeyboardShortcut("f", modifiers: [.command, .option, .control])
 }
 

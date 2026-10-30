@@ -38,7 +38,7 @@ struct AIEditActions: View {
 
     var order: [String] {
         var ids: [String] = []
-        if model.currentVersion != nil { ids += ["done", "retry"] }
+        if model.currentVersion != nil { ids += ["done", "retry", "dismiss"] }
         ids += model.editPresets.map(\.id)
         if !model.morePresets.isEmpty { ids.append("more") }
         return ids
@@ -54,33 +54,38 @@ struct AIEditActions: View {
         return .handled
     }
 
+    // The ways to change the text on one line; with a suggestion, Accept, Retry and Dismiss on the last line, with
+    // the model and the ratings at its end, so no row has to share its width with them
     var body: some View {
-        HStack(spacing: theme.space1) {
+        VStack(alignment: .leading, spacing: theme.space1) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: theme.space1) {
-                    if model.currentVersion != nil {
-                        doneButton
-                        action(String(localized: "Retry"), id: "retry") { model.retry() }
-                    }
                     ForEach(model.editPresets) { preset in
                         action(preset.title, id: preset.id) { model.refine(preset) }
                     }
                     if !model.morePresets.isEmpty { more }
                 }
             }
+            .frame(height: AIComposerMetrics.fieldHeight)
             if model.currentVersion != nil {
-                if let badge {
-                    AIComposerModelButton(model: model, badge: badge)
-                        .fixedSize()
-                        .layoutPriority(1)
-                        .padding(.horizontal, theme.space1)
+                HStack(spacing: theme.space1) {
+                    doneButton
+                    action(String(localized: "Retry"), id: "retry") { model.retry() }
+                    action(String(localized: "Dismiss"), id: "dismiss") { model.close() }
+                    Spacer(minLength: theme.space3)
+                    if let badge {
+                        AIComposerModelButton(model: model, badge: badge)
+                            .fixedSize()
+                            .padding(.horizontal, theme.space1)
+                    }
+                    Rectangle().fill(theme.borderHairline.color).frame(width: theme.borderWidthHairline, height: 18)
+                        .accessibilityHidden(true)
+                    thumb(up: true)
+                    thumb(up: false)
                 }
-                Rectangle().fill(theme.borderHairline.color).frame(width: theme.borderWidthHairline, height: 18)
-                thumb(up: true)
-                thumb(up: false)
+                .frame(height: AIComposerMetrics.fieldHeight)
             }
         }
-        .frame(height: AIComposerMetrics.fieldHeight)
         .disabled(model.phase == .working)
         .onKeyPress(.rightArrow) { step(1) }
         .onKeyPress(.leftArrow) { step(-1) }
@@ -93,16 +98,28 @@ struct AIEditActions: View {
 
     private var doneButton: some View {
         Button { model.replace() } label: {
-            Text("Done")
-                .font(theme.typeBodyStrong.swiftUIFont)
-                .foregroundStyle(theme.textPrimary.color)
-                .padding(.horizontal, theme.space3)
-                .frame(height: 24)
-                .background(RoundedRectangle(cornerRadius: theme.radiusSM).fill(theme.bgRowSelected.color))
+            HStack(spacing: theme.space1) {
+                Text("Accept")
+                    .font(theme.typeBodyStrong.swiftUIFont)
+                Text(verbatim: "↵")
+                    .font(theme.typeCaption.swiftUIFont)
+                    .opacity(0.7)
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle((model.canApply ? theme.textPrimary : theme.textDisabled).color)
+            .padding(.horizontal, theme.space3)
+            .frame(height: 24)
+            .background(RoundedRectangle(cornerRadius: theme.radiusSM, style: .continuous)
+                .fill(theme.bgRowSelected.color))
+            .overlay(RoundedRectangle(cornerRadius: theme.radiusSM, style: .continuous)
+                .strokeBorder((model.canApply ? theme.borderControl : theme.borderHairline).color,
+                              lineWidth: CGFloat(theme.borderWidthHairline)))
+            .contentShape(RoundedRectangle(cornerRadius: theme.radiusSM, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(!model.canApply)
         .help(String(localized: "Put this text in the draft  ↵"))
+        .accessibilityLabel(String(localized: "Accept"))
         .focusable()
         .focused(focus, equals: "done")
         .onKeyPress(characters: .init(charactersIn: " \r")) { _ in
@@ -187,7 +204,8 @@ private struct AITextAction: View {
 }
 
 struct AIExamplesPopover: View {
-    let width: CGFloat
+    // nil: the width it is given
+    var width: CGFloat? = nil
     let use: (String) -> Void
     let close: () -> Void
     @Environment(\.theme) private var theme

@@ -586,7 +586,7 @@ private final class CalendarHarness {
     let h = try CalendarHarness()
     try h.storeCalendarToken(writeScopes)
     let patchedInstance = FakeHTTPTransport.json(200, wire("inst1", day))
-    let series = FakeHTTPTransport.json(200, wire("series1", first, rules: ["RRULE:FREQ=WEEKLY;COUNT=10"]))
+    let series = FakeHTTPTransport.json(200, wire("series1", first, rules: ["RRULE:FREQ=WEEKLY;UNTIL=20271231T000000Z"]))
     let patchedSeries = FakeHTTPTransport.json(200, wire("series1", first))
     let made = FakeHTTPTransport.json(200, wire("new1", day, rules: ["RRULE:FREQ=WEEKLY"]))
     h.http.on("PATCH", events + "/inst1") { _ in patchedInstance }
@@ -617,11 +617,42 @@ private final class CalendarHarness {
     before = h.http.requests.count
     _ = try await provider.patchEvent(instance, with: retitle, scope: .thisAndFollowing, sendUpdates: .none)
     calls = sent(after: before)
-    #expect(calls.map(\.method) == ["GET", "POST", "PATCH"])
-    #expect(body(calls[1])["summary"] as? String == "Retitled" && body(calls[1])["recurrence"] as? [String] == ["RRULE:FREQ=WEEKLY"])
+    #expect(calls.map(\.method) == ["GET", "GET", "POST", "PATCH"], "the rule, then the series itself for what the new events carry over")
+    #expect(body(calls[2])["summary"] as? String == "Retitled" && body(calls[2])["recurrence"] as? [String] == ["RRULE:FREQ=WEEKLY;UNTIL=20271231T000000Z"])
     let cut = body(calls.last)["recurrence"] as? [String] ?? []
     #expect(calls.last?.url.path() == events + "/series1" && body(calls.last).keys.sorted() == ["recurrence"])
     #expect(cut.count == 1 && cut[0].contains("UNTIL=") && !cut[0].contains("COUNT="), "the old series ends before this one")
+}
+
+@MainActor
+@Test func aSeriesThatEndsAfterACountIsNotSplit() async throws {
+    let events = "/calendar/v3/calendars/robin@example.com/events"
+    let iso = ISO8601DateFormatter()
+    let day = Date(timeIntervalSince1970: 1_791_000_000)
+    let first = day.addingTimeInterval(-7 * 86_400)
+    let instance = CalendarEvent(id: "inst1", title: "Weekly", start: day, end: day.addingTimeInterval(1_800), timeZone: "UTC",
+                                 organizerIsMe: true, recurringEventID: "series1")
+    func wire(_ id: String, _ start: Date, rules: [String] = []) -> [String: Any] {
+        var out: [String: Any] = ["id": id, "summary": "Weekly", "start": ["dateTime": iso.string(from: start), "timeZone": "UTC"],
+                                  "end": ["dateTime": iso.string(from: start.addingTimeInterval(1_800)), "timeZone": "UTC"],
+                                  "organizer": ["email": "robin@example.com", "self": true]]
+        if !rules.isEmpty { out["recurrence"] = rules }
+        return out
+    }
+    var retitle = CalendarEventPatch()
+    retitle.title = "Retitled"
+    let h = try CalendarHarness()
+    try h.storeCalendarToken(writeScopes)
+    let series = FakeHTTPTransport.json(200, wire("series1", first, rules: ["RRULE:FREQ=WEEKLY;COUNT=10"]))
+    h.http.on("GET", events + "/series1") { _ in series }
+    let provider = try #require(try await h.session().environment.calendar)
+    do {
+        _ = try await provider.patchEvent(instance, with: retitle, scope: .thisAndFollowing, sendUpdates: .none)
+        Issue.record("a counted series must refuse a split")
+    } catch CalendarError.refused(let why) {
+        #expect(why.contains("set number of times") && why.contains("Change this event or all events"))
+    }
+    #expect(h.http.requests.filter { $0.method != "GET" && $0.url.path().hasPrefix(events) }.isEmpty)
 }
 
 @Suite struct GoogleCalendarFullEditMappingTests {
@@ -662,7 +693,7 @@ private final class CalendarHarness {
         read.extras.reminderOverrides = [GoogleReminder(method: "popup", minutes: 15)]
         read.extras.transparency = "transparent"
         let shown = GoogleCalendarProvider.event(read)
-        #expect(shown.extras.guests == [CalendarGuest(email: "sam@example.org", isOptional: true, response: .accepted)])
+        #expect(shown.extras.guests == [CalendarGuest(email: "sam@example.org", isOptional: true, response: .accepted, isOrganizer: nil)])
         #expect(shown.extras.permissions == CalendarGuestPermissions(canModify: true, canInviteOthers: true, canSeeGuestList: true))
         #expect(shown.extras.reminders == .custom([CalendarReminder(method: .popup, minutesBefore: 15)]) && shown.extras.busy == .free)
     }

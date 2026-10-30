@@ -14,17 +14,18 @@ public struct NotificationsSettingsView: View {
     public var body: some View {
         SettingsPageScaffold(title: "Notifications") {
             if model.showsPermissionWarning {
-                HStack(spacing: theme.space3) {
-                    Text("Notifications are off for Mail in System Settings")
-                        .themeFont(theme.typeBody)
-                        .foregroundStyle(theme.textPrimary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    Button("Open System Settings") { model.openSystemSettings() }
+                Section {
+                    HStack(spacing: theme.space4) {
+                        Image(systemName: "bell.slash")
+                            .foregroundStyle(theme.textWarning.color)
+                            .accessibilityHidden(true)
+                        Text("Notifications are off for Mail in System Settings")
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Button("Open System Settings") { model.openSystemSettings() }
+                    }
+                    .accessibilityElement(children: .combine)
                 }
-                .padding(theme.space4)
-                .background(RoundedRectangle(cornerRadius: theme.radiusLG).fill(theme.bgWarningSubtle.color))
-                .accessibilityElement(children: .combine)
             }
             SettingsSection("New mail", footnote: NotificationsSettingsModel.newMailNote) {
                 ForEach(model.accounts) { row in

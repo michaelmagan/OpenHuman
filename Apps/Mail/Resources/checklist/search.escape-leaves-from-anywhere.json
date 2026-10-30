@@ -1,0 +1,15 @@
+{
+  "id": "search.escape-leaves-from-anywhere",
+  "area": "Search",
+  "title": "Escape leaves search wherever the keys are",
+  "steps": [
+    "Press / and type re, then press Escape three times",
+    "Press / and click a result row in the list, then press Escape; press / without typing, click an empty part of the list, then press Escape",
+    "Press /, type re, press Return, open a result with Return, then press Escape twice",
+    "Press /, type re, press Return, then press Command-K and Escape"
+  ],
+  "deepLink": null,
+  "expected": "In the field Escape closes the suggestions, then clears the text, then leaves search. From the list, an empty part of the window or the empty field it leaves search at once: query and pills go, the earlier folder returns and the list has the keys. In an opened conversation the first Escape returns to the results. With the palette open Escape closes only the palette.",
+  "requires": "fake",
+  "addedIn": "2026-10-21"
+}

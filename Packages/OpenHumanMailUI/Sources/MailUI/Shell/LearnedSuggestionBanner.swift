@@ -10,12 +10,12 @@ struct LearnedSuggestionBanner: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: theme.space3) {
             Image(systemName: "lightbulb")
-                .foregroundStyle(theme.textSecondary.color)
+                .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: theme.space1) {
                 Text(suggestion.text)
                     .font(theme.typeLabel.swiftUIFont)
-                    .foregroundStyle(theme.textPrimary.color)
+                    .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(center.errorMessage ?? "Learned on this Mac from what you do. Undo with ⌘Z; rules are in Settings › Importance.")
                     .font(theme.typeCaption.swiftUIFont)
@@ -31,9 +31,10 @@ struct LearnedSuggestionBanner: View {
                 .ohLinkButtonStyle()
                 .font(theme.typeLabel.swiftUIFont)
         }
-        .padding(.horizontal, theme.space5)
-        .padding(.vertical, theme.space2)
+        .padding(.horizontal, NativeMetrics.Banner.paddingX)
+        .padding(.vertical, theme.space3)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .nativeGlassCard()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Suggestion from what you do")
     }

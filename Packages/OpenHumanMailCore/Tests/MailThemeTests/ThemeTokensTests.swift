@@ -16,7 +16,7 @@ import Testing
     #expect(t.textPrimary.css == "#1a1c20")
     #expect(t.bgRowSelected.css == "#eff1f5")
     #expect(t.accentRing.css == "#6d72c0")
-    #expect(t.rowHeight == 36)
+    #expect(t.rowHeight == 40)
     #expect(t.typeBody.size == 13 && t.typeBody.lineHeight == 18)
 }
 

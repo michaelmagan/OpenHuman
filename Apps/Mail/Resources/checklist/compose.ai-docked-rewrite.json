@@ -1,0 +1,15 @@
+{
+  "id": "compose.ai-docked-rewrite",
+  "area": "Composer",
+  "title": "The AI rewrite opens above the Send bar and never covers the draft",
+  "steps": [
+    "Launch with -UseFakeData and press c; check the Hit Cmd+J tip shows in the empty body, then write two lines",
+    "Select the first line and press Cmd+J; type an instruction and press Return",
+    "Compare the two texts, press Show changes, then Retry and Accept",
+    "Press Cmd+J with nothing selected, then Escape"
+  ],
+  "deepLink": null,
+  "expected": "The panel opens inside the card right above the Send bar, under all of the text, and the card grows to fit it. The original text is dimmed above the suggestion (side by side in a wide window); Accept, Retry and Dismiss are on the last row and nothing in it is cut off. Accept puts the text in and the card shrinks back; Escape closes it. The tip hides only while the panel is open.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

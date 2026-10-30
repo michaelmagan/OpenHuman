@@ -97,7 +97,12 @@ public final class BlockCenter {
     }
 
 
-    public func add(_ rule: BlockRule, account: AccountID) async throws -> UndoToken {
+    /// Refuses a rule for a whole common domain (gmail.com, github.com) with `DomainWideRuleError` unless
+    /// `allowingCommonDomain` says the person chose the entire domain.
+    public func add(_ rule: BlockRule, account: AccountID, allowingCommonDomain: Bool = false) async throws -> UndoToken {
+        if rule.kind == .domain {
+            try DomainWideRuleGuard.requireConfirmation(domain: rule.value, confirmed: allowingCommonDomain)
+        }
         let current = await rules(account)
         let replaced = current.filter { $0.id == rule.id }
         return try await BlockRuleStore.write(BlockRuleChange(account: account, added: [rule], removed: replaced), settings: settings)

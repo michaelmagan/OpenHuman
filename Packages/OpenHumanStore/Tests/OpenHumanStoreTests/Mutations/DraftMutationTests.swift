@@ -53,6 +53,33 @@ import Testing
         }
     }
 
+    @Test func aSaveThatRepeatsTheStoredContentKeepsTheVersionAndWritesNothing() throws {
+        let f = try MutationFixture()
+        let id = try f.newDraft()
+        #expect(try f.store.updateDraft(id, content: MutationFixture.content("Two"), expectedVersion: 1) == 2)
+        let written = try f.draftRow(id)["updated_at"] as Int64
+        #expect(try f.store.updateDraft(id, content: MutationFixture.content("Two"), expectedVersion: 2) == 2)
+        #expect(try f.store.updateDraft(id, content: MutationFixture.content("Two"), expectedVersion: nil) == 2)
+        let row = try f.draftRow(id)
+        #expect(row["local_version"] as Int == 2 && row["updated_at"] as Int64 == written)
+        #expect(throws: StoreError.self) { try f.store.updateDraft(id, content: MutationFixture.content("Two"), expectedVersion: 1) }
+        #expect(try f.store.updateDraft(id, content: MutationFixture.content("Three"), expectedVersion: 2) == 3)
+        #expect(try f.ops().isEmpty)
+    }
+
+    @Test func anUnchangedSaveStillReopensAFailedDraft() throws {
+        let f = try MutationFixture()
+        let id = try f.syncedDraft()
+        let receipt = try f.store.send(id, undoWindow: .zero, origin: .app)
+        _ = try f.claim()
+        try f.store.fail(receipt.sendOperationID, code: "bad_request", message: "Invalid To header", retryAt: nil)
+        #expect(try f.draftRow(id)["state"] as String == "failed")
+        let content = try #require(try f.store.draft(id)).content
+        let version = try f.draftRow(id)["local_version"] as Int
+        #expect(try f.store.updateDraft(id, content: content, expectedVersion: nil) == version + 1)
+        #expect(try f.draftRow(id)["state"] as String == "editing")
+    }
+
     @Test func uploadsCoalesceUntilAttemptedAndANewerOneSupersedesAnOlderRetry() throws {
         let f = try MutationFixture()
         let id = try f.newDraft()

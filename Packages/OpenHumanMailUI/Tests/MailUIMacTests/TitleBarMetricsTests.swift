@@ -54,11 +54,15 @@ struct TitleBarMetricsTests {
         #expect(TitleBarMetrics.stripHeight(of: window) == 0)
     }
 
-    @Test func theMainWindowHookGivesTheWindowAFullSizeContentView() {
+    @Test func theMainWindowHookLeavesTheTitleBarAndBackgroundToTheSystem() {
         let window = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: 900, height: 600),
                               styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        let background = window.backgroundColor
         MainWindowHooks.configure(window, theme: .dark, restoreFrame: false)
-        #expect(window.styleMask.contains(.fullSizeContentView) && window.titlebarAppearsTransparent)
+        #expect(!window.styleMask.contains(.fullSizeContentView) && !window.titlebarAppearsTransparent)
+        #expect(window.titleVisibility == .visible, "the title shows in the toolbar")
+        #expect(window.backgroundColor == background, "the theme colours the content, not the window")
+        #expect(window.appearance?.name == .darkAqua)
     }
 }

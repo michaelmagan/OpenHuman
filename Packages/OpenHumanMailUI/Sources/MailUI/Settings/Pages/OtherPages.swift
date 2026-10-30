@@ -26,24 +26,27 @@ struct ShortcutsSettingsPage: View {
 
     var body: some View {
         SettingsPageScaffold(title: "Shortcuts") {
-            VStack(alignment: .leading, spacing: theme.space2) {
-                HStack(spacing: theme.space3) {
+            Section {
+                HStack(spacing: theme.space4) {
                     TextField("Search shortcuts", text: $model.searchText, prompt: Text("Search shortcuts").settingsPrompt(theme))
                         .settingsTextField().frame(maxWidth: 320)
                     Spacer(minLength: 0)
                     Button("Print cheat sheet") { printText(model.cheatSheetText) }
                 }
+                if model.sections.allSatisfy(\.lines.isEmpty) {
+                    SettingsFootnote("No shortcut matches “\(model.searchText)”.")
+                }
+            } footer: {
                 if let editor = model.editor {
-                    SettingsFootnote(KeymapEditorModel.footnote)
-                    if let message = editor.message {
-                        SettingsFootnote(message, tone: editor.messageIsRefusal ? .danger : .success)
+                    VStack(alignment: .leading, spacing: theme.space2) {
+                        SettingsFootnote(KeymapEditorModel.footnote)
+                        if let message = editor.message {
+                            SettingsFootnote(message, tone: editor.messageIsRefusal ? .danger : .success)
+                        }
                     }
                 } else {
                     SettingsFootnote("Shortcuts can't be changed.")
                 }
-            }
-            if model.sections.allSatisfy(\.lines.isEmpty) {
-                SettingsFootnote("No shortcut matches “\(model.searchText)”.")
             }
             ForEach(model.sections) { section in
                 SettingsSection(section.title, compact: true) {
@@ -73,8 +76,7 @@ struct ShortcutsSettingsPage: View {
                     }
                     if let preview {
                         VStack(alignment: .leading, spacing: theme.space2) {
-                            Text(preview.summary).themeFont(theme.typeBody).foregroundStyle(theme.textPrimary.color)
-                                .fixedSize(horizontal: false, vertical: true)
+                            Text(preview.summary).fixedSize(horizontal: false, vertical: true)
                             ForEach(preview.refused, id: \.self) { SettingsFootnote($0, tone: .warning) }
                             HStack(spacing: theme.space3) {
                                 Button("Cancel") { self.preview = nil }
@@ -117,7 +119,7 @@ struct ShortcutsSettingsPage: View {
                 if let editor = model.editor, editor.recording == line.action {
                     KeyRecorderView(editor: editor)
                 } else {
-                    ForEach(line.keys, id: \.self) { KeycapView(text: $0) }
+                    ForEach(line.keys, id: \.self) { NativeKeycap($0) }
                 }
                 if let editor = model.editor, editor.canChange(line.action) {
                     let keyless = line.keys.isEmpty
@@ -148,8 +150,8 @@ struct KeyRecorderView: View {
 
     var body: some View {
         Text(editor.pendingText ?? KeymapEditorModel.recordingHint)
-            .themeFont(theme.typeMeta)
-            .foregroundStyle(theme.accentText.color)
+            .font(.system(size: NativeMetrics.Text.secondary))
+            .foregroundStyle(.tint)
             .accessibilityLabel(KeymapEditorModel.recordingHint)
             .onAppear {
                 let made = session ?? KeyRecorderSession(editor: editor)
@@ -165,33 +167,66 @@ final class KeyRecorderSession {
     private let editor: KeymapEditorModel
     private var monitor: Any?
     private var waiter: Task<Void, Never>?
+    #if os(macOS)
+    // The window the shortcut is recorded in, the key window when recording starts. Keys typed in any other window,
+    // and keys that compose text there, are left to it, and recording ends when the window stops being key.
+    private weak var window: NSWindow?
+    private var resignObserver: NSObjectProtocol?
+    #endif
 
     init(editor: KeymapEditorModel) {
         self.editor = editor
     }
 
-    func start() {
-        #if os(macOS)
+    #if os(macOS)
+    func start(in window: NSWindow? = NSApp.keyWindow) {
         guard monitor == nil else { return }
+        self.window = window
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let keyCode = event.keyCode, characters = event.charactersIgnoringModifiers
             let flags = event.modifierFlags
             let command = flags.contains(.command), option = flags.contains(.option)
             let control = flags.contains(.control), shift = flags.contains(.shift)
-            MainActor.assumeIsolated {
-                self?.heard(keyCode: keyCode, characters: characters, command: command, option: option,
-                            control: control, shift: shift)
+            let windowNumber = event.windowNumber
+            let taken = MainActor.assumeIsolated {
+                guard let self, self.takes(windowNumber: windowNumber) else { return false }
+                self.heard(keyCode: keyCode, characters: characters, command: command, option: option,
+                           control: control, shift: shift)
+                return true
             }
-            return nil
+            return taken ? nil : event
         }
-        #endif
+        if let window {
+            resignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification,
+                                                                    object: window, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.windowResignedKey() }
+            }
+        }
     }
+
+    // Whether a key typed in the window with this number is the shortcut being recorded
+    func takes(windowNumber: Int) -> Bool {
+        guard let window, windowNumber == window.windowNumber, windowNumber > 0 else { return false }
+        return (window.firstResponder as? NSTextInputClient)?.hasMarkedText() != true
+    }
+
+    func windowResignedKey() {
+        guard window != nil else { return }
+        if editor.recording != nil { editor.cancelRecording() }
+        stop()
+    }
+    #else
+    func start() {}
+    #endif
 
     func stop() {
         waiter?.cancel()
         waiter = nil
         #if os(macOS)
         if let monitor { NSEvent.removeMonitor(monitor) }
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+        resignObserver = nil
+        window = nil
         #endif
         monitor = nil
     }
@@ -412,10 +447,9 @@ struct AdvancedSettingsPage: View {
                 ForEach(superhuman.snoozed.prefix(20)) { item in
                     HStack(spacing: theme.space3) {
                         Text(item.subject.isEmpty ? "(no subject)" : item.subject).lineLimit(1)
-                            .themeFont(theme.typeBody).foregroundStyle(theme.textPrimary.color)
                         Spacer(minLength: theme.space3)
                         Text(item.lastMessageAt, format: .dateTime.month(.abbreviated).day())
-                            .themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
+                            .font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
                     }
                     .settingsRowPadding()
                 }
@@ -427,7 +461,7 @@ struct AdvancedSettingsPage: View {
         VStack(alignment: .leading, spacing: theme.space2) {
             Text("This file would add \(preview.splitsToAdd) splits and \(preview.snippetsToAdd) snippets, replace "
                 + "\(preview.splitsToReplace) splits and \(preview.snippetsToReplace) snippets with the same name, and set "
-                + "\(preview.settingsToApply) settings.").themeFont(theme.typeBody).foregroundStyle(theme.textPrimary.color)
+                + "\(preview.settingsToApply) settings.")
                 .fixedSize(horizontal: false, vertical: true)
             if preview.accountsSkipped > 0 {
                 SettingsFootnote("\(preview.accountsSkipped) account(s) in the file aren't signed in here and are skipped.")

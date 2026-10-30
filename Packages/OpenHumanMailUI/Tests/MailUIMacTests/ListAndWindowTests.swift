@@ -16,7 +16,7 @@ private let now = Date(timeIntervalSince1970: 1_791_000_000)
 struct ListAndWindowTests {
     @Test func rowColumnsFollowTheDesignGeometry() {
         let c = ThreadRowView.columns(width: 1000)
-        #expect(c.dotCenterX == 22)
+        #expect(c.dotCenterX == 21, "plate inset 8, checkbox clearance 6, half the 14 pt box; no cursor bar")
         #expect(c.sender == 40...260)
         #expect(c.subject.lowerBound == 276)
         #expect(c.date == 904...976)
@@ -34,7 +34,7 @@ struct ListAndWindowTests {
         controller.model = model
         model.start()
         try await until { controller.tableView.numberOfRows == 150 && model.rows.count == 100 }
-        #expect(controller.tableView.rowHeight == 36)
+        #expect(controller.tableView.rowHeight == 40)
         try await until { controller.tableView.selectedRow == 0 }
         model.moveCursor(by: 3)
         try await until { controller.tableView.selectedRow == 3 }

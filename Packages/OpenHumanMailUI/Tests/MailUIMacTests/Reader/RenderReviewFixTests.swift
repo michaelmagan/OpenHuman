@@ -1,4 +1,5 @@
 import AppKit
+import MailActions
 import MailFeatures
 import MailModel
 import MailRender
@@ -91,49 +92,59 @@ struct RenderReviewFixTests {
         return (h, detail)
     }
 
-    @Test func theOneLineHeaderIsOneBand() async throws {
+    @Test func theHeaderIsOneMonogramBand() async throws {
         let (h, detail) = try await harness()
         defer { h.close() }
         let key = try #require(detail.messages.last?.id)
         let header = try await h.header(key)
         h.controller.view.layoutSubtreeIfNeeded()
-        #expect(MessageHeaderView.isOneLine)
-        #expect(abs(header.frame.height - MessageHeaderView.oneLineBand) < 0.5, "height \(header.frame.height)")
+        let band = MessageHeaderView.bandHeight
+        #expect(header.frame.height >= band - 0.5 && header.frame.height <= band + 4, "height \(header.frame.height)")
+        #expect(header.avatar.frame.width == NativeMetrics.Reader.monogramSize && !header.avatar.isHidden, "a 32 pt monogram")
+        #expect(abs(header.avatar.frame.midY - header.bounds.midY) <= 1, "the monogram is centred in the band")
+        let name = header.convert(header.nameLabel.bounds, from: header.nameLabel)
+        let avatar = header.avatar.frame
+        #expect(name.minX >= avatar.maxX, "the sender follows the monogram")
+        let font = header.nameLabel.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        #expect(font?.pointSize == NativeMetrics.Reader.senderSize)
         #expect(header.bodyGap >= 0 && header.bodyGap <= ThemeTokens.light.space4)
         let buttons = header.actionButtons
-        #expect(!buttons.isEmpty)
+        #expect(buttons.last?.identifier?.rawValue == "reader.more")
+        #expect(buttons.contains { $0.identifier?.rawValue == ActionID.reply.rawValue }, "Reply, Reply All, Forward, More")
         for button in buttons {
             let frame = button.convert(button.bounds, to: header)
             #expect(abs(frame.midY - header.bounds.midY) <= 1, "\(button.identifier?.rawValue ?? ""): \(frame.midY)")
             #expect(header.bounds.contains(frame.insetBy(dx: 0.5, dy: 0.5)), "inside the band, so it takes its clicks")
+            #expect(!button.isBordered && button.alphaValue == 1, "borderless and always shown")
         }
+        let date = header.convert(header.dateLabel.bounds, from: header.dateLabel)
+        let first = try #require(buttons.first).convert(try #require(buttons.first).bounds, to: header)
+        #expect(date.maxX <= first.minX, "the date sits before the actions")
     }
 
     @Test(arguments: lightThemes + darkThemes)
-    func increaseContrastStrengthensTheCardEdgeAndRingsFocus(themeID: String) {
+    func increaseContrastRingsTheFocusPlate(themeID: String) {
         let on = Self.tokens(themeID, increaseContrast: true)
         let off = Self.tokens(themeID)
         #expect(on.increaseContrast && !off.increaseContrast)
-        let card = MessageCardView(theme: on)
-        #expect(Self.same(card.border, on.borderControl.nsColor))
-        #expect(Self.same(card.ring, on.accentRing.nsColor))
-        #expect(on.accentRing.contrastRatio(on: on.bgCard) >= 3, "\(themeID): the ring on the card")
-        #expect(on.borderControl.contrastRatio(on: on.bgWindow) >= 3, "\(themeID): the edge")
-        let plain = MessageCardView(theme: off)
-        #expect(Self.same(plain.border, off.borderElevated.nsColor))
-        #expect(plain.ring == nil)
+        let plate = ReaderPlateView(theme: on)
+        #expect(Self.same(plate.ring, on.accentRing.nsColor))
+        #expect(Self.same(plate.focusColor, on.component.row.bgCursor.nsColor))
+        #expect(on.accentRing.contrastRatio(on: on.bgCard) >= 3, "\(themeID): the ring")
+        #expect(ReaderPlateView(theme: off).ring == nil)
     }
 
     @Test(arguments: [false, true])
-    func theFocusedCardRingsUnderIncreaseContrast(increaseContrast: Bool) async throws {
+    func theFocusedMessageRingsUnderIncreaseContrast(increaseContrast: Bool) async throws {
         let (h, detail) = try await harness(theme: Self.tokens(BuiltinThemeID.light, increaseContrast: increaseContrast))
         defer { h.close() }
         let first = detail.messages[0].id, last = detail.messages[1].id
         h.model.focus(last)
         try await until { h.container(last)?.isFocused == true }
-        let focused = try #require(h.container(last)?.card)
-        #expect((focused.showsFocusRing && focused.ring != nil) == increaseContrast)
-        #expect(h.container(first)?.card.showsFocusRing == false)
+        let focused = try #require(h.container(last)?.focusPlate)
+        #expect(focused.look == .focus)
+        #expect(focused.showsRing == increaseContrast)
+        #expect(h.container(first)?.focusPlate.showsRing == false)
     }
 
     @Test func theConversationLeavesRoomForTheToastBand() async throws {
@@ -170,8 +181,8 @@ struct RenderReviewFixTests {
     }
 
     @Test func composerPolishMetrics() {
-        #expect(FormatBarMetrics.glyphInset == (FormatBarMetrics.button - FormatBarMetrics.glyph) / 2)
-        #expect(FormatBarMetrics.glyphInset > 0)
+        #expect(FormatBarMetrics.inlinePadding >= (FormatBarMetrics.height - FormatBarMetrics.button) / 2,
+                "the end buttons of the card's format bar sit inside its capsule")
         #expect(RecipientToken.removeStyle(hovered: false).opacity == 1, "the remove x is always shown, as in Gmail")
         #expect(RecipientToken.removeStyle(hovered: true).opacity == 1)
         #expect(RecipientToken.removeStyle(hovered: true).emphasized && !RecipientToken.removeStyle(hovered: false).emphasized)

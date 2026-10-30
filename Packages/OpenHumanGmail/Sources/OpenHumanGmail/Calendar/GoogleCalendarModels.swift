@@ -43,12 +43,15 @@ public struct GoogleCalendarAttendee: Sendable, Hashable {
     public let name: String?
     public var isOptional = false
     public var responseStatus: String?
+    public var isOrganizer: Bool?
 
-    public init(email: String, name: String? = nil, isOptional: Bool = false, responseStatus: String? = nil) {
+    public init(email: String, name: String? = nil, isOptional: Bool = false, responseStatus: String? = nil,
+                isOrganizer: Bool? = nil) {
         self.email = email
         self.name = name
         self.isOptional = isOptional
         self.responseStatus = responseStatus
+        self.isOrganizer = isOrganizer
     }
 }
 
@@ -211,6 +214,7 @@ struct WireEvent: Decodable {
         var responseStatus: String?
         var `self`: Bool?
         var optional: Bool?
+        var organizer: Bool?
     }
     struct Reminders: Decodable {
         struct Override: Decodable {
@@ -239,6 +243,7 @@ struct WireEvent: Decodable {
     }
     struct Organizer: Decodable {
         var `self`: Bool?
+        var email: String?
     }
     var id: String?
     var status: String?
@@ -279,15 +284,31 @@ struct WireEvent: Decodable {
             return nil
         }
         guard ends >= begins else { return nil }
+        let hasMarkedOrganizer = (attendees ?? []).contains { $0.organizer == true }
         let people = (attendees ?? []).compactMap { person -> GoogleCalendarAttendee? in
             guard let email = person.email?.trimmingCharacters(in: .whitespaces), email.contains("@") else { return nil }
+            let isOrganizer: Bool? = if let address = organizer?.email {
+                person.organizer == true || email.caseInsensitiveCompare(address) == .orderedSame
+            } else if let marked = person.organizer {
+                marked
+            } else if hasMarkedOrganizer || (person.`self` == true && organizer?.`self` != true) {
+                false
+            } else {
+                nil
+            }
             return GoogleCalendarAttendee(email: email, name: person.displayName, isOptional: person.optional == true,
-                                          responseStatus: person.responseStatus)
+                                          responseStatus: person.responseStatus, isOrganizer: isOrganizer)
         }
         let title = summary?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let own = (attendees ?? []).first { person in
-            person.`self` == true || (selfAddress.map { person.email?.lowercased() == $0.lowercased() } ?? false)
-        }
+        let own = (attendees ?? []).first { $0.`self` == true }
+            ?? (attendees ?? []).first { person in
+                let differentFromOrganizer = organizer?.email.map {
+                    person.email?.caseInsensitiveCompare($0) != .orderedSame
+                } ?? false
+                let isKnownGuest = person.organizer == false
+                    || (hasMarkedOrganizer && person.organizer != true) || differentFromOrganizer
+                return isKnownGuest && (selfAddress.map { person.email?.lowercased() == $0.lowercased() } ?? false)
+            }
         var extras = GoogleEventExtras()
         extras.guestsCanModify = guestsCanModify
         extras.guestsCanInviteOthers = guestsCanInviteOthers

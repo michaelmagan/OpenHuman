@@ -18,13 +18,16 @@ struct HintBarView: View {
     }
 
     private func row(_ hints: [ShortcutHint]) -> some View {
-        HStack(spacing: theme.space5) {
+        HStack(spacing: NativeMetrics.HintLine.itemGap) {
             ForEach(hints) { hint in
-                HStack(spacing: theme.space2) {
-                    KeycapRow(keycaps: hint.keycaps)
+                HStack(spacing: NativeMetrics.HintLine.keyGap) {
+                    HStack(spacing: NativeMetrics.HintLine.keyGap) {
+                        ForEach(Array(hint.keycaps.enumerated()), id: \.offset) { _, key in NativeKeycap(key) }
+                    }
+                    .accessibilityHidden(true)
                     Text(hint.title)
-                        .font(theme.typeLabel.swiftUIFont)
-                        .foregroundStyle(theme.textSecondary.color)
+                        .font(.system(size: NativeMetrics.HintLine.textSize))
+                        .foregroundStyle(.tertiary)
                         .lineLimit(1)
                 }
                 .accessibilityElement(children: .combine)

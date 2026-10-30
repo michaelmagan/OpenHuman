@@ -51,6 +51,19 @@ private func details(_ event: CalendarEvent, mine: Set<String> = [me]) -> Calend
 
 @MainActor
 @Suite struct CalendarEventDetailsTests {
+    @Test func anOrganizerOnlyGuestListDoesNotSupplyTheInviteesAnswer() {
+        let organizer = "work@example.test"
+        var event = CalendarEvent(id: "copy", title: "Review", start: ny(10, 14, 14), end: ny(10, 14, 15),
+                                  attendees: [EmailAddress(email: organizer)], organizerIsMe: false,
+                                  account: me)
+        event.extras.guests = [CalendarGuest(email: organizer, response: .accepted, isOrganizer: true)]
+        let resolved = event.resolvingMyResponse(addresses: [me, organizer])
+        let shown = details(resolved, mine: [me, organizer])
+        #expect(resolved.myResponse == nil && resolved.respondsAs == nil && !resolved.canRespond)
+        #expect(shown.guests.count == 1 && !shown.guests[0].isMe)
+        #expect(shown.guests[0].line == organizer && shown.answerText == CalendarEvent.responseNotShown)
+    }
+
     @Test func theDetailsShowTheTimeAndZonePlaceJoinLinkGuestsNotesAndCalendar() {
         let shown = details(review())
         #expect(shown.title == "Vendor review")
@@ -222,15 +235,20 @@ private struct DetailsFixture {
     @Test func theArrowsChooseEventsInOrderAndAnOpenCardFollowsThem() async throws {
         let f = DetailsFixture(events: [review(), designSync(), offsite()])
         let model = await f.sidebar()
-        #expect(model.moveEventFocus(by: 1) && model.focusedEventKey == CalendarDayTimeline.key(for: offsite()))
-        #expect(model.moveEventFocus(by: 1) && model.focusedEventKey == CalendarDayTimeline.key(for: designSync()))
+        let shown = model.focusableEvents
+        #expect(shown.map(\.id) == ["offsite", "sync", "review"])
+        let first = try #require(shown.first)
+        let second = try #require(shown.dropFirst().first)
+        let last = try #require(shown.last)
+        #expect(model.moveEventFocus(by: 1) && model.focusedEventKey == first.copyKey)
+        #expect(model.moveEventFocus(by: 1) && model.focusedEventKey == second.copyKey)
         #expect(model.openedEvent == nil, "choosing alone opens nothing")
         #expect(model.openFocusedEvent() && model.openedEvent?.id == "sync")
         #expect(model.moveEventFocus(by: 1) && model.openedEvent?.id == "review")
         #expect(model.moveEventFocus(by: 1) && model.openedEvent?.id == "review", "the last event stays chosen")
         #expect(model.moveEventFocus(by: -5) && model.openedEvent?.id == "offsite")
         model.closeEvent()
-        #expect(model.moveEventFocus(by: -1) && model.focusedEventKey == CalendarDayTimeline.key(for: review()),
+        #expect(model.moveEventFocus(by: -1) && model.focusedEventKey == last.copyKey,
                 "up with nothing chosen starts at the last event")
         #expect(f.wroteNothing)
     }

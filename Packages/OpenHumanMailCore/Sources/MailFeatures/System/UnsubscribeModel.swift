@@ -6,7 +6,7 @@ import Observation
 @MainActor @Observable
 public final class UnsubscribeModel: ReaderHeaderAccessory, ActionPresenting {
     @ObservationIgnored public weak var next: (any ActionPresenting)?
-    @ObservationIgnored private unowned let environment: AppEnvironment
+    @ObservationIgnored private weak var environment: AppEnvironment?
     @ObservationIgnored private let urlOpener: any URLOpening
 
     @ObservationIgnored private let accessorySlot: ReaderHeaderAccessoryStore
@@ -19,6 +19,7 @@ public final class UnsubscribeModel: ReaderHeaderAccessory, ActionPresenting {
     }
 
     public func install() {
+        guard let environment else { return }
         let overlays = environment.overlays
         if let previous = overlays.fallback, previous !== self { next = previous }
         overlays.fallback = self
@@ -26,8 +27,9 @@ public final class UnsubscribeModel: ReaderHeaderAccessory, ActionPresenting {
     }
 
     public func uninstall() {
-        if environment.overlays.fallback === self { environment.overlays.fallback = next }
+        if let environment, environment.overlays.fallback === self { environment.overlays.fallback = next }
         if accessorySlot.current === self { accessorySlot.current = nil }
+        next = nil
     }
 
     public func canPresent(_ kind: ActionPresentation.Kind) -> Bool {
@@ -40,6 +42,7 @@ public final class UnsubscribeModel: ReaderHeaderAccessory, ActionPresenting {
     public func present(_ presentation: ActionPresentation) {
         switch presentation {
         case .openURL(let url):
+            guard let environment else { return }
             guard url.scheme?.lowercased() == "https", url.host() != nil else {
                 environment.notices.post("Mail only opens secure (https) unsubscribe links.", style: .info,
                                          duration: NoticeCenter.infoDuration)
@@ -52,6 +55,7 @@ public final class UnsubscribeModel: ReaderHeaderAccessory, ActionPresenting {
     }
 
     public func item(for message: MessageSummary, in thread: ThreadKey) async -> ReaderHeaderAccessoryItem? {
+        guard let environment else { return nil }
         let info: UnsubscribeInfo?
         do { info = try await environment.data.unsubscribeInfo(message.id) } catch { info = nil }
         guard info != nil else { return nil }
@@ -60,6 +64,7 @@ public final class UnsubscribeModel: ReaderHeaderAccessory, ActionPresenting {
     }
 
     public func activate(_ item: ReaderHeaderAccessoryItem, for message: MessageSummary, in thread: ThreadKey) {
+        guard let environment else { return }
         var context = environment.router.actionContext()
         context.scope = .reader
         context.account = thread.account

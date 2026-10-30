@@ -48,7 +48,10 @@ public final class CalendarEventStore {
     }
 
     private var slices: [Key: Slice] = [:]
-    private var flights: [Key: (id: UUID, task: Task<Void, Never>)] = [:]
+    private var flights: [Key: (id: UUID, task: Task<Void, Never>, writes: Int)] = [:]
+    private var generations: [Key: Int] = [:]
+    private var localWrites: [Key: Int] = [:]
+    public private(set) var ownAddresses: [String: Set<String>] = [:]
     private var observers: [UUID: @MainActor (CalendarEventStoreChange) -> Void] = [:]
     private let persistence: (any CalendarCachePersisting)?
     private var persistTail: Task<Void, Never>?
@@ -76,22 +79,48 @@ public final class CalendarEventStore {
     public func events(_ key: Key, from: Date, to: Date, includeDeclined: Bool = false) -> [CalendarEvent]? {
         guard covers(key, from: from, to: to), let slice = slices[key] else { return nil }
         let zone = timeZone
+        let mine = ownAddresses[key.account] ?? []
         return slice.records.values
             .filter { includeDeclined || !$0.declinedByMe }
             .map { record -> CalendarEvent in
                 var event = record.materialized(in: zone).event
                 if record.declinedByMe, event.myResponse == nil { event.myResponse = .declined }
-                return event
+                return event.resolvingMyResponse(addresses: mine)
             }
+            .filter { includeDeclined || !Self.declinedAsAlias($0) }
             .filter { $0.overlaps(from: from, to: to) }
             .sorted(by: Self.soonestFirst)
     }
 
+    // The account's own addresses by calendar account, so an answer given as an alias shows as the account's
+    public func learnAddresses(of accounts: [Account]) {
+        var known: [String: Set<String>] = [:]
+        let connected = Set(accounts.map { $0.email.lowercased() })
+        for account in accounts {
+            let own = account.email.lowercased()
+            known[own] = account.myAddresses.filter { $0 == own || !connected.contains($0) }
+        }
+        guard known != ownAddresses else { return }
+        let before = ownAddresses
+        ownAddresses = known
+        for (key, slice) in slices where before[key.account] != known[key.account] && !slice.records.isEmpty {
+            var change = CalendarEventStoreChange(key: key)
+            change.updated = Set(slice.records.keys)
+            notify(change)
+        }
+    }
+
+    static func declinedAsAlias(_ event: CalendarEvent) -> Bool {
+        event.respondsAs != nil && event.myResponse == .declined
+    }
+
     public func busy(_ key: Key, from: Date, to: Date) -> [CalendarBusyInterval]? {
         guard covers(key, from: from, to: to), let slice = slices[key] else { return nil }
+        let mine = ownAddresses[key.account] ?? []
         let blocks = slice.records.values
             .filter { $0.isBusy && !$0.event.isAllDay && !$0.declinedByMe
-                && $0.event.overlaps(from: from, to: to) }
+                && $0.event.overlaps(from: from, to: to)
+                && !Self.declinedAsAlias($0.event.resolvingMyResponse(addresses: mine)) }
             .map { CalendarBusyInterval(start: max($0.event.start, from), end: min($0.event.end, to)) }
             .sorted { $0.start < $1.start }
         return Self.merged(blocks)
@@ -169,7 +198,7 @@ public final class CalendarEventStore {
 
     public func forget(account: String) {
         let account = account.lowercased()
-        for key in slices.keys where key.account == account { drop(key) }
+        for key in Set(slices.keys).union(flights.keys) where key.account == account { drop(key) }
         enqueue(.forgetAccount(account))
     }
 
@@ -179,7 +208,7 @@ public final class CalendarEventStore {
     }
 
     public func forgetAll() {
-        for key in slices.keys { drop(key) }
+        for key in Set(slices.keys).union(flights.keys) { drop(key) }
         enqueue(.forgetAll)
     }
 
@@ -218,7 +247,8 @@ public final class CalendarEventStore {
                            calendar: Calendar, now: Date, force: Bool = false) async {
         if let flight = flights[key] {
             await flight.task.value
-            return
+            // Why: a read that began before a save can bring the old version, so a forced refresh after it reads again
+            guard force, localWrites[key, default: 0] > flight.writes, flights[key] == nil else { return }
         }
         if !force, !isDue(key, now: now) { return }
         let window = Self.window(from: visible.start, to: visible.end, today: today, calendar: calendar)
@@ -267,11 +297,36 @@ public final class CalendarEventStore {
         var slice = slices[key] ?? Slice()
         var change = CalendarEventStoreChange(key: key)
         let record = Self.localRecord(event, replacing: slice.records[event.id], readIn: timeZone)
-        Self.upsert(record, into: &slice, change: &change)
+        Self.upsert(record, into: &slice, change: &change, local: true)
         if provisional { slice.provisional.insert(event.id) } else { slice.provisional.remove(event.id) }
         slices[key] = slice
+        if !provisional { noteRemoteWrite(key) }
         if !provisional, !change.isEmpty { save(key, slice: slice, upserted: [record], removed: []) }
         notify(change)
+    }
+
+    // An answer to a whole series shows at once on the occurrences already read; the next read brings the calendar's own
+    public func applyLocalResponse(_ key: Key, series: String, response: CalendarResponse) {
+        noteRemoteWrite(key)
+        guard !series.isEmpty, var slice = slices[key] else { return }
+        var change = CalendarEventStoreChange(key: key)
+        var upserted: [CalendarEventRecord] = []
+        for record in Array(slice.records.values) where (record.recurringEventID ?? record.event.recurringEventID) == series {
+            var answered = record
+            answered.event.myResponse = response
+            answered.declinedByMe = response == .declined
+            Self.upsert(answered, into: &slice, change: &change, local: true)
+            upserted.append(answered)
+        }
+        guard !upserted.isEmpty else { return }
+        slices[key] = slice
+        save(key, slice: slice, upserted: upserted, removed: [])
+        notify(change)
+    }
+
+    // A write the store doesn't hold itself (a whole series): the next forced refresh reads again after a read under way
+    public func noteRemoteWrite(_ key: Key) {
+        localWrites[key, default: 0] += 1
     }
 
     public func replaceLocal(_ key: Key, id: String, with event: CalendarEvent) {
@@ -282,8 +337,9 @@ public final class CalendarEventStore {
         var upserted: [CalendarEventRecord] = []
         if !event.id.isEmpty {
             let record = Self.localRecord(event, replacing: slice.records[event.id], readIn: timeZone)
-            Self.upsert(record, into: &slice, change: &change)
+            Self.upsert(record, into: &slice, change: &change, local: true)
             upserted = [record]
+            noteRemoteWrite(key)
         }
         slices[key] = slice
         if !upserted.isEmpty { save(key, slice: slice, upserted: upserted, removed: []) }
@@ -293,6 +349,7 @@ public final class CalendarEventStore {
     public func removeLocal(_ key: Key, id: String) {
         guard var slice = slices[key], slice.records.removeValue(forKey: id) != nil else { return }
         let wasProvisional = slice.provisional.remove(id) != nil
+        if !wasProvisional { noteRemoteWrite(key) }
         slices[key] = slice
         var change = CalendarEventStoreChange(key: key)
         change.removed = [id]
@@ -311,18 +368,21 @@ public final class CalendarEventStore {
             await work(self)
             if self.flights[key]?.id == id { self.flights[key] = nil }
         }
-        flights[key] = (id, task)
+        flights[key] = (id, task, localWrites[key, default: 0])
         await task.value
     }
 
     private func readWindow(_ key: Key, provider: any CalendarProviding, from: Date, to: Date, now: Date) async {
         networkReads += 1
+        let generation = generations[key]
         do {
             let answer = try await provider.eventWindow(from: from, to: to)
+            guard generations[key] == generation else { return }
             applyWindow(key, answer, from: from, to: to, now: now)
             succeeded(key, now: now)
             Log(.app).notice("calendar window read: \(answer.records.count) event(s)")
         } catch {
+            guard generations[key] == generation else { return }
             failed(key, error, now: now)
         }
     }
@@ -330,19 +390,24 @@ public final class CalendarEventStore {
     private func readChanges(_ key: Key, provider: any CalendarProviding, token: String, window: DateInterval,
                              now: Date) async {
         networkReads += 1
+        let generation = generations[key]
         do {
             let delta = try await provider.eventDelta(since: token)
+            guard generations[key] == generation else { return }
             applyDelta(key, delta, now: now)
             succeeded(key, now: now)
             Log(.app).notice("calendar changes read: \(delta.changed.count) changed, \(delta.removed.count) removed")
         } catch CalendarSyncError.tokenExpired {
+            guard generations[key] == generation else { return }
             Log(.app).notice("calendar change token expired; reading the window again")
             await rereadAfterExpiry(key, provider: provider, window: window, now: now)
         } catch CalendarSyncError.unsupported {
+            guard generations[key] == generation else { return }
             slices[key]?.tokensUnsupported = true
             slices[key]?.syncToken = nil
             await readWindow(key, provider: provider, from: window.start, to: window.end, now: now)
         } catch {
+            guard generations[key] == generation else { return }
             failed(key, error, now: now)
         }
     }
@@ -350,8 +415,10 @@ public final class CalendarEventStore {
     private func rereadAfterExpiry(_ key: Key, provider: any CalendarProviding, window: DateInterval, now: Date) async {
         networkReads += 1
         let old = slices[key] ?? Slice()
+        let generation = generations[key]
         do {
             let answer = try await provider.eventWindow(from: window.start, to: window.end)
+            guard generations[key] == generation else { return }
             var fresh = Slice()
             fresh.provisional = old.provisional.filter { old.records[$0] != nil }
             for id in fresh.provisional { fresh.records[id] = old.records[id] }
@@ -377,6 +444,7 @@ public final class CalendarEventStore {
                                                 syncToken: fresh.syncToken)))
             notify(change)
         } catch {
+            guard generations[key] == generation else { return }
             drop(key)
             enqueue(.forgetCalendar(key))
             failed(key, error, now: now)
@@ -389,8 +457,8 @@ public final class CalendarEventStore {
         change.coverageChanged = true
         let incoming = Set(answer.records.map(\.event.id))
         var removed: [String] = []
-        for (id, record) in slice.records where record.event.overlaps(from: from, to: to) && !incoming.contains(id)
-            && !slice.provisional.contains(id) {
+        for (id, record) in slice.records where answer.isComplete && record.event.overlaps(from: from, to: to)
+            && !incoming.contains(id) && !slice.provisional.contains(id) {
             slice.records[id] = nil
             change.removed.insert(id)
             removed.append(id)
@@ -405,9 +473,9 @@ public final class CalendarEventStore {
             }
         }
         slice.ranges = Self.inserting(CalendarCoveredRange(start: from, end: to, fetchedAt: now), into: slice.ranges)
-        if !slice.tokensUnsupported, let token = answer.syncToken { slice.syncToken = token }
+        if !slice.tokensUnsupported, answer.isComplete, let token = answer.syncToken { slice.syncToken = token }
         slice.lastRefresh = now
-        slice.lastFullRead = now
+        if answer.isComplete { slice.lastFullRead = now }
         removed += Self.trim(&slice, now: now)
         slices[key] = slice
         save(key, slice: slice, upserted: upserted, removed: removed)
@@ -473,6 +541,7 @@ public final class CalendarEventStore {
     }
 
     private func drop(_ key: Key) {
+        generations[key, default: 0] += 1
         guard let slice = slices.removeValue(forKey: key) else { return }
         var change = CalendarEventStoreChange(key: key)
         change.removed = Set(slice.records.keys)
@@ -503,17 +572,22 @@ public final class CalendarEventStore {
         }
     }
 
+    // Why: the written copy keeps the version it replaced, so a read that began before the write (and so still carries
+    // that version) leaves it alone; the calendar's next version replaces it
     static func localRecord(_ event: CalendarEvent, replacing old: CalendarEventRecord?, readIn zone: TimeZone)
         -> CalendarEventRecord {
-        CalendarEventRecord(event: event, recurringEventID: event.recurringEventID ?? old?.recurringEventID,
+        CalendarEventRecord(event: event, etag: old?.etag, updated: old?.updated,
+                            recurringEventID: event.recurringEventID ?? old?.recurringEventID,
                             isBusy: old?.isBusy, declinedByMe: event.myResponse == .declined, readIn: zone)
     }
 
-    static func upsert(_ record: CalendarEventRecord, into slice: inout Slice, change: inout CalendarEventStoreChange) {
+    static func upsert(_ record: CalendarEventRecord, into slice: inout Slice, change: inout CalendarEventStoreChange,
+                       local: Bool = false) {
         let id = record.event.id
         guard !id.isEmpty else { return }
         if let old = slice.records[id] {
-            if old.isSameVersion(as: record) && !slice.provisional.contains(id) { return }
+            let same = local ? old == record : old.isSameVersion(as: record)
+            if same && !slice.provisional.contains(id) { return }
             change.updated.insert(id)
         } else {
             change.inserted.insert(id)

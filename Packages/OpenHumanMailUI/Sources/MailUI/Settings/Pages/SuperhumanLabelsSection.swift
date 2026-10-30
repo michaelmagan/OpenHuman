@@ -23,19 +23,13 @@ struct SuperhumanLabelsSection: View {
                         isOn: Binding(get: { hide.value }, set: { value in Task { await hide.set(value) } }))
                 .disabled(!canEditSettings)
                 .accessibilityIdentifier("settings.superhumanLabels.hide")
+                .task {
+                    hide.start()
+                    await agreement.load()
+                }
             importRows
             agreementRows
             SettingsErrorLine(text: hide.errorMessage)
-        }
-        .task {
-            hide.start()
-            await agreement.load()
-        }
-        .alert("Remove Superhuman labels?", isPresented: $confirmingRemove) {
-            Button("Cancel", role: .cancel) {}
-            Button("Remove", role: .destructive) { Task { await importer.removeSuperhumanLabels() } }
-        } message: {
-            Text(SuperhumanLabelImportModel.removeWarning)
         }
     }
 
@@ -76,6 +70,12 @@ struct SuperhumanLabelsSection: View {
                     .disabled(!importer.canRemove)
                     .accessibilityIdentifier("settings.superhumanLabels.remove")
             }
+            .alert("Remove Superhuman labels?", isPresented: $confirmingRemove) {
+                Button("Cancel", role: .cancel) {}
+                Button("Remove", role: .destructive) { Task { await importer.removeSuperhumanLabels() } }
+            } message: {
+                Text(SuperhumanLabelImportModel.removeWarning)
+            }
         }
     }
 
@@ -91,7 +91,6 @@ struct SuperhumanLabelsSection: View {
         ForEach(importer.counts) { count in
             SettingsRow(count.category, detail: countDetail(count)) {
                 Text(count.toImport.formatted())
-                    .themeFont(theme.typeBody).foregroundStyle(theme.textPrimary.color)
                     .monospacedDigit()
                     .accessibilityLabel(Text("\(count.toImport) to import"))
             }
@@ -107,17 +106,16 @@ struct SuperhumanLabelsSection: View {
     @ViewBuilder private var previewRows: some View {
         if !importer.preview.isEmpty {
             VStack(alignment: .leading, spacing: theme.space2) {
-                Text("Examples").themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
+                Text("Examples").font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
                 ForEach(importer.preview) { example in
                     HStack(spacing: theme.space3) {
                         Text(example.subject.isEmpty ? "(no subject)" : example.subject).lineLimit(1)
-                            .themeFont(theme.typeBody).foregroundStyle(theme.textPrimary.color)
                         Spacer(minLength: theme.space3)
                         Text(example.superhumanName == example.category ? example.category
                              : "\(example.superhumanName) → \(example.category)")
-                            .themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
+                            .font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
                         Text(example.lastMessageAt, format: .dateTime.month(.abbreviated).day())
-                            .themeFont(theme.typeMeta).foregroundStyle(theme.textTertiary.color)
+                            .font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -174,7 +172,7 @@ struct SuperhumanLabelsSection: View {
         return VStack(alignment: .leading, spacing: theme.space2) {
             Text("\(report.fromCache.formatted()) answers Mail already had, \(report.ranOnDevice.formatted()) sorted now"
                  + (report.failed > 0 ? ", \(report.failed.formatted()) couldn't be sorted" : ""))
-                .themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
+                .font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
             Grid(alignment: .trailing, horizontalSpacing: theme.space4, verticalSpacing: theme.space1) {
                 GridRow {
                     header("Label", leading: true)
@@ -203,7 +201,7 @@ struct SuperhumanLabelsSection: View {
         let columns = report.columns
         return VStack(alignment: .leading, spacing: theme.space2) {
             Text("Superhuman's label (rows) against Mail's (columns)")
-                .themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
+                .font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
             Grid(alignment: .trailing, horizontalSpacing: theme.space3, verticalSpacing: theme.space1) {
                 GridRow {
                     header("", leading: true)
@@ -215,8 +213,8 @@ struct SuperhumanLabelsSection: View {
                         ForEach(columns, id: \.self) { column in
                             let n = report.confusion[row]?[column] ?? 0
                             Text(n == 0 ? "·" : n.formatted())
-                                .themeFont(theme.typeMeta).monospacedDigit()
-                                .foregroundStyle((row == column ? theme.textPrimary : theme.textSecondary).color)
+                                .font(.system(size: NativeMetrics.Text.secondary)).monospacedDigit()
+                                .foregroundStyle(row == column ? HierarchicalShapeStyle.primary : .secondary)
                         }
                     }
                 }
@@ -226,12 +224,12 @@ struct SuperhumanLabelsSection: View {
     }
 
     private func header(_ text: String, leading: Bool = false) -> some View {
-        Text(text).themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
+        Text(text).font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
             .gridColumnAlignment(leading ? .leading : .trailing)
     }
 
     private func cell(_ text: String, leading: Bool = false) -> some View {
-        Text(text).themeFont(theme.typeMeta).monospacedDigit().foregroundStyle(theme.textPrimary.color)
+        Text(text).font(.system(size: NativeMetrics.Text.secondary)).monospacedDigit().foregroundStyle(.primary)
             .gridColumnAlignment(leading ? .leading : .trailing)
     }
 

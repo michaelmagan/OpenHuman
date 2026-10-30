@@ -14,8 +14,10 @@ struct BlockedSettingsPage: View {
 
     var body: some View {
         SettingsPageScaffold(title: "Blocked") {
-            SettingsFootnote("Mail from a blocked sender or domain skips the Inbox. \(BlockedSettingsModel.unblockNote)")
-            if let note = model.editNote { SettingsFootnote(note, tone: .warning) }
+            Section {
+                SettingsFootnote("Mail from a blocked sender or domain skips the Inbox. \(BlockedSettingsModel.unblockNote)")
+                if let note = model.editNote { SettingsFootnote(note, tone: .warning) }
+            }
             if model.accounts.count > 1 {
                 SettingsSection {
                     SettingsRow("Account", detail: "Each account has its own blocked list.", selection: $model.account) {
@@ -66,11 +68,13 @@ struct BlockedSettingsPage: View {
                 }
             }
             if let change = model.lastChange, model.canUndoLastChange {
-                HStack(spacing: theme.space3) {
-                    Text(change.title).themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
-                    Button("Undo") { Task { await model.undoLastChange() } }
-                        .ohLinkButtonStyle()
-                        .accessibilityLabel("Undo \(change.title)")
+                Section {
+                    HStack(spacing: theme.space3) {
+                        Text(change.title).font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
+                        Button("Undo") { Task { await model.undoLastChange() } }
+                            .ohLinkButtonStyle()
+                            .accessibilityLabel("Undo \(change.title)")
+                    }
                 }
             }
             SettingsErrorLine(text: model.errorMessage)

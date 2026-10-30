@@ -4,6 +4,7 @@ import MailFakes
 import MailFeatures
 import MailModel
 import MailTheme
+import MailUI
 import OpenHumanCore
 import Testing
 @testable import MailUIMac
@@ -58,28 +59,28 @@ struct DesignCoreRestTests {
     }
 
 
-    @Test func aRunOfCollapsedMessagesIsOneFlatRun() async throws {
+    @Test func aRunOfCollapsedMessagesIsHairlineRowsWithNoGaps() async throws {
         let detail = UIFixtures.conversation(4, count: 6)
         var bodies: [MessageKey: MessageContent] = [:]
         for message in detail.messages { bodies[message.id] = MessageContent(html: nil, text: "Hi") }
         let h = try await ReaderHarness.make(UITestSource(details: [detail], bodies: bodies), thread: detail.id)
         defer { h.close() }
         try await until { h.model.messages.count == 6 }
-        let items = h.model.items
-        let expected = ReaderCardGroups.segments(items) { key in h.model.message(key)?.isExpanded == false }
-        try await until { h.controller.cardSegments == expected }
-        #expect(expected.contains(.first) && expected.contains(.last), "older collapsed messages share a card")
-        for (item, segment) in zip(items, expected) {
-            guard case .message(let key) = item else { continue }
-            #expect(h.controller.messageViews[key]?.cardSegment == segment)
-            #expect(h.controller.messageViews[key]?.card.segment == segment)
-            if let view = h.controller.messageViews[key], !view.isExpanded, !view.isFocused {
-                #expect(view.cardAppearance == .flat, "an idle collapsed row is flat on the canvas")
+        h.model.showAllMessages()
+        try await until { h.controller.messageViews.count == 6 }
+        h.controller.view.layoutSubtreeIfNeeded()
+        let views = h.model.messages.compactMap { h.controller.messageViews[$0.id] }
+        #expect(views.count == 6)
+        for view in views {
+            #expect(view.separator.superview === view, "every message starts with a hairline")
+            if !view.isExpanded, !view.isFocused {
+                #expect(view.plateLook == .none, "an idle collapsed row is flat on the canvas")
             }
         }
-        h.model.showAllMessages()
-        try await until { !h.controller.cardSegments.isEmpty && h.controller.cardSegments.count == h.model.items.count }
-        #expect(h.controller.cardSegments.filter { $0 == .middle }.count >= 1)
+        for (upper, lower) in zip(views, views.dropFirst()) {
+            let a = upper.convert(upper.bounds, to: nil), b = lower.convert(lower.bounds, to: nil)
+            #expect(abs(a.minY - b.maxY) < 0.5, "rows meet at their hairline, no gap between messages")
+        }
     }
 
     @Test func theListAndTheReaderFollowTheDensity() {
@@ -87,10 +88,10 @@ struct DesignCoreRestTests {
             var theme = ThemeTokens.light
             theme.density = density
             let style = ThreadRowStyle(theme: theme)
-            #expect(style.plateInsetY == CGFloat(theme.listPlateInsetY) && style.hoverTarget == CGFloat(theme.listHoverTarget))
+            #expect(style.plateInsetY == NativeMetrics.List.plateInsetY && style.hoverTarget == CGFloat(theme.listHoverTarget))
             let pill = OlderMessagesPillView(count: 3, theme: theme)
             pill.layoutSubtreeIfNeeded()
-            #expect(pill.fittingSize.height == CGFloat(theme.collapsedMessageRow + theme.space2), "\(density)")
+            #expect(pill.fittingSize.height == CollapsedMessageView.rowHeight(theme) + 1, "\(density)")
         }
     }
 }

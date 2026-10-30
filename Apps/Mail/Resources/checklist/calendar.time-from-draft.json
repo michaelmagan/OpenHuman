@@ -1,0 +1,14 @@
+{
+  "id": "calendar.time-from-draft",
+  "area": "Calendar",
+  "title": "Clicking a time in your own draft shows it on the calendar before any event form",
+  "steps": [
+    "Launch with -UseFakeData -UseFakeCalendar, open a conversation and press r",
+    "Type Could we meet tomorrow at 3pm? and click the underlined time",
+    "Click the Create event block, then press Cancel in the new event card"
+  ],
+  "deepLink": null,
+  "expected": "The calendar opens on the right on tomorrow with 3 PM drawn as a Create event block, as for a time in a message; no form opens until the block is clicked. The card then opens over the day with Save and Cancel visible, and Cancel brings the block back.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

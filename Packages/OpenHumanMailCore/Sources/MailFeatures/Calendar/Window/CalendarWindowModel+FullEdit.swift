@@ -21,7 +21,7 @@ extension CalendarWindowModel {
         }
         let scopes = CalendarRecurrenceScope.options(for: current.event, patch: patch)
         if !scopes.isEmpty {
-            var question = CalendarScopeQuestion(eventID: current.event.id, action: .save)
+            var question = CalendarScopeQuestion(eventID: current.event.copyKey, action: .save)
             question.scopes = scopes
             scopeQuestion = question
             return
@@ -62,8 +62,9 @@ extension CalendarWindowModel {
         let zone = timeZone.identifier
         let others = !event.attendees.isEmpty || !patch.guestsAdded.isEmpty
         let updates = CalendarSendUpdatesPolicy.effective(chosen: current.sendUpdatesChoice, hasOtherGuests: others, patch: patch)
+        let series = event.isRecurring && scope != .thisEvent
         let id = UUID()
-        if let time = patch.time { overlays[id] = .times(id: event.id, start: time.start, end: time.end) }
+        if let time = patch.time { overlays[id] = .times(id: event.copyKey, start: time.start, end: time.end) }
         closeCard()
         if others, patch.touchesGuests {
             let line = updates == .all ? String(localized: "Saving \(event.title)… Google emails the guests.")
@@ -71,7 +72,7 @@ extension CalendarWindowModel {
             hold(id, title: line) { [weak self] in
                 do {
                     let latest = try await target.patchEvent(event, with: patch, scope: scope, sendUpdates: updates)
-                    self?.store(latest, replacing: event)
+                    self?.storePatched(latest, replacing: event, series: series)
                 } catch {
                     self?.failed(String(localized: "Couldn't save \(event.title). \(CalendarSidebarModel.message(error))"), id)
                     return
@@ -85,9 +86,25 @@ extension CalendarWindowModel {
         let latest: CalendarEvent
         do {
             latest = try await target.patchEvent(event, with: patch, scope: scope, sendUpdates: .none)
-            store(latest, replacing: event)
+            storePatched(latest, replacing: event, series: series)
         } catch {
             failed(String(localized: "Couldn't save \(event.title). \(CalendarSidebarModel.message(error))"), id)
+            return
+        }
+        if series {
+            // Why: the calendar answers a series change with the series' own event, so Undo changes this occurrence back
+            // with the same scope; a series split from here on is not undone
+            guard scope == .allEvents, let edited = current.form else {
+                await changed(id, line: String(localized: "Saved \(event.title)."))
+                return
+            }
+            let back = CalendarEventForm(event: event, calendarKey: key, defaultZone: zone).diff(against: edited)
+            let after = event.with(start: patch.time?.start ?? event.start, end: patch.time?.end ?? event.end)
+            offerUndo(String(localized: "Saved \(event.title).")) { [weak self] in
+                _ = try await target.patchEvent(after, with: back, scope: .allEvents, sendUpdates: .none)
+                self?.storePatched(after, replacing: event, series: true)
+            }
+            await changed(id, line: nil)
             return
         }
         let back = CalendarEventForm(event: event, calendarKey: key, defaultZone: zone)
@@ -97,6 +114,20 @@ extension CalendarWindowModel {
             self?.store(restored, replacing: event)
         }
         await changed(id, line: nil)
+    }
+
+    // Why: a whole-series answer is the series' own event, never one of the occurrences on the grid, so it is not stored
+    // under its id; the refresh after the save reads the occurrences
+    func storePatched(_ answer: CalendarEvent, replacing event: CalendarEvent, series: Bool) {
+        guard series else { return store(answer, replacing: event) }
+        if let key = storeKey(for: event) { eventStore.noteRemoteWrite(key) }
+    }
+
+    // Why: a dropped event is only proposed until Accept, so leaving the proposal says the event kept its time
+    func noteUnsavedMove(keeping id: String? = nil) {
+        guard let current = card, current.pendingMove != nil, current.event.copyKey != id else { return }
+        environment.notices.post(String(localized: "Didn't move \(current.event.title). Accept a move to save it."),
+                                 duration: NoticeCenter.infoDuration)
     }
 
 
@@ -110,9 +141,9 @@ extension CalendarWindowModel {
         let copy = form.duplicateDraft()
         closeCard()
         await newEvent(start: copy.start, end: copy.end)
-        guard let made = sidebar.draft else { return }
+        guard sidebar.draft != nil else { return }
         var merged = copy
-        merged.sendUpdates = made.sendUpdates
+        merged.sendUpdates = CalendarEventDraft.defaultSendUpdates(attendees: copy.attendees)
         sidebar.draft = merged
     }
 

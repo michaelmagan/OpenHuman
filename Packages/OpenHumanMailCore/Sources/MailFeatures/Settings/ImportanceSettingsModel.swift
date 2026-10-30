@@ -68,19 +68,23 @@ public final class ImportanceSettingsModel {
     @ObservationIgnored private var subjectLookups: Set<String> = []
     @ObservationIgnored private var accountsTask: Task<Void, Never>?
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
+    @ObservationIgnored private let askDomainWide: DomainWideRuleAsking
 
     public init(data: any MailDataSource, port: (any ImportanceRulesPort)?, undo: UndoCoordinator?,
-                availability: SettingsAvailability, settings: (any SettingsPort)? = nil) {
+                availability: SettingsAvailability, settings: (any SettingsPort)? = nil,
+                askDomainWide: @escaping DomainWideRuleAsking = { _ in .cancel }) {
         self.data = data
         self.port = port
         self.undo = undo
         self.availability = availability
+        self.askDomainWide = askDomainWide
         sendsToGmail = StoredSetting(AppSettings.importanceSendsToGmail, port: settings)
     }
 
     public convenience init(environment: AppEnvironment) {
         self.init(data: environment.data, port: environment.importance, undo: environment.undo,
-                  availability: SettingsAvailability(environment: environment), settings: environment.settings)
+                  availability: SettingsAvailability(environment: environment), settings: environment.settings,
+                  askDomainWide: environment.domainWideRuleAsking)
     }
 
     isolated deinit {
@@ -213,14 +217,21 @@ public final class ImportanceSettingsModel {
                 self.draft = nil
                 return
             }
+            guard await allowsDomainWide(change) else { return }
             if await perform("Changed rule: \(words)", { try await port.update(id, to: change) }) { self.draft = nil }
         } else {
             if rules.contains(where: { $0.match == draft.match && $0.effect == effect && $0.value == change.value }) {
                 errorMessage = "That rule is already in the list."
                 return
             }
+            guard await allowsDomainWide(change) else { return }
             if await perform("Added rule: \(words)", { try await port.apply(change) }) { self.draft = nil }
         }
+    }
+
+    private func allowsDomainWide(_ change: ImportanceChange) async -> Bool {
+        guard let effect = ImportanceActionHandler.domainWideEffect(change.kind) else { return true }
+        return await DomainWideRules.allowsEntireDomain(change.value, effect: effect, ask: askDomainWide)
     }
 
     public func delete(_ row: RuleRow) async {

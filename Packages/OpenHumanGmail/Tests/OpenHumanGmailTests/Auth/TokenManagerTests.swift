@@ -66,6 +66,29 @@ import Testing
         #expect(transport.requests.count == 1)
     }
 
+    @Test func aRefreshAnsweredAfterTheTokenWasDeletedWritesNothingBack() async throws {
+        let clock = TestClock()
+        let store = InMemoryTokenStore([email: Synthetic.token(expiry: clock.now.addingTimeInterval(-1))])
+        let answer = Gate()
+        let ready = Gate()
+        let transport = ScriptedTransport { _ in
+            ready.open()
+            await answer.wait()
+            return jsonResponse(200, ["access_token": "synthetic-access-2", "expires_in": 3600,
+                                      "scope": GmailScope.readonly, "token_type": "Bearer"])
+        }
+        let tokens = manager(store: store, transport: transport, clock: clock)
+        let pending = Task { try await tokens.accessToken() }
+        await ready.wait()
+        #expect(transport.requests.count == 1)
+        try store.delete(account: email)
+        answer.open()
+        await #expect(throws: OAuthError.reauthRequired) { _ = try await pending.value }
+        #expect(try store.load(account: email) == nil)
+        #expect(try store.allAccounts().isEmpty)
+        #expect(await tokens.authState() == .needsReauth(.noToken))
+    }
+
     @Test func reloadsFromTheStoreBeforeRefreshing() async throws {
         let clock = TestClock()
         let store = InMemoryTokenStore([email: Synthetic.token(expiry: clock.now.addingTimeInterval(600))])

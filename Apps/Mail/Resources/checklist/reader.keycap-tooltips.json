@@ -3,12 +3,12 @@
   "area": "Reader",
   "title": "Tooltips show the key in keycaps",
   "steps": [
-    "Launch Mail with -UseFakeData; open a conversation and rest the pointer on the check mark beside the subject",
-    "Move straight to the clock, then the bell, then the down arrow",
-    "Rest on the reply arrow in a message header, then on the small chevron after the recipients and click it"
+    "Launch Mail with -UseFakeData; open a conversation and rest the pointer on the reply arrow in the open message's header",
+    "Move straight to Reply All, then Forward",
+    "Rest on the small chevron after the recipients and click it"
   ],
   "deepLink": null,
-  "expected": "After about half a second a dark pill (light in Dark) shows the action and its key in keycaps (Mark done E; Snooze, Remind me; Next conversation J; Reply R). The next button's tip shows at once. The chevron's tip says Show details with no key; a click shows the From, To and date block. One tip at a time, inside the window, never over its button.",
+  "expected": "After about half a second a dark pill (light in Dark) shows the action and its key in keycaps (Reply R, Reply All A, Forward F). The next button's tip shows at once. The chevron's tip says Show details with no key; a click shows the From, To and date block. One tip at a time, inside the window, never over its button.",
   "requires": "fake",
   "addedIn": "2026-10-14"
 }

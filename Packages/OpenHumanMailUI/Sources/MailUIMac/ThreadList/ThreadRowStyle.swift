@@ -12,8 +12,10 @@ final class ThreadRowStyle {
     let lineHeight: CGFloat
     let bodyFont: NSFont
     let strongFont: NSFont
+    let readSenderFont: NSFont
     let unreadFont: NSFont
     let metaFont: NSFont
+    let dateFont: NSFont
     let chipDotFont: NSFont
     let chips: LabelChipRenderer
     var chipFont: NSFont { chips.chipFont }
@@ -32,8 +34,8 @@ final class ThreadRowStyle {
     let accentOnFill: NSColor
     let hover: NSColor
     let cursor: NSColor
+    let inactiveCursor: NSColor
     let checked: NSColor
-    let cursorBar: NSColor
     let plateEdge: NSColor
     let drawsPlateEdge: Bool
     let actionTint: NSColor
@@ -46,9 +48,8 @@ final class ThreadRowStyle {
     let plateInsetX: CGFloat
     let plateInsetY: CGFloat
     let plateRadius: CGFloat
-    let cursorBarWidth: CGFloat
     let hoverTarget: CGFloat
-    static let senderIsAlwaysStrong = true
+    let unreadDotSize: CGFloat
     static let chipsAreFilled = true
     static let maximumFilledChips = 2
     static let dimRun = NSAttributedString.Key("oh.row.dim")
@@ -84,18 +85,20 @@ final class ThreadRowStyle {
         rowHeight = theme.rowHeight
         lineHeight = theme.typeBody.lineHeight
         bodyFont = theme.typeBody.font
-        strongFont = theme.typeBodyStrong.font
+        strongFont = Self.senderType(theme, unread: true).font
+        readSenderFont = Self.senderType(theme, unread: false).font
         var unread = theme.typeBody
         unread.weight = Int(theme.component.row.unreadWeight)
         if Self.openness(theme) > 0 { unread.weight = max(unread.weight, theme.typeLabel.weight) }
         unreadFont = unread.font
         metaFont = theme.typeMeta.font
+        dateFont = Self.dateType(theme).font
         chipDotFont = NSFont.systemFont(ofSize: max(6, theme.typeMeta.size * 0.6))
         chips = LabelChipRenderer(theme: theme)
         window = theme.bgWindow.nsColor
         primary = theme.component.row.subject.nsColor
         secondary = theme.textSecondary.nsColor
-        snippet = theme.component.row.snippet.nsColor
+        snippet = theme.textSecondary.nsColor
         tertiary = theme.textTertiary.nsColor
         success = theme.component.row.draft.nsColor
         warning = theme.component.row.snoozed.nsColor
@@ -103,24 +106,24 @@ final class ThreadRowStyle {
         accentRing = theme.accentRing.nsColor
         accentFill = theme.accentFill.nsColor
         accentOnFill = theme.accentOnFill.nsColor
-        hover = theme.component.row.bgHover.nsColor
+        hover = Self.hoverFill(theme).nsColor
         cursor = Self.cursorFill(theme).nsColor
-        checked = theme.listCheckedFill.nsColor
-        cursorBar = theme.component.row.cursorBar.nsColor
+        inactiveCursor = Self.inactiveCursorFill(theme).nsColor
+        checked = Self.checkedFill(theme).nsColor
         plateEdge = theme.borderControl.nsColor
         drawsPlateEdge = theme.increaseContrast
         actionTint = Self.glyphTint(theme).nsColor
         actionTintUnderPointer = theme.listActionTintUnderPointer.nsColor
         actionPointerFill = theme.listActionPointerFill.nsColor
         actionPressedFill = theme.listActionPressedFill.nsColor
-        unreadDot = theme.component.row.unreadDot.nsColor
+        unreadDot = theme.accentRing.nsColor
         senderColor = theme.component.row.sender.nsColor
         ai = theme.textAI.nsColor
-        plateInsetX = CGFloat(theme.listPlateInsetX)
-        plateInsetY = CGFloat(theme.listPlateInsetY)
+        plateInsetX = NativeMetrics.List.plateInsetX
+        plateInsetY = NativeMetrics.List.plateInsetY
         hoverTarget = CGFloat(theme.listHoverTarget)
-        plateRadius = CGFloat(theme.component.row.cursorRadius) * (1 + Self.openness(theme) * 2 / 3)
-        cursorBarWidth = CGFloat(theme.component.row.cursorBarWidth)
+        plateRadius = NativeMetrics.List.plateCornerRadius
+        unreadDotSize = NativeMetrics.List.unreadDotSize
         spaceWidth = (" " as NSString).size(withAttributes: [.font: bodyFont]).width
         metaSpaceWidth = (" " as NSString).size(withAttributes: [.font: metaFont]).width
         truncating = theme.typeBody.paragraphStyle(lineBreak: .byTruncatingTail)
@@ -140,14 +143,67 @@ final class ThreadRowStyle {
 
     func plateRect(in bounds: NSRect) -> NSRect { bounds.insetBy(dx: plateInsetX, dy: plateInsetY) }
 
-    static func cursorFill(_ theme: ThemeTokens) -> ThemeColor { theme.listCursorFill }
+    // The plates are tints of the accent and the label colour over the list surface, like a native list. A dark
+    // accent is thinned until secondary text still reads on it.
+    static func plate(_ color: ThemeColor, _ alpha: CGFloat, on theme: ThemeTokens) -> ThemeColor {
+        func tinted(_ a: Double) -> ThemeColor {
+            ThemeColor(red: color.red, green: color.green, blue: color.blue, alpha: a).composited(over: theme.bgWindow)
+        }
+        var strength = Double(alpha)
+        var result = tinted(strength)
+        while theme.textSecondary.contrastRatio(on: result) < minimumTextContrast, strength > plateStep * 2 {
+            strength -= plateStep
+            result = tinted(strength)
+        }
+        return result
+    }
 
-    static func glyphTint(_ theme: ThemeTokens) -> ThemeColor { theme.listActionTint }
+    static let minimumTextContrast = 4.5
+    private static let plateStep = 0.02
+
+    static func cursorFill(_ theme: ThemeTokens) -> ThemeColor {
+        plate(theme.accentRing, NativeMetrics.List.selectedAlpha, on: theme)
+    }
+
+    static func inactiveCursorFill(_ theme: ThemeTokens) -> ThemeColor {
+        plate(theme.textPrimary, NativeMetrics.List.inactiveSelectedAlpha, on: theme)
+    }
+
+    static func hoverFill(_ theme: ThemeTokens) -> ThemeColor {
+        plate(theme.textPrimary, NativeMetrics.List.hoverAlpha, on: theme)
+    }
+
+    static func checkedFill(_ theme: ThemeTokens) -> ThemeColor {
+        plate(theme.accentRing, NativeMetrics.List.checkedAlpha, on: theme)
+    }
+
+    static func glyphTint(_ theme: ThemeTokens) -> ThemeColor {
+        let plates = [cursorFill(theme), inactiveCursorFill(theme), hoverFill(theme)]
+        return plates.allSatisfy { theme.accentText.contrastRatio(on: $0) >= 3 } ? theme.accentText : theme.textSecondary
+    }
+
+    // Semibold when unread, medium when read
+    static func senderType(_ theme: ThemeTokens, unread: Bool) -> TypeStyle {
+        var type = theme.typeBody
+        type.weight = unread ? theme.typeBodyStrong.weight : theme.typeLabel.weight
+        return type
+    }
+
+    static func textScale(_ theme: ThemeTokens) -> CGFloat {
+        theme.typeBody.size > 0 ? CGFloat(theme.typeBody.size) / NativeMetrics.Text.body : 1
+    }
+
+    static func dateType(_ theme: ThemeTokens) -> TypeStyle {
+        var type = theme.typeMeta
+        type.size = Double((NativeMetrics.List.dateTextSize * textScale(theme) * 2).rounded() / 2)
+        type.monospacedDigits = true
+        return type
+    }
 
     func symbol(_ name: String, color: NSColor) -> NSImage? {
         let key = name + "|" + color.description
         if let image = symbols[key] { return image }
-        let config = NSImage.SymbolConfiguration(pointSize: metrics.indicatorSize, weight: .light)
+        let config = NSImage.SymbolConfiguration(pointSize: metrics.indicatorSize, weight: .regular)
             .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
         let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config)
         symbols[key] = image
@@ -204,7 +260,7 @@ final class ThreadRowStyle {
 
     private func makeSender(_ row: ThreadRow, format: ThreadRowFormatting, draftPrefix: Bool,
                             muted: Bool) -> NSAttributedString {
-        let font = muted ? bodyFont : (Self.senderIsAlwaysStrong || row.isUnread ? strongFont : bodyFont)
+        let font = muted ? bodyFont : (row.isUnread ? strongFont : readSenderFont)
         let nameColor = muted ? secondary : senderColor
         let text = NSMutableAttributedString()
         if draftPrefix {
@@ -437,20 +493,43 @@ final class ThreadRowStyle {
         let key = DateKey(date: keyDate, location: upcoming == nil ? .system(.inbox) : location,
                           unread: row.isUnread && !muted, day: day)
         if let cached = formattedDates[key] { return cached }
-        let column = format.dateColumn(row, location: location, now: now)
+        let column = Self.dateColumn(row, location: location, format: format, now: now)
         let value = date(column.text, unread: row.isUnread && !muted, upcoming: column.isUpcoming)
         if formattedDates.count > 8_192 { retire(&formattedDates) }
         formattedDates[key] = value
         return value
     }
 
+    // System style: "10:42 AM" today, "Yesterday", "Oct 12" this year, "Oct 12, 2025" before; never upper-cased
+    static func dateColumn(_ row: ThreadRow, location: MailLocation, format: ThreadRowFormatting,
+                           now: Date) -> (text: String, isUpcoming: Bool) {
+        let upcoming: Date? = switch location {
+        case .system(.snoozed): row.snoozedUntil
+        case .system(.reminders): row.reminderAt
+        case .system(.scheduled): row.scheduledSendAt
+        default: nil
+        }
+        if let upcoming, ReminderItem.isSomeday(upcoming) { return (String(localized: "Someday"), true) }
+        if let upcoming { return (format.spokenUpcomingDate(upcoming, now: now), true) }
+        return (listDate(row.lastMessageAt, format: format, now: now), false)
+    }
+
+    static func listDate(_ date: Date, format: ThreadRowFormatting, now: Date) -> String {
+        let calendar = format.calendar
+        if !calendar.isDate(date, inSameDayAs: now), let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(date, inSameDayAs: yesterday) {
+            return String(localized: "Yesterday")
+        }
+        return format.spokenListDate(date, now: now)
+    }
+
     func date(_ text: String, unread: Bool, upcoming: Bool) -> NSAttributedString {
         let key = "\(unread ? 1 : 0)\(upcoming ? 1 : 0)\(text)"
         if let cached = dates[key] { return cached }
-        let color = upcoming ? warning : (unread ? theme.component.row.dateUnread.nsColor : theme.component.row.date.nsColor)
+        let color = upcoming ? warning : tertiary
         var extra: [NSAttributedString.Key: Any] = [.paragraphStyle: rightAligned]
-        if !upcoming, !unread { extra[Self.dimRun] = true }
-        let value = NSAttributedString(string: text, attributes: attributes(metaFont, color, extra: extra))
+        if !upcoming { extra[Self.dimRun] = true }
+        let value = NSAttributedString(string: text, attributes: attributes(dateFont, color, extra: extra))
         if dates.count > 512 { dates.removeAll(keepingCapacity: true) }
         dates[key] = value
         return value
@@ -515,7 +594,7 @@ final class ThreadRowStyle {
         let type = typeScale(theme)
         let padding = CGFloat(row.paddingX), gap = CGFloat(row.columnGap)
         let box = SelectCheckbox.side
-        let dot = CGFloat(theme.listPlateInsetX + row.cursorBarWidth) + checkboxClearance + box / 2
+        let dot = NativeMetrics.List.plateInsetX + checkboxClearance + box / 2
         let leading = max(padding * (1 + open), ((dot + box / 2 + senderClearance) / 4).rounded(.up) * 4)
         return Metrics(leading: leading, trailing: padding * (1 + open / 2), dotCenterX: dot,
                        senderGap: gap * (1 + open), columnGap: gap,

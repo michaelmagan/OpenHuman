@@ -22,6 +22,8 @@ public struct CalendarEventCard: Sendable, Hashable {
     public var sendUpdatesChoice: CalendarSendUpdates?
     public var pendingMove: CalendarPendingMove?
     public var defaultZone: String = ""
+    public var pendingGuest = "" { didSet { if pendingGuest != oldValue { pendingGuestNote = nil } } }
+    public var pendingGuestNote: String?
 
     public var formPatch: CalendarEventPatch {
         form?.patch(from: event, defaultZone: defaultZone) ?? CalendarEventPatch()
@@ -34,7 +36,24 @@ public struct CalendarEventCard: Sendable, Hashable {
     }
 
     public var timesChanged: Bool { start != event.start || end != event.end }
-    public var hasChanges: Bool { form != nil ? !formPatch.isEmpty : (timesChanged || !changes.isEmpty) }
+    public var hasChanges: Bool {
+        guard form != nil else { return timesChanged || !changes.isEmpty }
+        return !formPatch.isEmpty || !pendingGuest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    // An address still in the guest field joins the guests on Save; other text stops the save and says why
+    mutating func commitPendingGuest() -> Bool {
+        guard var edited = form else { return true }
+        guard let typed = CalendarPendingGuest.addresses(in: pendingGuest) else {
+            pendingGuestNote = CalendarPendingGuest.notAnAddress
+            return false
+        }
+        guard !typed.isEmpty else { return true }
+        for address in typed { edited.addGuest(address) }
+        form = edited
+        pendingGuest = ""
+        return true
+    }
     public var emailsPeople: Bool { !event.attendees.isEmpty }
 }
 
@@ -87,9 +106,10 @@ extension CalendarWindowModel {
     }
 
     public func openEvent(_ event: CalendarEvent) {
+        noteUnsavedMove(keeping: event.copyKey)
         scopeQuestion = nil
         removeQuestion = nil
-        selectedEventID = event.id
+        selectedEventID = event.copyKey
         let (key, found) = provider(for: event)
         let refusal = found?.info.createRefusal
             ?? (found == nil ? CalendarError.notConfigured.description : nil)
@@ -129,6 +149,11 @@ extension CalendarWindowModel {
 
     public func saveCard() async {
         guard var current = card else { return }
+        if current.form != nil {
+            let committed = current.commitPendingGuest()
+            card = current
+            guard committed else { return }
+        }
         guard current.hasChanges else {
             closeCard()
             return
@@ -148,7 +173,7 @@ extension CalendarWindowModel {
             return
         }
         if current.event.isRecurring {
-            scopeQuestion = CalendarScopeQuestion(eventID: current.event.id, action: .save)
+            scopeQuestion = CalendarScopeQuestion(eventID: current.event.copyKey, action: .save)
             return
         }
         await commitSave(current)
@@ -166,7 +191,7 @@ extension CalendarWindowModel {
         current.note = nil
         card = current
         let id = UUID()
-        overlays[id] = .response(id: event.id, response)
+        overlays[id] = .response(id: event.copyKey, response)
         let series = event.isRecurring ? String(localized: " (this event only)") : ""
         hold(id, title: String(localized: "Answering \(response.title) to \(event.title)\(series)… Google tells the organizer.")) {
             [weak self] in
@@ -188,12 +213,12 @@ extension CalendarWindowModel {
             card = current
             return
         }
-        removeQuestion = CalendarRemoveQuestion(eventID: current.event.id, title: current.event.title,
+        removeQuestion = CalendarRemoveQuestion(eventID: current.event.copyKey, title: current.event.title,
                                                 emailsPeople: current.emailsPeople)
     }
 
     public func confirmRemove() async {
-        guard let question = removeQuestion, card?.event.id == question.eventID else {
+        guard let question = removeQuestion, card?.event.copyKey == question.eventID else {
             removeQuestion = nil
             return
         }
@@ -209,7 +234,7 @@ extension CalendarWindowModel {
             return
         }
         if current.event.isRecurring {
-            scopeQuestion = CalendarScopeQuestion(eventID: current.event.id, action: .remove)
+            scopeQuestion = CalendarScopeQuestion(eventID: current.event.copyKey, action: .remove)
             return
         }
         commitRemove(current)
@@ -233,7 +258,7 @@ extension CalendarWindowModel {
         case .remove:
             if let current = card { commitRemove(current) }
         case .move(let start, let end):
-            if let event = events.first(where: { $0.id == question.eventID }) { await commitMove(event, start: start, end: end) }
+            if let event = events.first(where: { $0.copyKey == question.eventID }) { await commitMove(event, start: start, end: end) }
         }
     }
 
@@ -253,7 +278,7 @@ extension CalendarWindowModel {
             return
         }
         if event.isRecurring {
-            scopeQuestion = CalendarScopeQuestion(eventID: event.id, action: .move(start: start, end: end))
+            scopeQuestion = CalendarScopeQuestion(eventID: event.copyKey, action: .move(start: start, end: end))
             return
         }
         await commitMove(event, start: start, end: end)
@@ -266,7 +291,7 @@ extension CalendarWindowModel {
         let (start, end) = (current.start, current.end)
         let timesChanged = current.timesChanged
         let id = UUID()
-        if timesChanged { overlays[id] = .times(id: event.id, start: start, end: end) }
+        if timesChanged { overlays[id] = .times(id: event.copyKey, start: start, end: end) }
         closeCard()
         if current.emailsPeople {
             hold(id, title: String(localized: "Saving \(event.title)… Google emails the attendees.")) { [weak self] in
@@ -309,7 +334,7 @@ extension CalendarWindowModel {
         guard let target = provider(for: current.event).provider else { return }
         let event = current.event
         let id = UUID()
-        overlays[id] = .removed(id: event.id)
+        overlays[id] = .removed(id: event.copyKey)
         closeCard()
         let emails = current.emailsPeople
         let title = emails ? String(localized: "Deleting \(event.title)… Google emails the attendees.")
@@ -341,7 +366,7 @@ extension CalendarWindowModel {
     private func commitMove(_ event: CalendarEvent, start: Date, end: Date) async {
         guard let target = provider(for: event).provider else { return }
         let id = UUID()
-        overlays[id] = .times(id: event.id, start: start, end: end)
+        overlays[id] = .times(id: event.copyKey, start: start, end: end)
         let clock = start.formatted(Date.FormatStyle(date: .omitted, time: .shortened, timeZone: timeZone))
         if !event.attendees.isEmpty {
             hold(id, title: String(localized: "Moving \(event.title) to \(clock)… Google emails the attendees.")) { [weak self] in
@@ -395,12 +420,26 @@ extension CalendarWindowModel {
     func hold(_ id: UUID, title: String, perform: @escaping @MainActor @Sendable () async -> Void) {
         let window = holdWindow
         let sleep = self.sleep
-        held[id] = Task { [weak self] in
-            do { try await sleep(window) } catch { return }
+        held[id] = Task { [weak self, weak owner = environment] in
+            try? await sleep(window)
             guard let self, self.held.removeValue(forKey: id) != nil else { return }
+            guard let owner else {
+                self.overlays[id] = nil
+                return
+            }
+            // Terminal handling can suspend again in the forced reload after the write.
+            defer { withExtendedLifetime(owner) {} }
             await perform()
         }
         pushUndo(id, title: title)
+    }
+
+    public var hasQuitWork: Bool { !held.isEmpty }
+
+    public func prepareForQuit() async {
+        let pending = Array(held.values)
+        for task in pending { task.cancel() }
+        for task in pending { await task.value }
     }
 
     func offerUndo(_ title: String, revert: @escaping @MainActor () async throws -> Void) {

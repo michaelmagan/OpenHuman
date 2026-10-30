@@ -1,6 +1,7 @@
 import AppKit
 import MailFeatures
 import MailModel
+import OpenHumanCore
 import ServiceManagement
 import UniformTypeIdentifiers
 
@@ -93,6 +94,38 @@ extension SystemPlatform {
             guard alert.runModal() == .alertFirstButtonReturn else { return nil }
             return ConversationDebugOptions(includeSubjectAndSender: box.state == .on)
         }
+        platform.confirmDomainWideRule = { question in await DomainWideRuleAlert.run(question) }
         return platform
+    }
+}
+
+@MainActor
+enum DomainWideRuleAlert {
+    static func make(_ question: DomainWideRuleConfirmation) -> NSAlert {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = question.title
+        alert.informativeText = question.message
+        for choice in question.choices {
+            let button = alert.addButton(withTitle: question.buttonTitle(choice))
+            if choice == .entireDomain { button.hasDestructiveAction = true }
+        }
+        return alert
+    }
+
+    static func choice(for response: NSApplication.ModalResponse,
+                       in question: DomainWideRuleConfirmation) -> DomainWideRuleChoice {
+        let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        return question.choices.indices.contains(index) ? question.choices[index] : .cancel
+    }
+
+    static func run(_ question: DomainWideRuleConfirmation) async -> DomainWideRuleChoice {
+        let alert = make(question)
+        let response = if let window = NSApp.keyWindow ?? NSApp.mainWindow, window.attachedSheet == nil {
+            await alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+        return choice(for: response, in: question)
     }
 }

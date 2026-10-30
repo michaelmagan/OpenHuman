@@ -227,13 +227,14 @@ public struct ThemeLibrary: Sendable {
     }
 
     public func resolve(_ preferences: ThemePreferences, appearance effective: ThemeAppearance,
-                        increaseContrast: Bool = false) -> ResolvedTheme {
+                        increaseContrast: Bool = false, liveAccent: LiveAccent? = nil) -> ResolvedTheme {
         resolve(themeID: preferences.themeID(for: effective), appearance: effective, preferences: preferences,
-                increaseContrast: increaseContrast)
+                increaseContrast: increaseContrast, liveAccent: liveAccent)
     }
 
     public func resolve(themeID requested: String, appearance effective: ThemeAppearance,
-                        preferences: ThemePreferences = ThemePreferences(), increaseContrast: Bool = false) -> ResolvedTheme {
+                        preferences: ThemePreferences = ThemePreferences(), increaseContrast: Bool = false,
+                        liveAccent: LiveAccent? = nil) -> ResolvedTheme {
         var notes: [ThemeIssue] = []
         var themeID = requested
         if requested == BuiltinThemeID.base || !(themes[requested]?.isUsable ?? false) {
@@ -273,6 +274,13 @@ public struct ThemeLibrary: Sendable {
         }
         var outcome = tokens(chain: chain, accent: accents[accentID]?.file, appearance: appearance,
                              overrides: overrides, typography: typography)
+        if accentID == LiveAccent.accentID, let liveAccent {
+            let surfaces = LiveAccent.Surfaces(window: outcome.tokens.bgWindow, selected: outcome.tokens.bgRowSelected,
+                                               text: outcome.tokens.textPrimary)
+            overrides.merge(liveAccent.overrides(for: appearance, on: surfaces)) { _, live in live }
+            outcome = tokens(chain: chain, accent: accents[accentID]?.file, appearance: appearance,
+                             overrides: overrides, typography: typography)
+        }
         outcome.tokens.density = preferences.density
         outcome.tokens.increaseContrast = increaseContrast
         let issues = notes + loaded.fileIssues.warnings + chainIssues + outcome.issues + ContrastLint.issues(for: outcome.tokens)

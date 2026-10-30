@@ -76,6 +76,48 @@ private func host<V: View>(_ view: V, size: NSSize, theme: ResolvedTheme = .ligh
 }
 
 @MainActor
+private final class StubUpdater: SoftwareUpdater {
+    var automaticallyChecksForUpdates = true
+    var lastUpdateCheckDate: Date? = updateNow.addingTimeInterval(-3600)
+    var checks = 0
+    func checkForUpdates() { checks += 1 }
+}
+
+@MainActor
+@Test func withAnUpdaterTheSectionOffersCheckNowTheLastCheckAndTheAutomaticSwitch() {
+    let updater = StubUpdater()
+    let center = UpdateCheckCenter(current: earlyBuild, fetch: { _ in UpdateFeedReply(status: 404) }, openURL: { _ in },
+                                   updater: updater, now: { updateNow })
+    #expect(center.lastCheckedLine == "Last checked 1 hour ago.")
+    #expect(center.updatesUnavailable == nil)
+    var heights: [CGFloat] = []
+    for theme in [ResolvedTheme.light, .dark] {
+        let hosting = host(UpdateCheckSettingsSection(center: center),
+                           size: NSSize(width: SettingsMetrics.contentMaxWidth, height: 300), theme: theme)
+        heights.append(hosting.fittingSize.height)
+    }
+    #expect(heights.allSatisfy { $0 > 100 }, "two rows and the note: \(heights)")
+    #expect(updater.checks == 0, "drawing the section checks nothing")
+    center.begin()
+    #expect(updater.checks == 1 && !center.isPresented, "Check Now hands the check to the updater; no sheet as well")
+}
+
+@MainActor
+@Test func aBuildThatCannotUpdateSaysSoAndWhyBesideTheGitHubCheck() {
+    for reason in UpdatesUnavailableReason.allCases {
+        let center = UpdateCheckCenter(current: earlyBuild, fetch: { _ in UpdateFeedReply(status: 404) }, openURL: { _ in },
+                                       updatesUnavailable: reason, now: { updateNow })
+        let plain = UpdateCheckCenter(current: earlyBuild, fetch: { _ in UpdateFeedReply(status: 404) }, openURL: { _ in },
+                                      now: { updateNow })
+        let size = NSSize(width: SettingsMetrics.contentMaxWidth, height: 400)
+        let explained = host(UpdateCheckSettingsSection(center: center), size: size).fittingSize.height
+        let unexplained = host(UpdateCheckSettingsSection(center: plain), size: size).fittingSize.height
+        #expect(explained > unexplained, "the extra row for \(reason)")
+        #expect(UpdateCheckSettingsSection(center: center).checkTitle == "Check Now", "the GitHub check stays")
+    }
+}
+
+@MainActor
 @Test func theGeneralPageShowsUpdatesOnceTheAppInstallsTheCheck() async {
     let environment = AppEnvironment.fake(corpus: .rich(threadCount: 20, now: updateNow), options: .init(remoteAck: .immediate),
                                           featureFlags: FeatureFlags())

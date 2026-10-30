@@ -55,3 +55,36 @@ struct MentionPickerView: View {
         return matched + tail
     }
 }
+
+// The @-mention list in the floating completion panel under the body: the editor keeps the caret and the keys, and
+// opening or narrowing the list moves nothing in the card
+struct FloatingMentionList: View {
+    let picker: MentionPickerModel
+    let floating: FloatingCompletion
+    @Environment(\.theme) private var theme
+    @State private var list = CompletionListModel()
+
+    static func query(_ picker: MentionPickerModel) -> String {
+        "@" + (picker.query ?? "")
+    }
+
+    var body: some View {
+        floating.anchor(FloatingCompletion.Request(
+            list: list, isPresented: !picker.isClosed && !picker.rows.isEmpty, theme: theme,
+            label: String(localized: "Mention a contact"), identifier: "composer.mention",
+            accept: { address in
+                guard let row = picker.rows.first(where: { $0.address == address }) else { return }
+                picker.choose(row)
+            }))
+            .frame(width: MentionPickerView.width, height: 1)
+            .accessibilityHidden(true)
+            .onAppear(perform: mirror)
+            .onChange(of: picker.rows) { _, _ in mirror() }
+            .onChange(of: picker.cursor) { _, _ in mirror() }
+            .onChange(of: picker.query) { _, _ in mirror() }
+    }
+
+    private func mirror() {
+        list.mirror(query: Self.query(picker), items: picker.rows.map(\.address), cursor: picker.cursor)
+    }
+}

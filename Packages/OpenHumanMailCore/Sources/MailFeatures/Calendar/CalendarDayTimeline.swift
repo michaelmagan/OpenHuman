@@ -86,10 +86,10 @@ public struct CalendarDayTimeline: Sendable, Hashable {
 
     public var shownEvents: [CalendarEvent] { allDay + blocks.map(\.event) }
 
-    public static func key(for event: CalendarEvent) -> String { "\(event.account ?? "")|\(event.id)" }
+    public static func key(for event: CalendarEvent) -> String { event.copyKey }
 
     static func columns(_ events: [CalendarEvent]) -> [(event: CalendarEvent, column: Int, columns: Int)] {
-        let sorted = events.sorted { ($0.start, $1.end, $0.id) < ($1.start, $0.end, $1.id) }
+        let sorted = events.sorted { ($0.start, $1.end, $0.copyKey) < ($1.start, $0.end, $1.copyKey) }
         var out: [(event: CalendarEvent, column: Int, columns: Int)] = []
         var group: [(event: CalendarEvent, column: Int)] = []
         var columnEnds: [Date] = []

@@ -71,6 +71,25 @@ extension CalendarEvent {
     public var canRespond: Bool { !id.isEmpty && organizerIsMe != true && myResponse != nil }
 
     public var isRecurring: Bool { recurringEventID?.isEmpty == false }
+
+    // Why: the calendar marks only its own address as `self`, so an invitation sent to one of the account's other
+    // addresses (a send-as alias) carries the answer on that address's guest entry
+    public func resolvingMyResponse(addresses: Set<String>) -> CalendarEvent {
+        guard myResponse == nil, organizerIsMe != true, !id.isEmpty, !addresses.isEmpty else { return self }
+        let mine = Set(addresses.map { $0.lowercased() })
+        let entries = extras.guests.filter { $0.isOrganizer == false && mine.contains($0.email.lowercased()) }
+        guard entries.count == 1, let entry = entries.first else { return self }
+        var resolved = self
+        resolved.myResponse = entry.response ?? .needsAction
+        resolved.respondsAs = entry.email
+        return resolved
+    }
+
+    // Someone else's event with guests where none of the account's addresses is on the guest list Mail can read:
+    // an invitation to a group, or a guest list the calendar shortened
+    public var hidesMyResponse: Bool { !id.isEmpty && organizerIsMe != true && myResponse == nil && !attendees.isEmpty }
+
+    public static var responseNotShown: String { String(localized: "Your response is not shown for this event.") }
 }
 
 public enum CalendarViewKind: String, Sendable, Hashable, Codable, CaseIterable {

@@ -5,11 +5,11 @@
   "steps": [
     "With -UseFakeData -UseFakeCalendar open Calendar (2) in Week view and click Dinner (tomorrow at 7 PM)",
     "Read the date in the card and compare it with the header of the column the event sits in",
-    "Press the Up and Down arrow keys in the date field and use its stepper; type another date in the same form and press Return",
+    "Press the Up and Down arrow keys in the date field; type another date in the same form and press Return",
     "Press Cancel"
   ],
   "deepLink": null,
-  "expected": "The date has two digits for month and day with no gap (for example 12/01/2026), in your locale's order, and names the same day as the column the event sits in. Arrow keys and the stepper change one day; a typed date is accepted; Cancel changes nothing.",
+  "expected": "The date has two digits for month and day with no gap (for example 12/01/2026), in your locale's order, and names the same day as the column the event sits in. Arrow keys change one day; a typed date is accepted; Cancel changes nothing.",
   "requires": "fake",
   "addedIn": "2026-10-13"
 }

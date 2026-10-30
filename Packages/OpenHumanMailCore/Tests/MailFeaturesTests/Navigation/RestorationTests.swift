@@ -143,7 +143,7 @@ func temporaryStateDirectory() -> URL {
             first.active?.selection.scrollOffset = 7.5
             first.active?.searchText = "dinner"
             first.active?.searchOpen = true
-            first.isLabelSidebarVisible = true
+            first.isLabelSidebarVisible = false
             first.windowPlace = window
             first.openDraftIDs = ["draft-1"]
             first.panelsSource = { PanelsPlace(checklistOpen: true, checklistItemID: "x.y", feedbackOpen: true, feedbackText: "unsent") }
@@ -163,7 +163,7 @@ func temporaryStateDirectory() -> URL {
         let (second, _) = await router(store)
         #expect(second.activeAccountID == AccountID(1))
         #expect(second.location == saved.location)
-        #expect(second.isLabelSidebarVisible)
+        #expect(!second.isLabelSidebarVisible, "the hidden sidebar is kept")
         #expect(second.windowPlace == window)
         #expect(second.restoredWindowPlace == window)
         #expect(second.openDraftIDs == ["draft-1"])
@@ -241,7 +241,7 @@ func temporaryStateDirectory() -> URL {
         try Data("\u{0}garbage".utf8).write(to: store.url)
         let (router, _) = await router(store)
         #expect(router.location == router.active?.firstTab)
-        #expect(!router.isLabelSidebarVisible)
+        #expect(router.isLabelSidebarVisible, "nothing saved, so the sidebar is shown")
     }
 
     @Test func theLegacyUserDefaultsValueIsReadUntilTheFileExists() throws {
@@ -263,7 +263,7 @@ func temporaryStateDirectory() -> URL {
         await eventually { sleeper.release(); return store.saveCount >= 1 }
         let before = store.saveCount
         for _ in 0..<5 { router.perform(.nextThread) }
-        router.isLabelSidebarVisible = true
+        router.isLabelSidebarVisible = false
         router.active?.searchText = "burst"
         await eventually { sleeper.waiting(for: PersistDebouncer.standardDelay) == 1 }
         #expect(store.saveCount == before, "nothing is written while the burst is still debouncing")
@@ -272,7 +272,7 @@ func temporaryStateDirectory() -> URL {
         sleeper.release()
         await eventually { sleeper.waiting == 0 }
         #expect(store.saveCount == before + 1, "one write for the whole burst")
-        #expect(store.load()?.labelSidebarVisible == true)
+        #expect(store.load()?.labelSidebarVisible == false)
         #expect(store.load()?.place(for: AccountID(1))?.searchText == "burst")
     }
 
@@ -304,14 +304,14 @@ func temporaryStateDirectory() -> URL {
     @Test func theFinalFlushSavesOnceAndFreezesTheState() async throws {
         let store = InMemoryNavigationStore()
         let (router, sleeper) = await router(store)
-        router.isLabelSidebarVisible = true
-        router.finalFlush()
-        #expect(store.load()?.labelSidebarVisible == true, "saved without waiting for the debounce")
         router.isLabelSidebarVisible = false
+        router.finalFlush()
+        #expect(store.load()?.labelSidebarVisible == false, "saved without waiting for the debounce")
+        router.isLabelSidebarVisible = true
         router.perform(.nextSplit)
         router.persist()
         sleeper.release()
-        #expect(store.load()?.labelSidebarVisible == true, "nothing is written after the last flush")
+        #expect(store.load()?.labelSidebarVisible == false, "nothing is written after the last flush")
     }
 
     @Test func aFrameOnAnAttachedScreenIsKept() {

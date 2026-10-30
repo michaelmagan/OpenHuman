@@ -27,6 +27,7 @@ public struct AttributedBridge {
     public let placeholderColor: NSColor
     public let ghostColor: NSColor
     public let lineHeight: CGFloat?
+    public let maxImageFraction: CGFloat
 
     public static let quoteKey = NSAttributedString.Key("dev.openhuman.mail.composer.quote")
     public static let inlineImageKey = NSAttributedString.Key("dev.openhuman.mail.composer.inlineImage")
@@ -34,7 +35,7 @@ public struct AttributedBridge {
     static let quoteIndent: CGFloat = 12
     static let listIndent: CGFloat = 24
     static let markerGap: CGFloat = 6
-    static let maxImageWidth: CGFloat = 480
+    static let unsizedImageWidth: CGFloat = 480
 
     public init(theme: ThemeTokens) {
         font = theme.typeBody.font
@@ -43,12 +44,19 @@ public struct AttributedBridge {
         placeholderColor = theme.textTertiary.nsColor
         ghostColor = theme.textSecondary.nsColor
         lineHeight = theme.typeBody.lineHeight
+        maxImageFraction = Self.imageFraction(percent: theme.readerMaxImageWidth)
+    }
+
+    // The reader's own image cap, so a draft shows a picture as wide as the sent copy will be
+    static func imageFraction(percent: Double) -> CGFloat {
+        percent.isFinite && percent > 0 ? CGFloat(min(max(percent, 10), 100)) / 100 : 1
     }
 
     public init(font: NSFont, textColor: NSColor = .textColor, linkColor: NSColor = .linkColor,
                 placeholderColor: NSColor = .placeholderTextColor, lineHeight: CGFloat? = nil,
-                ghostColor: NSColor = .secondaryLabelColor) {
+                ghostColor: NSColor = .secondaryLabelColor, maxImageFraction: CGFloat = 1) {
         self.font = font
+        self.maxImageFraction = maxImageFraction
         self.textColor = textColor
         self.linkColor = linkColor
         self.placeholderColor = placeholderColor
@@ -171,14 +179,18 @@ public struct AttributedBridge {
     }
 
     func imageCharacter(_ ref: InlineImageRef, content: InlineImageContent?) -> NSAttributedString {
-        let attachment = NSTextAttachment()
-        attachment.image = content?.image ?? Self.missingImage
+        let attachment = InlineImageAttachment()
+        var wrapper: FileWrapper?
         if let content, let data = content.data {
-            let wrapper = FileWrapper(regularFileWithContents: data)
-            wrapper.preferredFilename = Self.attachmentName(contentID: ref.contentID, fileExtension: content.fileExtension)
-            attachment.fileWrapper = wrapper
+            wrapper = FileWrapper(regularFileWithContents: data)
+            wrapper?.preferredFilename = Self.attachmentName(contentID: ref.contentID, fileExtension: content.fileExtension)
         }
-        attachment.bounds = CGRect(origin: .zero, size: Self.displaySize(ref: ref, image: content?.image))
+        attachment.show(content?.image ?? Self.missingImage, file: wrapper)
+        let size = Self.displaySize(ref: ref, image: content?.image)
+        attachment.size = size
+        attachment.natural = content.flatMap { Self.naturalSize($0.image) } ?? size
+        attachment.maxFraction = maxImageFraction
+        attachment.bounds = CGRect(origin: .zero, size: size)
         var attrs = typingAttributes
         attrs[.attachment] = attachment
         attrs[Self.inlineImageKey] = ref.contentID
@@ -190,15 +202,17 @@ public struct AttributedBridge {
         ?? NSImage(size: NSSize(width: 24, height: 24))
 
     static func displaySize(ref: InlineImageRef, image: NSImage?) -> CGSize {
-        var size = CGSize(width: CGFloat(ref.width ?? 0), height: CGFloat(ref.height ?? 0))
-        if size.width <= 0 || size.height <= 0, let image, image.size.width > 0, image.size.height > 0 {
-            size = image.size
-        }
-        if size.width <= 0 || size.height <= 0 { size = CGSize(width: 24, height: 24) }
-        if size.width > maxImageWidth {
-            size = CGSize(width: maxImageWidth, height: size.height * maxImageWidth / size.width)
-        }
-        return CGSize(width: max(1, size.width.rounded()), height: max(1, size.height.rounded()))
+        if let size = ref.size { return InlineImageSizing.fit(size, maxWidth: InlineImageSizing.maximumSide) }
+        let natural = image.flatMap(naturalSize) ?? CGSize(width: 24, height: 24)
+        return InlineImageSizing.fit(natural, maxWidth: unsizedImageWidth)
+    }
+
+    // In points: a Retina screenshot of 1840 pixels says 144 dpi and is 920 points wide
+    static func naturalSize(_ image: NSImage) -> CGSize? {
+        let size = image.size
+        if size.width > 0, size.height > 0, size.width.isFinite, size.height.isFinite { return size }
+        guard let rep = image.representations.first, rep.pixelsWide > 0, rep.pixelsHigh > 0 else { return nil }
+        return CGSize(width: rep.pixelsWide, height: rep.pixelsHigh)
     }
 
     static func attachmentName(contentID: String, fileExtension: String) -> String {
@@ -351,7 +365,7 @@ public struct AttributedBridge {
     func imageRef(_ contentID: String, at index: Int, in text: NSAttributedString) -> InlineImageRef {
         let attachment = text.attribute(.attachment, at: index, effectiveRange: nil) as? NSTextAttachment
         let alt = text.attribute(Self.inlineImageAltKey, at: index, effectiveRange: nil) as? String
-        let size = attachment?.bounds.size ?? .zero
+        let size = (attachment as? InlineImageAttachment)?.size ?? attachment?.bounds.size ?? .zero
         return InlineImageRef(contentID: contentID, width: size.width > 0 ? Int(size.width.rounded()) : nil,
                               height: size.height > 0 ? Int(size.height.rounded()) : nil,
                               alt: alt?.isEmpty == false ? alt : nil)
@@ -461,5 +475,48 @@ public struct AttributedBridge {
         let skip = line.distance(from: line.startIndex, to: line.index(after: second))
         let utf16Skip = (String(line[..<line.index(line.startIndex, offsetBy: skip)]) as NSString).length
         return NSRange(location: range.location + utf16Skip, length: max(0, range.length - utf16Skip))
+    }
+}
+
+// Holds the size the author chose, which is also the size sent. Like the reader's max-width, it is shown smaller when
+// the column is narrower, and the chosen size comes back when the column widens again.
+final class InlineImageAttachment: NSTextAttachment {
+    var size: CGSize = .zero
+    var natural: CGSize = .zero
+    var maxFraction: CGFloat = 1
+    var picture: NSImage?
+
+    // Setting `image` and `fileWrapper` each clears the other, and the file wrapper's name carries the content id that a
+    // copy or a drag pastes back. So the picture is drawn from here, never from the file at its own size.
+    func show(_ picture: NSImage, file: FileWrapper?) {
+        allowsTextAttachmentView = false
+        if let file { fileWrapper = file } else { image = picture }
+        self.picture = picture
+    }
+
+    override func image(for bounds: CGRect, attributes: [NSAttributedString.Key: Any], location: any NSTextLocation,
+                        textContainer: NSTextContainer?) -> NSImage? {
+        picture ?? super.image(for: bounds, attributes: attributes, location: location, textContainer: textContainer)
+    }
+
+    override func image(forBounds imageBounds: CGRect, textContainer: NSTextContainer?, characterIndex charIndex: Int) -> NSImage? {
+        picture ?? super.image(forBounds: imageBounds, textContainer: textContainer, characterIndex: charIndex)
+    }
+
+    override func attachmentBounds(for attributes: [NSAttributedString.Key: Any], location: any NSTextLocation,
+                                   textContainer: NSTextContainer?, proposedLineFragment: CGRect,
+                                   position: CGPoint) -> CGRect {
+        let room = proposedLineFragment.width > 1 ? proposedLineFragment.width * maxFraction : size.width
+        return CGRect(origin: .zero, size: InlineImageSizing.fit(size, maxWidth: room))
+    }
+
+    func resized(to size: CGSize) -> InlineImageAttachment {
+        let copy = InlineImageAttachment()
+        if let picture { copy.show(picture, file: fileWrapper) }
+        copy.size = size
+        copy.natural = natural
+        copy.maxFraction = maxFraction
+        copy.bounds = CGRect(origin: .zero, size: size)
+        return copy
     }
 }

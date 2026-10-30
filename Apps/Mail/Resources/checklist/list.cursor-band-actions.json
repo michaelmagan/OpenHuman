@@ -1,7 +1,7 @@
 {
   "id": "list.cursor-band-actions",
   "area": "Thread list",
-  "title": "The cursor row is an accent band with three actions",
+  "title": "The cursor row is a rounded accent plate with three actions",
   "steps": [
     "Launch Mail with -UseFakeData; press j a few times in the Inbox",
     "Move the pointer over another row, then over the cursor row's three buttons",
@@ -9,7 +9,7 @@
     "Turn on Increase Contrast in System Settings › Accessibility › Display and look again"
   ],
   "deepLink": null,
-  "expected": "Cursor row: a soft accent band with a 3 pt accent bar; a hovered row: a light grey plate. In place of the date, three accent glyphs: check (Mark done), clock (Snooze), bell (Remind me); each gets a soft fill under the pointer and shows its name. Label and Trash stay in the right-click menu and on L and #. The check marks it done; Cmd-Z brings it back. With Increase Contrast the band has an edge.",
+  "expected": "Cursor row: a rounded accent tint, no bar; a hovered row: a faint grey plate. In place of the date, three accent glyphs: check (Mark done), clock (Snooze), bell (Remind me); each gets a soft fill under the pointer and shows its name. Label and Trash stay in the right-click menu and on L and #. The check marks it done; Cmd-Z brings it back. With Increase Contrast the plate has an edge.",
   "requires": "fake",
   "addedIn": "2026-10-14"
 }

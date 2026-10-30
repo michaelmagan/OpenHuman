@@ -11,32 +11,30 @@ public struct PromptsSettingsView: View {
     }
 
     public var body: some View {
-        Group {
-            if model.selectedID != nil {
-                PromptEditorView(model: model)
-            } else {
-                list
-            }
+        if model.selectedID != nil {
+            PromptEditorView(model: model)
+        } else {
+            list
         }
-        .task { if model.rows.isEmpty { await model.load() } }
     }
 
-    private var list: some View {
-        VStack(alignment: .leading, spacing: theme.space7) {
+    @ViewBuilder private var list: some View {
+        Section {
             if let missing = model.missingPrompt {
                 SettingsFootnote(String(localized: "No prompt “\(missing)”."), tone: .warning)
             }
             SettingsFootnote(String(localized: "Every instruction Mail sends to a model. Your version is used from the next request; the default stays available."))
-            ForEach(model.sections) { section in
-                SettingsSection(section.title) {
-                    ForEach(section.rows) { row in
-                        SettingsRow(row.info.title, detail: row.info.usedBy, status: Self.status(row),
-                                    statusTone: row.activeRevision == nil ? .secondary : .success) {
-                            Button(String(localized: "Edit")) { Task { await model.select(row.id) } }
-                                .accessibilityLabel(String(localized: "Edit \(row.info.title)"))
-                        }
-                        .accessibilityIdentifier("settings.ai.prompt.\(row.id)")
+                .task { if model.rows.isEmpty { await model.load() } }
+        }
+        ForEach(model.sections) { section in
+            SettingsSection(section.title) {
+                ForEach(section.rows) { row in
+                    SettingsRow(row.info.title, detail: row.info.usedBy, status: Self.status(row),
+                                statusTone: row.activeRevision == nil ? .secondary : .success) {
+                        Button(String(localized: "Edit")) { Task { await model.select(row.id) } }
+                            .accessibilityLabel(String(localized: "Edit \(row.info.title)"))
                     }
+                    .accessibilityIdentifier("settings.ai.prompt.\(row.id)")
                 }
             }
         }
@@ -55,8 +53,9 @@ struct PromptEditorView: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: theme.space5) {
+        Section {
             header
+                .task { if model.rows.isEmpty { await model.load() } }
             Picker(String(localized: "Show"), selection: $model.tab) {
                 ForEach(PromptsSettingsModel.EditorTab.allCases, id: \.self) { tab in
                     Text(PromptsSettingsModel.title(tab)).tag(tab)
@@ -64,14 +63,18 @@ struct PromptEditorView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+        }
+        Section {
             switch model.tab {
             case .mine: mine
             case .original: textBlock(model.originalText)
             case .changes: changes
             case .history: history
             }
-            if model.canTest { testSection }
-            if let error = model.error { SettingsFootnote(error, tone: .danger) }
+        }
+        if model.canTest { testSection }
+        if let error = model.error {
+            Section { SettingsFootnote(error, tone: .danger) }
         }
     }
 
@@ -81,9 +84,9 @@ struct PromptEditorView: View {
                 .ohLinkButtonStyle()
                 .accessibilityIdentifier("settings.ai.prompts.back")
             if let row = model.selected {
-                Text(row.info.title).themeFont(theme.typeTitle).foregroundStyle(theme.textPrimary.color)
-                Text(row.info.usedBy).themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
-                Text(model.identity).themeFont(theme.typeMono).foregroundStyle(theme.textSecondary.color)
+                Text(row.info.title).font(.title3).fontWeight(.semibold).accessibilityAddTraits(.isHeader)
+                Text(row.info.usedBy).font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.secondary)
+                Text(model.identity).font(.system(size: NativeMetrics.Text.secondary).monospaced()).foregroundStyle(.secondary)
                     .textSelection(.enabled)
                 if row.isBasedOnOlderDefault {
                     SettingsFootnote(String(localized: "Your version was written for v\(row.activeBaseVersion ?? 0); v\(row.version) is now the default. It stays in use: compare under Changes, or start again from the default."),
@@ -100,9 +103,8 @@ struct PromptEditorView: View {
                 .scrollContentBackground(.hidden)
                 .padding(theme.space2)
                 .frame(minHeight: 200, maxHeight: 320)
-                .background(theme.bgSunken.color, in: RoundedRectangle(cornerRadius: theme.radiusSM))
-                .overlay(RoundedRectangle(cornerRadius: theme.radiusSM)
-                    .stroke(theme.borderHairline.color, lineWidth: theme.borderWidthHairline))
+                .background(.background, in: RoundedRectangle(cornerRadius: theme.radiusMD))
+                .overlay(RoundedRectangle(cornerRadius: theme.radiusMD).strokeBorder(.quaternary))
                 .accessibilityLabel(String(localized: "Prompt text"))
                 .accessibilityIdentifier("settings.ai.prompts.editor")
             if let slots = slotsLine { SettingsFootnote(slots) }
@@ -150,11 +152,11 @@ struct PromptEditorView: View {
     private func textBlock(_ text: String) -> some View {
         Text(text)
             .themeFont(theme.typeMono)
-            .foregroundStyle(theme.textPrimary.color)
+            .foregroundStyle(.primary)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(theme.space3)
-            .background(theme.bgSunken.color, in: RoundedRectangle(cornerRadius: theme.radiusSM))
+            .padding(theme.space4)
+            .background(.quinary, in: RoundedRectangle(cornerRadius: theme.radiusMD))
     }
 
     private var changes: some View {
@@ -171,8 +173,8 @@ struct PromptEditorView: View {
                     .textSelection(.enabled)
             }
         }
-        .padding(theme.space3)
-        .background(theme.bgSunken.color, in: RoundedRectangle(cornerRadius: theme.radiusSM))
+        .padding(theme.space4)
+        .background(.quinary, in: RoundedRectangle(cornerRadius: theme.radiusMD))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(String(localized: "Changes from the default"))
     }
@@ -193,18 +195,17 @@ struct PromptEditorView: View {
         }
     }
 
-    private var history: some View {
-        VStack(alignment: .leading, spacing: theme.space3) {
-            if model.history.isEmpty {
-                SettingsFootnote(String(localized: "No versions of yours yet. Saving makes r1."))
-            }
-            ForEach(model.history) { revision in
-                SettingsRow(Self.title(revision), detail: revision.note, status: Self.status(revision)) {
-                    if revision.revision == model.selected?.activeRevision {
-                        Text(String(localized: "In use")).themeFont(theme.typeMeta).foregroundStyle(theme.textSuccess.color)
-                    } else {
-                        Button(String(localized: "Revert")) { Task { await model.revert(to: revision.revision) } }
-                    }
+    @ViewBuilder private var history: some View {
+        if model.history.isEmpty {
+            SettingsFootnote(String(localized: "No versions of yours yet. Saving makes r1."))
+        }
+        ForEach(model.history) { revision in
+            SettingsRow(Self.title(revision), detail: revision.note, status: Self.status(revision)) {
+                if revision.revision == model.selected?.activeRevision {
+                    Text(String(localized: "In use")).font(.system(size: NativeMetrics.Text.secondary))
+                        .foregroundStyle(theme.textSuccess.color)
+                } else {
+                    Button(String(localized: "Revert")) { Task { await model.revert(to: revision.revision) } }
                 }
             }
         }
@@ -239,7 +240,7 @@ struct PromptEditorView: View {
                 SettingsFootnote(String(localized: "Running…"))
             case .done(let result):
                 VStack(alignment: .leading, spacing: theme.space2) {
-                    Text(result.subject).themeFont(theme.typeBodyStrong).foregroundStyle(theme.textPrimary.color)
+                    Text(result.subject).fontWeight(.semibold)
                     textBlock(result.output.isEmpty ? String(localized: "(no answer)") : result.output)
                     SettingsFootnote([result.promptIdentity, result.providerName].compactMap { $0 }.joined(separator: " · "))
                 }

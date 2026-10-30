@@ -1,15 +1,14 @@
 {
   "id": "reader.title-row",
   "area": "Reader",
-  "title": "Large subject with Done, Snooze, Remind, ⋯ and previous/next on the title row",
+  "title": "Large subject and a meta line; the conversation actions are in the window toolbar",
   "steps": [
     "Launch Mail with -UseFakeData; open a conversation (Return)",
-    "Look at the title area, then click the up and down arrows at the right of the subject",
-    "Open the ⋯ menu beside the subject",
+    "Look at the title area, then use Done, Remind, Label, Trash, the up and down arrows and ⋯ in the toolbar",
     "Open a conversation with a long subject"
   ],
   "deepLink": null,
-  "expected": "The subject is large (26 pt). Check mark, clock, bell, ⋯, a small gap, then up and down arrows sit right-aligned on the subject's line; the arrows open the previous and next conversation (K, J). Label and Trash are in ⋯. Under the subject: 'N messages · names' and labels; with AI on the summary still ends 16 pt above the first message. A long subject wraps and the buttons take their own row.",
+  "expected": "The subject is 22 pt semibold with 'N messages · names' and labels in 12 pt grey under it; no buttons beside or under the subject. The toolbar holds Done, Remind, Label and Trash, then the up and down arrows (K, J) and ⋯ with Reply, Star, Snooze, Move, Mute and Print. With AI on the summary still ends 16 pt above the first message. A long subject wraps across the column.",
   "requires": "fake",
   "addedIn": "2026-10-14"
 }

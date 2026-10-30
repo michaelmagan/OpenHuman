@@ -87,6 +87,16 @@ private final class ForgetfulTokenStore: TokenStore {
         #expect(cloud.peek(email)?.refreshToken == "refresh-mac-2" && cloud.peek(email)?.version == 2)
     }
 
+    @Test func aRefreshWithoutASignInWritesNothingBack() throws {
+        let cloud = InMemorySharedGrantStore()
+        let mac = Device(cloud: cloud)
+        #expect(throws: TokenStoreError.missing) {
+            try mac.store.saveRefreshed(Synthetic.token(refresh: "refresh-1"), account: email, refreshedWith: "refresh-1")
+        }
+        #expect(try mac.store.load(account: email) == nil)
+        #expect(try mac.store.allAccounts().isEmpty)
+    }
+
     @Test func aRefreshKeepsTheAccessTokenOnThisDeviceAndNeverWritesTheSharedCopy() async throws {
         let clock = TestClock()
         let cloud = InMemorySharedGrantStore()

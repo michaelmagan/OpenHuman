@@ -39,7 +39,6 @@ public struct SettingsShellView: View {
     @State private var shell: SettingsShellModel
     let environment: AppEnvironment?
     let hosting: SettingsHosting
-    @Environment(\.theme) private var theme
 
     public init(environment: AppEnvironment, hosting: SettingsHosting, defaults: UserDefaults = .standard) {
         self.environment = environment
@@ -66,13 +65,19 @@ public struct SettingsShellView: View {
     }
 
     public var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            // Why: the split view grows to its columns' minimum heights, so a column without a bound (the footer's
+            // text measured a word per line) pushed the list past the window's edge, out of reach of scrolling
             SettingsSidebar(pages: pages, selection: $shell.selected, build: hosting.build)
-            Rectangle().fill(theme.borderHairline.color).frame(width: theme.borderWidthHairline)
+                .frame(minWidth: SettingsMetrics.sidebarWidth, idealWidth: SettingsMetrics.sidebarWidth)
+                .frame(minHeight: 0, maxHeight: .infinity)
+                .navigationSplitViewColumnWidth(min: SettingsMetrics.sidebarWidth, ideal: SettingsMetrics.sidebarWidth,
+                                                max: SettingsMetrics.sidebarMaxWidth)
+                .toolbar(removing: .sidebarToggle)
+        } detail: {
             page
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         }
-        .background(theme.bgWindow.color)
         .navigationTitle(shell.selectedEntry?.title ?? "Settings")
         .onAppear { followRequest() }
         .onChange(of: environment?.settingsNavigator.requestedPage) { followRequest() }
@@ -141,47 +146,32 @@ struct SettingsSidebar: View {
     let pages: [SettingsPageEntry]
     @Binding var selection: String
     var build: BuildLabel?
-    @FocusState private var focused: Bool
+    var footerFrameProbe: AnyView? = nil
     @Environment(\.theme) private var theme
+    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: theme.space1) {
-                    ForEach(pages) { entry in
-                        SettingsSidebarRow(entry: entry, isSelected: entry.id == selection, showsCursor: focused) {
-                            selection = entry.id
-                        }
-                    }
+            List(selection: Binding<String?>(get: { selection }, set: { id in if let id { selection = id } })) {
+                ForEach(pages) { entry in
+                    SettingsSidebarRow(entry: entry).tag(Optional(entry.id))
                 }
-                .padding(theme.space3)
             }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+            .background(theme.bgSidebar.color)
+            .accessibilityIdentifier("settings.pageList")
+            .accessibilityLabel("Settings pages")
+            .frame(minHeight: 0, maxHeight: .infinity)
             if let build {
                 SettingsBuildFooter(build: build)
+                    .background(theme.bgSidebar.color)
+                    .background { footerFrameProbe }
             }
         }
-        .frame(width: SettingsMetrics.sidebarWidth)
-        .frame(maxHeight: .infinity)
-        .background(theme.bgSidebar.color)
-        .focusable()
-        .focused($focused)
-        .focusEffectDisabled()
-        .onKeyPress(.upArrow) { move(by: -1) }
-        .onKeyPress(.downArrow) { move(by: 1) }
-        .onAppear { focused = true }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Settings pages")
-    }
-
-    private func move(by offset: Int) -> KeyPress.Result {
-        if let next = Self.page(after: selection, offset: offset, in: pages.map(\.id)) { selection = next }
-        return .handled
-    }
-
-    static func page(after current: String, offset: Int, in ids: [String]) -> String? {
-        guard let index = ids.firstIndex(of: current) else { return ids.first }
-        let target = min(max(index + offset, 0), ids.count - 1)
-        return target == index ? nil : ids[target]
+        .focused($focused)
+        .onAppear { focused = true }
     }
 }
 
@@ -197,12 +187,12 @@ struct SettingsBuildFooter: View {
         VStack(alignment: .leading, spacing: theme.space1) {
             ForEach(Self.lines(build), id: \.self) { Text($0) }
         }
-        .themeFont(theme.typeMeta)
+        .font(.system(size: NativeMetrics.Text.caption))
         .foregroundStyle(theme.textSecondary.color)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, theme.space3 * 2)
-        .padding(.vertical, theme.space4)
+        .padding(.horizontal, theme.space6)
+        .padding(.vertical, theme.space5)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("settings.buildNotice")
     }
@@ -210,45 +200,12 @@ struct SettingsBuildFooter: View {
 
 struct SettingsSidebarRow: View {
     let entry: SettingsPageEntry
-    let isSelected: Bool
-    let showsCursor: Bool
-    let action: () -> Void
-    @State private var hovering = false
     @Environment(\.theme) private var theme
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: theme.space3) {
-                Image(systemName: entry.symbol)
-                    .font(.system(size: SettingsMetrics.sidebarIconSize))
-                    .foregroundStyle((isSelected ? theme.accentText : theme.textSecondary).color)
-                    .frame(width: theme.space6)
-                    .accessibilityHidden(true)
-                Text(entry.title)
-                    .themeFont(isSelected ? theme.typeBodyStrong : theme.typeBody)
-                    .foregroundStyle(theme.textPrimary.color)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, theme.space3)
-            .frame(height: SettingsMetrics.sidebarRowHeight)
-            .background(plate)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .accessibilityLabel(entry.title)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .accessibilityIdentifier("settings.page.\(entry.id)")
-    }
-
-    private var plate: some View {
-        ZStack(alignment: .leading) {
-            Rectangle().fill(isSelected ? theme.bgRowSelected.color : (hovering ? theme.bgRowHover.color : .clear))
-            if isSelected && showsCursor {
-                Rectangle().fill(theme.accentRing.color).frame(width: theme.borderWidthCursorBar)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: theme.radiusMD))
+        Label(entry.title, systemImage: entry.symbol)
+            .foregroundStyle(theme.textPrimary.color)
+            .lineLimit(1)
+            .accessibilityIdentifier("settings.page.\(entry.id)")
     }
 }

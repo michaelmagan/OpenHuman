@@ -43,11 +43,17 @@ public final class CalendarSidebarModel {
             if oldValue == nil, draft != nil { openedEvent = nil }
             if draft != oldValue { draftNote = nil }
             if !switchingDraft, draft != oldValue { mirrorDraft() }
+            if draft == nil || switchingDraft, !pendingGuest.isEmpty || pendingGuestNote != nil {
+                pendingGuest = ""
+                pendingGuestNote = nil
+            }
         }
     }
     @ObservationIgnored private var switchingDraft = false
     @ObservationIgnored var draftKeyOverride: PendingEventKey?
     public private(set) var draftNote: String?
+    public var pendingGuest = "" { didSet { if pendingGuest != oldValue { pendingGuestNote = nil } } }
+    public private(set) var pendingGuestNote: String?
     public private(set) var isCreating = false
     public let secondTimeZoneSetting: StoredSetting<String?>
     public let ignoreConflictsSetting: StoredSetting<Bool>
@@ -59,6 +65,10 @@ public final class CalendarSidebarModel {
     public private(set) var progress: CalendarLoadProgress?
     public private(set) var refreshNote: String?
     public private(set) var mentionFocus: DateInterval?
+    public private(set) var pickedTime: PickedTime?
+    public private(set) var suggestionContext: AvailabilityContext?
+    public private(set) var insertedAvailability: InsertedAvailability?
+    @ObservationIgnored private var skippedSlots: Set<CalendarAvailability.Slot> = []
     public private(set) var openedEvent: CalendarEvent?
     public private(set) var focusedEventKey: String?
     @ObservationIgnored public var timeZone: TimeZone
@@ -68,6 +78,7 @@ public final class CalendarSidebarModel {
     @ObservationIgnored var loadText: (ThreadKey) async -> CalendarThreadText?
 
     @ObservationIgnored private unowned let environment: AppEnvironment
+    @ObservationIgnored private weak var owner: AppEnvironment?
     @ObservationIgnored private var text: CalendarThreadText?
     @ObservationIgnored private var mentions: [CalendarDateMention] = []
     @ObservationIgnored private var textThread: ThreadKey?
@@ -80,6 +91,7 @@ public final class CalendarSidebarModel {
     @ObservationIgnored private var mergedSources = false
     @ObservationIgnored private var storeObserver: UUID?
     @ObservationIgnored private var heldCreates: [UUID: (task: Task<Void, Never>, draft: CalendarEventDraft, thread: ThreadKey?,
+                                                         key: PendingEventKey?,
                                                          calendar: any CalendarProviding)] = [:]
     @ObservationIgnored private var createdEvents: [UUID: (event: CalendarEvent, calendar: any CalendarProviding)] = [:]
     @ObservationIgnored private var undoerStorage: CalendarEventUndoer?
@@ -88,6 +100,7 @@ public final class CalendarSidebarModel {
     public init(environment: AppEnvironment, provider: any CalendarProviding, timeZone: TimeZone = .current,
                 now: @escaping @MainActor () -> Date = Date.init) {
         self.environment = environment
+        owner = environment
         self.provider = provider
         self.timeZone = timeZone
         self.now = now
@@ -150,6 +163,7 @@ public final class CalendarSidebarModel {
         async -> (provider: (any CalendarProviding)?, owner: Account?) {
         guard routesByAccount, let connections = environment.calendarConnections else { return (provider, nil) }
         let accounts = await AIThreadLoader.first(environment.data.accounts()) ?? []
+        eventStore.learnAddresses(of: accounts)
         if let id = account ?? fallback {
             guard let owner = accounts.first(where: { $0.id == id }) else { return (nil, nil) }
             return (connections.calendarProvider(for: owner), owner)
@@ -304,7 +318,10 @@ public final class CalendarSidebarModel {
     public func setVisible(_ visible: Bool) {
         let opened = visible && !isVisible
         isVisible = visible
-        if !visible { forgetEvent() }
+        if !visible {
+            forgetEvent()
+            pickedTime = nil
+        }
         if visible {
             followConnections()
             secondTimeZoneSetting.start()
@@ -330,7 +347,11 @@ public final class CalendarSidebarModel {
 
     public func show(thread: ThreadKey?) async {
         followConnections()
-        if thread != self.thread { forgetEvent() }
+        if thread != self.thread {
+            forgetEvent()
+            if suggestion != nil || suggestionNote != nil, suggestionContext?.thread != thread { clearSuggestion() }
+        }
+        if let picked = pickedTime, let from = picked.thread, from != thread { pickedTime = nil }
         generation += 1
         let mine = generation
         if draft != nil, thread != draftThread { stashDraft() }
@@ -353,7 +374,11 @@ public final class CalendarSidebarModel {
         }
         isBrowsing = false
         followsDraft = false
-        let starts = Self.days(for: found, timeZone: zone, now: now())
+        var starts = Self.days(for: found, timeZone: zone, now: now())
+        if let picked = pickedTime {
+            let day = CalendarDateMentions.calendar(zone).startOfDay(for: picked.start)
+            starts = [(day, true)]
+        }
         shownStarts = starts
         await selectCalendar(for: thread)
         guard mine == generation, !Task.isCancelled else { return }
@@ -441,11 +466,24 @@ public final class CalendarSidebarModel {
 
     @discardableResult
     public func suggestTimes() async -> CalendarAvailability? {
-        await suggestTimes(account: thread?.account)
+        await suggestTimes(for: availabilityContext(for: nil))
     }
 
     @discardableResult
     public func suggestTimes(account: AccountID?) async -> CalendarAvailability? {
+        skippedSlots = []
+        return await findTimes(account: account)
+    }
+
+    // Records what the times were found for, so the sidebar can tell when recipients, the thread or the days moved on
+    @discardableResult
+    public func suggestTimes(for context: AvailabilityContext, others: Bool = false) async -> CalendarAvailability? {
+        if others, let shown = suggestion { skippedSlots.formUnion(shown.slots) } else if !others { skippedSlots = [] }
+        suggestionContext = context
+        return await findTimes(account: context.account)
+    }
+
+    private func findTimes(account: AccountID?) async -> CalendarAvailability? {
         let found = await calendarOf(account, fallback: account == nil ? activeAccount() : nil)
         guard let chosen = found.provider else {
             suggestion = nil
@@ -483,10 +521,10 @@ public final class CalendarSidebarModel {
             }
         }
         let slots = CalendarAvailability.slots(days: workdays, busy: busy, now: current, calendar: calendar,
-                                               ignoreConflicts: ignore)
+                                               ignoreConflicts: ignore, excluding: skippedSlots)
         guard !slots.isEmpty else {
             suggestion = nil
-            suggestionNote = Self.noFreeTimes
+            suggestionNote = skippedSlots.isEmpty ? Self.noFreeTimes : Self.noOtherTimes
             return nil
         }
         let made = CalendarAvailability(slots: slots, asOf: current, ignoresConflicts: ignore)
@@ -494,21 +532,149 @@ public final class CalendarSidebarModel {
         return made
     }
 
+    public static let noOtherTimes = String(localized: "No other free 30-minute times in the next five working days.")
+
+    public static let suggestionLifetime: TimeInterval = 10 * 60
+
     public func suggestionText(_ availability: CalendarAvailability) -> String? {
         availability.text(timeZone: timeZone, secondTimeZone: secondTimeZone)
     }
 
+    public struct AvailabilityContext: Hashable, Sendable {
+        public var account: AccountID?
+        public var thread: ThreadKey?
+        public var draft: UUID?
+        public var recipients: [String]
+        public var firstDay: Date?
+
+        public init(account: AccountID?, thread: ThreadKey?, draft: UUID?, recipients: [String], firstDay: Date?) {
+            self.account = account
+            self.thread = thread
+            self.draft = draft
+            self.recipients = recipients
+            self.firstDay = firstDay
+        }
+    }
+
+    // Another conversation is another email, so its times are cleared instead of being marked stale
+    public enum StaleReason: Equatable, Sendable {
+        case account, draft, recipients, days
+
+        public var text: String {
+            switch self {
+            case .account: String(localized: "These times are from another account's calendar.")
+            case .draft: String(localized: "These times were found for another draft.")
+            case .recipients: String(localized: "The recipients changed since these times were found.")
+            case .days: String(localized: "The working days moved on since these times were found.")
+            }
+        }
+    }
+
+    public struct InsertedAvailability: Equatable, Sendable {
+        public let draft: UUID
+        public let text: String
+        public let slots: [CalendarAvailability.Slot]
+    }
+
+    public func availabilityContext(for session: ComposeSession?) -> AvailabilityContext {
+        let calendar = CalendarDateMentions.calendar(timeZone)
+        let firstDay = CalendarAvailability.days(from: now(), calendar: calendar).first
+        let people = session.map { ($0.to.tokens + $0.cc.tokens + $0.bcc.tokens).map { $0.email.lowercased() } } ?? []
+        return AvailabilityContext(account: session?.account.id ?? thread?.account, thread: session?.thread ?? thread,
+                                   draft: session?.id, recipients: Array(Set(people)).sorted(), firstDay: firstDay)
+    }
+
+    public func isForAnotherConversation(_ context: AvailabilityContext) -> Bool {
+        guard suggestion != nil, let found = suggestionContext else { return false }
+        return found.thread != context.thread
+    }
+
+    public func staleReason(for context: AvailabilityContext) -> StaleReason? {
+        guard suggestion != nil, let found = suggestionContext, found != context,
+              !isForAnotherConversation(context) else { return nil }
+        if found.account != context.account { return .account }
+        if found.draft != context.draft { return .draft }
+        if found.recipients != context.recipients { return .recipients }
+        return .days
+    }
+
+    // Times found for another conversation go away at once; stale ones for this email are found again
+    public func followAvailability(_ context: AvailabilityContext) async {
+        if isForAnotherConversation(context) {
+            clearSuggestion()
+        } else if staleReason(for: context) != nil {
+            await suggestTimes(for: context)
+        }
+    }
+
+    public func hasInsertedAvailability(in session: ComposeSession?) -> Bool {
+        guard let session, let inserted = insertedAvailability else { return false }
+        return inserted.draft == session.id
+    }
+
     @discardableResult
     public func insertAvailability(into session: ComposeSession) async -> Bool {
-        guard let found = await suggestTimes(account: session.account.id), let text = suggestionText(found) else {
+        let context = availabilityContext(for: session)
+        var found = suggestion
+        if let shown = found, suggestionContext != context || now().timeIntervalSince(shown.asOf) > Self.suggestionLifetime {
+            found = nil
+        }
+        if found == nil { found = await suggestTimes(for: context) }
+        guard let found, let text = suggestionText(found) else {
             session.notice = ComposeSession.Notice(.info, suggestionNote ?? Self.noFreeTimes)
             return false
         }
-        guard let editor = session.editor, editor.replaceText(in: editor.editorSelection, with: text + "\n") else {
-            session.notice = ComposeSession.Notice(.info, String(localized: "Couldn't put the free times in the draft. Click in the message and try again."))
+        let block = text + "\n"
+        guard let editor = session.editor else {
+            session.notice = ComposeSession.Notice(.info, Self.couldNotInsert)
             return false
         }
+        var target = editor.editorSelection
+        if hasInsertedAvailability(in: session), let earlier = insertedAvailability,
+           let range = Self.range(of: earlier.text, in: editor.editorText) {
+            target = range
+        }
+        guard editor.replaceText(in: target, with: block) else {
+            session.notice = ComposeSession.Notice(.info, Self.couldNotInsert)
+            return false
+        }
+        insertedAvailability = InsertedAvailability(draft: session.id, text: block, slots: found.slots)
         return true
+    }
+
+    // One undoable edit, like typing; ⌘Z in the draft brings the times back
+    @discardableResult
+    public func removeInsertedAvailability(from session: ComposeSession) -> Bool {
+        guard hasInsertedAvailability(in: session), let inserted = insertedAvailability else { return false }
+        guard let editor = session.editor, let range = Self.range(of: inserted.text, in: editor.editorText)
+                ?? Self.range(of: String(inserted.text.dropLast()), in: editor.editorText) else {
+            insertedAvailability = nil
+            session.notice = ComposeSession.Notice(.info, Self.timesWereEdited)
+            return false
+        }
+        guard editor.replaceText(in: range, with: "") else {
+            session.notice = ComposeSession.Notice(.info, Self.timesWereEdited)
+            return false
+        }
+        insertedAvailability = nil
+        return true
+    }
+
+    public func clearSuggestion() {
+        suggestion = nil
+        suggestionNote = nil
+        suggestionContext = nil
+        skippedSlots = []
+    }
+
+    static let couldNotInsert = String(localized: "Couldn't put the free times in the draft. Click in the message and try again.")
+    static let timesWereEdited = String(localized: "The times were changed in the draft, so Mail left them. Remove them by hand or press ⌘Z.")
+
+    static func range(of needle: String, in text: String) -> Range<Int>? {
+        guard !needle.isEmpty else { return nil }
+        let found = (text as NSString).range(of: needle, options: .backwards)
+        guard found.location != NSNotFound else { return nil }
+        return found.location..<NSMaxRange(found)
     }
 
     private func ignoresConflicts() async -> Bool {
@@ -602,6 +768,50 @@ public final class CalendarSidebarModel {
         draft?.start = start
         draft?.end = start.addingTimeInterval(length)
         await show(day: start)
+    }
+
+    public struct PickedTime: Equatable, Sendable {
+        public let mention: CalendarDateMention
+        public let thread: ThreadKey?
+        public let key: PendingEventKey?
+        public let start: Date
+        public let end: Date
+
+        public var interval: DateInterval { DateInterval(start: start, end: max(end, start)) }
+    }
+
+    // A time clicked in a message or in a draft: the calendar opens on its day and shows it as a block; nothing is
+    // drafted yet. A draft's time keeps the draft's key, so the event made from it belongs to that draft.
+    public func reveal(_ mention: CalendarDateMention, in thread: ThreadKey?, key: PendingEventKey? = nil) async {
+        let target = thread ?? (key == nil ? self.thread : nil)
+        let wanted = key ?? target.map { .thread($0) }
+        if draft != nil, let wanted, draftKey == wanted {
+            await beginDraft(for: target, at: mention, key: key)
+            return
+        }
+        setVisible(true)
+        let (start, length) = Self.time(of: mention, timeZone: timeZone)
+        pickedTime = PickedTime(mention: mention, thread: target, key: key, start: start,
+                                end: start.addingTimeInterval(length))
+        if let target, target != self.thread {
+            await show(thread: target)
+        } else {
+            await show(day: start)
+        }
+    }
+
+    public func createEventAtPickedTime() async {
+        guard let picked = pickedTime else { return }
+        await beginDraft(for: picked.thread, at: picked.mention, key: picked.key)
+    }
+
+    public func dismissPickedTime() {
+        pickedTime = nil
+    }
+
+    public var showsPickedTime: Bool {
+        guard draft == nil, let picked = pickedTime, focusSlot == picked.interval, let day = dayViewDay else { return false }
+        return CalendarDateMentions.calendar(timeZone).isDate(day.start, inSameDayAs: picked.start)
     }
 
     private func peopleTitle(for draft: CalendarEventDraft, thread: ThreadKey?) async -> String? {
@@ -711,7 +921,7 @@ public final class CalendarSidebarModel {
 
     @discardableResult
     public func createEvent() async -> Bool {
-        guard let draft, !isCreating else { return false }
+        guard draft != nil, !isCreating, commitPendingGuest(), let draft else { return false }
         guard let target = draftCalendar else {
             draftNote = draftAccountRefusal ?? Self.notConnected(String(localized: "this account"))
             return false
@@ -724,12 +934,15 @@ public final class CalendarSidebarModel {
             draftNote = problem
             return false
         }
+        pickedTime = nil
         if draft.mayEmailAttendees {
             hold(draft, on: target)
             return true
         }
         isCreating = true
         defer { isCreating = false }
+        let submitted = draftKey
+        let submittedThread = draftThread
         let key = CalendarEventStore.key(for: target)
         let pending = placeholder(for: draft, on: target)
         eventStore.applyLocal(key, upsert: pending, provisional: true)
@@ -739,24 +952,67 @@ public final class CalendarSidebarModel {
         } catch CalendarError.unclear {
             eventStore.removeLocal(key, id: pending.id)
             if await findCreated(draft, on: target) != nil {
-                self.draft = nil
+                finishCreate(submitted)
                 calendarChanged()
                 environment.notices.post(String(localized: "Event created."), duration: NoticeCenter.infoDuration)
                 await refresh()
                 return true
             }
-            draftNote = Self.unclearNotFound
+            createFailed(Self.unclearNotFound, submitted)
             return false
         } catch {
             eventStore.removeLocal(key, id: pending.id)
-            draftNote = "Couldn't create the event. \(Self.message(error))"
+            createFailed("Couldn't create the event. \(Self.message(error))", submitted)
             return false
         }
         eventStore.replaceLocal(key, id: pending.id, with: event)
-        self.draft = nil
+        finishCreate(submitted)
         calendarChanged()
-        offerUndo(of: event, draft: draft, on: target)
+        offerUndo(of: event, draft: draft, on: target, thread: submittedThread)
         await refresh()
+        return true
+    }
+
+    // The conversation may have changed while the event was being created: only the submitted draft is cleared
+    private func finishCreate(_ submitted: PendingEventKey?) {
+        if draftKey == submitted {
+            draft = nil
+        } else if let submitted {
+            environment.pendingEvents.remove(submitted)
+        }
+    }
+
+    private func createFailed(_ note: String, _ submitted: PendingEventKey?) {
+        if draftKey == submitted {
+            draftNote = note
+        } else {
+            environment.notices.post(note, style: .error)
+        }
+    }
+
+    private func keepPending(_ draft: CalendarEventDraft, key: PendingEventKey?, thread: ThreadKey?) {
+        guard let key, key != draftKey else { return }
+        let active = environment.pendingEvents.active
+        environment.pendingEvents.save(draft, for: key, thread: thread)
+        if let active, active != key {
+            environment.pendingEvents.activate(active)
+        } else {
+            environment.pendingEvents.deactivate(key)
+        }
+    }
+
+    // An address still in the guest field joins the guests on Save; other text stops the save and says why
+    func commitPendingGuest() -> Bool {
+        guard let current = draft else { return true }
+        guard let typed = CalendarPendingGuest.addresses(in: pendingGuest) else {
+            pendingGuestNote = CalendarPendingGuest.notAnAddress
+            return false
+        }
+        guard !typed.isEmpty else { return true }
+        var form = CalendarEventForm(draft: current)
+        for address in typed { form.addGuest(address) }
+        draft = form.applying(to: current)
+        pendingGuest = ""
         return true
     }
 
@@ -835,6 +1091,7 @@ public final class CalendarSidebarModel {
 
     public var focusSlot: DateInterval? {
         if let draft, draft.end > draft.start { return DateInterval(start: draft.start, end: draft.end) }
+        if let picked = pickedTime, picked.thread == nil || picked.thread == thread { return picked.interval }
         if let thread, let proposal = environment.scheduling?.analyses[thread]?.proposal, proposal.precision != .day,
            proposal.end > proposal.start {
             return DateInterval(start: proposal.start, end: proposal.end)
@@ -980,6 +1237,7 @@ public final class CalendarSidebarModel {
         let window = createWindow
         let sleep = self.sleep
         let heldThread = draftThread
+        let heldKey = draftKey
         let key = CalendarEventStore.key(for: target)
         let pending = placeholder(for: draft, on: target)
         eventStore.applyLocal(key, upsert: pending, provisional: true)
@@ -988,9 +1246,9 @@ public final class CalendarSidebarModel {
             do { try await sleep(window) } catch { return }
             guard let self, let held = self.heldCreates.removeValue(forKey: id) else { return }
             let shown = self.heldPlaceholders.removeValue(forKey: id)
-            await self.createHeld(held.draft, thread: held.thread, on: held.calendar, placeholder: shown)
+            await self.createHeld(held.draft, thread: held.thread, key: held.key, on: held.calendar, placeholder: shown)
         }
-        heldCreates[id] = (task: task, draft: draft, thread: heldThread, calendar: target)
+        heldCreates[id] = (task: task, draft: draft, thread: heldThread, key: heldKey, calendar: target)
         self.draft = nil
         let title: LocalizedStringResource = "Creating event…"
         if let undo = environment.undo {
@@ -1002,11 +1260,29 @@ public final class CalendarSidebarModel {
         }
     }
 
-    private func createHeld(_ draft: CalendarEventDraft, thread: ThreadKey?, on target: any CalendarProviding,
+    public var hasQuitWork: Bool { !heldCreates.isEmpty }
+
+    public func prepareForQuit() async {
+        for id in Array(heldCreates.keys) {
+            guard let held = heldCreates.removeValue(forKey: id) else { continue }
+            held.task.cancel()
+            let shown = heldPlaceholders.removeValue(forKey: id)
+            await createHeld(held.draft, thread: held.thread, key: held.key, on: held.calendar, placeholder: shown)
+        }
+    }
+
+    private func createHeld(_ draft: CalendarEventDraft, thread: ThreadKey?, key heldKey: PendingEventKey?,
+                            on target: any CalendarProviding,
                             placeholder shown: (key: CalendarCacheKey, id: String)? = nil) async {
+        guard let owner else {
+            if let shown { eventStore.removeLocal(shown.key, id: shown.id) }
+            return
+        }
+        // Dispatch authorizes this operation to settle, including helpers that use the unowned environment.
+        defer { withExtendedLifetime(owner) {} }
         if let refusal = target.info.createRefusal {
             if let shown { eventStore.removeLocal(shown.key, id: shown.id) }
-            environment.notices.post(String(localized: "Couldn't create the event. \(refusal)"), style: .error)
+            owner.notices.post(String(localized: "Couldn't create the event. \(refusal)"), style: .error)
             return
         }
         let created: CalendarEvent
@@ -1016,28 +1292,30 @@ public final class CalendarSidebarModel {
             if let shown { eventStore.removeLocal(shown.key, id: shown.id) }
             if await findCreated(draft, on: target) != nil {
                 calendarChanged()
-                environment.notices.post(String(localized: "Event created."), duration: NoticeCenter.infoDuration)
+                owner.notices.post(String(localized: "Event created."), duration: NoticeCenter.infoDuration)
                 await refresh()
             } else {
-                environment.notices.post(Self.unclearWithAttendees, style: .error)
+                owner.notices.post(Self.unclearWithAttendees, style: .error)
             }
             return
         } catch {
             if let shown { eventStore.removeLocal(shown.key, id: shown.id) }
-            environment.notices.post(String(localized: "Couldn't create the event. \(Self.message(error))"), style: .error)
+            owner.notices.post(String(localized: "Couldn't create the event. \(Self.message(error))"), style: .error)
             if self.draft == nil, self.thread == thread {
                 draftThread = thread
                 draftProvider = target
                 self.draft = draft
                 draftNote = "Couldn't create the event. \(Self.message(error))"
+            } else {
+                keepPending(draft, key: heldKey, thread: thread)
             }
             return
         }
         if let shown { eventStore.replaceLocal(shown.key, id: shown.id, with: created) }
         calendarChanged()
-        environment.notices.post(draft.emailsAttendees ? String(localized: "Event created. Google emails the invitations.")
-                                                       : String(localized: "Event created."),
-                                 duration: NoticeCenter.infoDuration)
+        owner.notices.post(draft.emailsAttendees ? String(localized: "Event created. Google emails the invitations.")
+                                                : String(localized: "Event created."),
+                           duration: NoticeCenter.infoDuration)
         await refresh()
     }
 
@@ -1055,7 +1333,8 @@ public final class CalendarSidebarModel {
         }
     }
 
-    private func offerUndo(of event: CalendarEvent, draft: CalendarEventDraft, on target: any CalendarProviding) {
+    private func offerUndo(of event: CalendarEvent, draft: CalendarEventDraft, on target: any CalendarProviding,
+                           thread: ThreadKey?) {
         guard let undo = environment.undo, !event.id.isEmpty, event.attendees.isEmpty, !draft.mayEmailAttendees else {
             environment.notices.post(String(localized: "Event created."))
             return
@@ -1064,7 +1343,7 @@ public final class CalendarSidebarModel {
         createdEvents[id] = (event: event, calendar: target)
         undo.push(UndoCoordinator.Entry(title: "Event created.", token: UndoToken(payload: Data(id.uuidString.utf8)),
                                         expiresAt: Date().addingTimeInterval(NoticeCenter.seconds(createWindow)),
-                                        threads: draftThread.map { [$0] } ?? [], undoer: undoer))
+                                        threads: thread.map { [$0] } ?? [], undoer: undoer))
     }
 
     func undoCreate(_ id: UUID) async {
@@ -1075,6 +1354,8 @@ public final class CalendarSidebarModel {
                 draftThread = held.thread
                 draftProvider = held.calendar
                 draft = held.draft
+            } else {
+                keepPending(held.draft, key: held.key, thread: held.thread)
             }
             environment.notices.post(String(localized: "Event canceled. Nothing was created."),
                                      duration: NoticeCenter.infoDuration)
@@ -1181,15 +1462,15 @@ public final class CalendarSidebarModel {
                 }
                 read += 1
                 if store.lastError(source.key) != nil { stale = true }
-                events += mergedSources ? found.map { event in
+                events += found.map { event in
                     var tagged = event
                     tagged.account = source.owner.isEmpty ? nil : source.owner
                     return tagged
-                } : found
+                }
                 busy += blocks
             }
             if read > 0 {
-                day.events = events.sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
+                day.events = events.sorted { $0.start != $1.start ? $0.start < $1.start : $0.copyKey < $1.copyKey }
                 day.busy = CalendarEventStore.merged(busy.sorted { $0.start < $1.start })
                 day.free = Self.free(day: day.start, busy: day.busy, calendar: calendar)
             }
@@ -1326,4 +1607,17 @@ final class CalendarEventUndoer: MailUndoing {
     }
 
     private func undoCreate(_ id: UUID) async { await model?.undoCreate(id) }
+}
+
+// Text left in the guest field when the event is saved. Nil when any part of it is not an email address, so the
+// save stops instead of dropping it; empty when nothing is typed.
+public enum CalendarPendingGuest {
+    public static let notAnAddress = String(localized: "Type an email address, or clear the guest field.")
+
+    public static func addresses(in typed: String) -> [EmailAddress]? {
+        guard !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        let parsed = RecipientParser.parse(typed)
+        guard !parsed.isEmpty, parsed.allSatisfy({ RecipientParser.isValid($0.email) }) else { return nil }
+        return parsed
+    }
 }

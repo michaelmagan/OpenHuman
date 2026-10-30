@@ -1,7 +1,7 @@
 {
   "id": "reader.flat-collapsed",
   "area": "Reader",
-  "title": "Collapsed messages are flat rows; open messages are raised cards",
+  "title": "Collapsed messages are 36 pt rows under hairlines; focus is a soft plate",
   "steps": [
     "Launch Mail with -UseFakeData; open a conversation with 4 or more messages",
     "Move the pointer over a collapsed message, then over 'N older messages'",
@@ -9,7 +9,7 @@
     "Press R, then open Send later with the collapsed rows in view; then switch View › Appearance to Dark"
   ],
   "deepLink": null,
-  "expected": "Collapsed messages are flat rows on the background (sender, snippet, date): no card, no lines; senders line up with the open message's sender. 'N older messages' starts in the sender column, so a sheet never leaves an empty-looking row. Hover lifts a row to a card and nothing moves. The focused message is a raised card with an accent bar; open messages are raised cards. Same in Dark.",
+  "expected": "Collapsed messages are flat rows on the background (sender, snippet, date) with a thin line above each; senders line up with the subject and the open message's monogram. 'N older messages' starts at the same edge. Hover tints a row and nothing moves. The focused message has a rounded plate behind its row or header; there are no cards or accent bars. Same in Dark.",
   "requires": "fake",
   "addedIn": "2026-10-14"
 }

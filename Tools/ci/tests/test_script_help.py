@@ -12,6 +12,7 @@ SCRIPTS = [
     "Tools/ci/package-app.sh",
     "Tools/release/bump-version.sh",
     "Tools/release/check-release.sh",
+    "Tools/release/install-release-tools.sh",
     "Tools/release/make-dmg.sh",
     "Tools/release/publish-github.sh",
     "Tools/render-ios.sh",

@@ -7,7 +7,8 @@ IOS_SKIP="MailUIMac OpenHumanAIAgentCLI"
 
 usage() {
     cat <<'EOF'
-Usage: Tools/ci/build-packages.sh [--platform macos|linux|ios] [--build-only | --test-only] [Package ...]
+Usage: Tools/ci/build-packages.sh [--platform macos|linux|ios] [--build-only | --test-only]
+                                   [--exclude Package] [--serialized-tests] [Package ...]
 
 Builds and tests every package in Packages/, or only the packages named.
 
@@ -19,6 +20,8 @@ Builds and tests every package in Packages/, or only the packages named.
                                 OpenHumanAIAgentCLI.
   --build-only                  build the packages and their tests, run nothing
   --test-only                   run the tests (swift test still builds first)
+  --exclude <Package>           omit a package; may be repeated
+  --serialized-tests            run tests without parallel execution
   -h, --help                    show this help
 
 OH_SCRATCH_ROOT=<dir>  build each package in <dir>/<Package> (swift --scratch-path) instead of its
@@ -27,15 +30,18 @@ OH_SCRATCH_ROOT=<dir>  build each package in <dir>/<Package> (swift --scratch-pa
                        (default build/ios-dd/<Package>).
 OH_COMPILATION_CACHE_PATH=<dir>  compilation cache for --platform ios
                        (default ~/Library/Caches/OpenHuman/compilation-cache).
+OH_TEST_LOG_DIR=<dir>   keep package test logs in this directory for CI diagnostics.
 EOF
 }
 
-platform=""; mode="all"; selected=()
+platform=""; mode="all"; selected=(); excluded=(); serialized_tests=0
 while (( $# )); do
     case "$1" in
         --platform) platform="$2"; shift 2 ;;
         --build-only) mode="build"; shift ;;
         --test-only) mode="test"; shift ;;
+        --exclude) excluded+=("$2"); shift 2 ;;
+        --serialized-tests) serialized_tests=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) selected+=("$1"); shift ;;
     esac
@@ -70,6 +76,7 @@ build_ios() {
     for manifest in "$ROOT"/Packages/*/Package.swift; do
         dir="$(dirname "$manifest")"; pkg="$(basename "$dir")"
         if (( ${#selected[@]} )) && [[ " ${selected[*]} " != *" $pkg "* ]]; then continue; fi
+        if (( ${#excluded[@]} )) && [[ " ${excluded[*]} " == *" $pkg "* ]]; then continue; fi
         scratch="$dir/.build"
         [[ -z "${OH_SCRATCH_ROOT:-}" ]] || scratch="$OH_SCRATCH_ROOT/$pkg"
         products="$(ios_library_products "$dir" "$scratch")" || { failed+=("$pkg"); continue; }
@@ -102,6 +109,7 @@ fi
 for manifest in "$ROOT"/Packages/*/Package.swift; do
     dir="$(dirname "$manifest")"; pkg="$(basename "$dir")"
     if (( ${#selected[@]} )) && [[ " ${selected[*]} " != *" $pkg "* ]]; then continue; fi
+    if (( ${#excluded[@]} )) && [[ " ${excluded[*]} " == *" $pkg "* ]]; then continue; fi
     if [[ "$platform" == "linux" && " $APPLE_ONLY " == *" $pkg "* ]]; then
         echo "== $pkg: skipped on linux (Apple-only)"; continue
     fi
@@ -110,15 +118,22 @@ for manifest in "$ROOT"/Packages/*/Package.swift; do
     echo "== $pkg ($mode, $platform)"
     ok=1
     if [[ "$mode" != "test" ]]; then
-        (cd "$dir" && swift build --build-tests ${scratch[@]+"${scratch[@]}"}) || ok=0
+        (cd "$dir" && swift build --build-tests --jobs 2 ${scratch[@]+"${scratch[@]}"}) || ok=0
     fi
     if [[ "$ok" == 1 && "$mode" != "build" ]]; then
-        log="$(mktemp -t "oh-test-$pkg")"
-        (cd "$dir" && swift test ${scratch[@]+"${scratch[@]}"} 2>&1 | tee "$log"; exit "${PIPESTATUS[0]}") || ok=0
+        if [[ -n "${OH_TEST_LOG_DIR:-}" ]]; then
+            mkdir -p "$OH_TEST_LOG_DIR"
+            log="$OH_TEST_LOG_DIR/$pkg.log"
+        else
+            log="$(mktemp -t "oh-test-$pkg")"
+        fi
+        test_args=(--jobs 2)
+        if (( serialized_tests )); then test_args+=(--no-parallel); fi
+        (cd "$dir" && swift test "${test_args[@]}" ${scratch[@]+"${scratch[@]}"} 2>&1 | tee "$log"; exit "${PIPESTATUS[0]}") || ok=0
         if [[ "$ok" == 1 ]] && ! "$ROOT/Tools/ci/check-test-log.sh" "$log" "$dir"; then
             echo "== $pkg: incomplete test run"; ok=0
         fi
-        rm -f "$log"
+        if [[ -z "${OH_TEST_LOG_DIR:-}" ]]; then rm -f "$log"; fi
     fi
     (( ok )) || failed+=("$pkg")
 done

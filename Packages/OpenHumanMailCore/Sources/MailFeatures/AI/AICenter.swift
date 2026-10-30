@@ -130,6 +130,12 @@ public final class AICenter {
         try? await traces.forget(accountKey: key)
     }
 
+    // Why: at sign-out the account may already be gone from the router, so the key comes from the email
+    public func forgetTraces(email: String) async {
+        guard let traces else { return }
+        try? await traces.forget(accountKey: Self.policyKey(email: email))
+    }
+
     @ObservationIgnored public private(set) var rewriteFeedback: (up: Int, down: Int) = (0, 0)
     @ObservationIgnored private(set) var pendingRating: Task<Void, Never>?
 

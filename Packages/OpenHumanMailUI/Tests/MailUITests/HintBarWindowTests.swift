@@ -15,7 +15,11 @@ import Testing
     router.start()
     await awaitObserved("the list loads") { router.list?.state == .loaded }
 
-    let hosting = SizeReportingHostingView(rootView: MailShellView(router: router) { Color.clear.frame(width: 900, height: 400) })
+    let hints = HintBarModel(router: router)
+    hints.start()
+    let hosting = SizeReportingHostingView(rootView: ShellDetailColumn(router: router, hints: hints) {
+        Color.clear.frame(width: 900, height: 400)
+    })
     hosting.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
     hosting.layoutSubtreeIfNeeded()
     let withHints = hosting.fittingSize.height
@@ -28,8 +32,8 @@ import Testing
     let settings = try #require(env.settings)
     try await settings.set(AppSettings.showShortcutHints, false)
     await hosting.layout { hosting.fittingSize.height != withHints }
-    #expect(withHints - hosting.fittingSize.height == CGFloat(ResolvedTheme.light.component.footer.height),
-            "the footer is `footer.height` and gone with the setting")
+    #expect(withHints - hosting.fittingSize.height == NativeMetrics.HintLine.height,
+            "the hint line is `NativeMetrics.HintLine.height` and gone with the setting")
 
     try await settings.set(AppSettings.showShortcutHints, true)
     await hosting.layout { hosting.fittingSize.height == withHints }

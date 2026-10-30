@@ -1,0 +1,12 @@
+{
+  "id": "updates.not-available",
+  "area": "About",
+  "title": "See why this build does not update itself",
+  "steps": [
+    "Open Settings › General and look under Updates",
+    "Turn on VoiceOver and move to the row below Check for updates"
+  ],
+  "expected": "A row says \"Updates not available in this build\" and that Debug and DevTools builds never install updates. VoiceOver reads the title and the reason together. Check Now still asks GitHub as before.",
+  "requires": "fake",
+  "addedIn": "2026-10-22"
+}

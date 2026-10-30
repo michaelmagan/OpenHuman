@@ -52,13 +52,7 @@ public struct SendingCard: View {
         }
         .padding(compose.padding)
         .frame(maxWidth: compose.maxWidth, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: compose.radius).fill(compose.bg.color).themeShadow(compose.shadow)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: compose.radius)
-                .strokeBorder(theme.borderElevated.color, lineWidth: theme.borderWidthHairline)
-        }
+        .composerSurface(true)
         .onKeyPress(.escape) {
             manager.closeSendingView()
             return .handled

@@ -26,6 +26,7 @@ public final class BlockedSettingsModel {
     public var query = ""
     public var newValue = ""
     public private(set) var pendingConfirmation: BlockRule?
+    @ObservationIgnored private var pendingAllowsCommonDomain = false
     public private(set) var errorMessage: String?
     public private(set) var lastChange: LastChange?
     public private(set) var isWorking = false
@@ -88,7 +89,7 @@ public final class BlockedSettingsModel {
         tasks = Array(tasks.prefix(1))
         rules = []
         hasLoaded = false
-        pendingConfirmation = nil
+        cancelPending()
         errorMessage = nil
         guard let account, let center else { return }
         tasks.append(Task { [weak self] in
@@ -114,26 +115,38 @@ public final class BlockedSettingsModel {
         }
         isWorking = true
         defer { isWorking = false }
+        let wholeDomain = rule.kind == .domain
+        if wholeDomain {
+            let ask: DomainWideRuleAsking = environment?.domainWideRuleAsking ?? { @Sendable _ in .cancel }
+            guard await DomainWideRules.allowsEntireDomain(rule.value, effect: .block, ask: ask) else { return }
+        }
         if await center.hasSentTo(rule, account: account) {
             pendingConfirmation = rule
+            pendingAllowsCommonDomain = wholeDomain
             return
         }
-        await commit(rule, account: account)
+        await commit(rule, account: account, allowingCommonDomain: wholeDomain)
     }
 
     public func confirmPending() async {
         guard let rule = pendingConfirmation, let account else { return }
-        pendingConfirmation = nil
+        let wholeDomain = pendingAllowsCommonDomain
+        cancelPending()
         isWorking = true
         defer { isWorking = false }
-        await commit(rule, account: account)
+        await commit(rule, account: account, allowingCommonDomain: wholeDomain)
     }
 
-    public func cancelPending() { pendingConfirmation = nil }
+    public func cancelPending() {
+        pendingConfirmation = nil
+        pendingAllowsCommonDomain = false
+    }
 
-    private func commit(_ rule: BlockRule, account: AccountID) async {
+    private func commit(_ rule: BlockRule, account: AccountID, allowingCommonDomain: Bool) async {
         guard let center else { return }
-        await perform("Blocked \(rule.value)") { try await center.add(rule, account: account) }
+        await perform("Blocked \(rule.value)") {
+            try await center.add(rule, account: account, allowingCommonDomain: allowingCommonDomain)
+        }
         if lastChange != nil { newValue = "" }
     }
 

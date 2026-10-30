@@ -115,17 +115,23 @@ private func grid(_ events: [CalendarEvent], now: Date, days: [Date]? = nil) -> 
         #expect(CalendarPalette.block(0, state: .outlined, tokens: tokens).border != nil)
     }
 
-    @Test func theStateFollowsSelectionThenAnswerThenPlace() {
-        #expect(CalendarPalette.state(isSelected: true, isDeclined: true, needsAnswer: true, isOutlined: true,
-                                      isPast: true) == .selected)
-        #expect(CalendarPalette.state(isSelected: false, isDeclined: true, needsAnswer: false, isOutlined: true,
-                                      isPast: false) == .declined)
-        #expect(CalendarPalette.state(isSelected: false, isDeclined: false, needsAnswer: true, isOutlined: true,
-                                      isPast: false) == .invited)
-        #expect(CalendarPalette.state(isSelected: false, isDeclined: false, needsAnswer: false, isOutlined: true,
-                                      isPast: true) == .outlined)
-        #expect(CalendarPalette.state(isSelected: false, isDeclined: false, needsAnswer: false, isOutlined: false,
-                                      isPast: true) == .past)
+    @Test func theStateFollowsSelectionThenAnswerThenMaybe() {
+        func state(selected: Bool = false, declined: Bool = false, needsAnswer: Bool = false, tentative: Bool = false,
+                   past: Bool = false) -> CalendarPalette.BlockState {
+            CalendarPalette.state(isSelected: selected, isDeclined: declined, needsAnswer: needsAnswer,
+                                  isTentative: tentative, isPast: past)
+        }
+        #expect(state(selected: true, declined: true, needsAnswer: true, tentative: true, past: true) == .selected)
+        #expect(state(declined: true, tentative: true) == .declined)
+        #expect(state(needsAnswer: true, tentative: true) == .invited)
+        #expect(state(tentative: true, past: true) == .outlined)
+        #expect(state(past: true) == .past)
+        #expect(state() == .normal, "an accepted event is filled")
+        let tokens = ThemeTokens.light
+        #expect(CalendarPalette.block(0, state: .normal, tokens: tokens).border == nil)
+        #expect(CalendarPalette.block(0, state: .outlined, tokens: tokens).dashedBorder == false)
+        #expect(CalendarPalette.block(0, state: .invited, tokens: tokens).dashedBorder)
+        #expect(CalendarPalette.block(0, state: .declined, tokens: tokens).dashedBorder)
     }
 
     @Test func contentFollowsTheBlocksHeight() {

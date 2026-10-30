@@ -80,6 +80,14 @@ public struct MailCommands: Commands {
         return binding.keyboardShortcut
     }
 
+    /// The symbol a menu item shows beside its title: the conversation's actions, where the toolbar shows the same
+    /// symbol. Text only where menu images are not available.
+    @MainActor
+    static func menuSymbol(for id: ActionID, features: NativeFeatures = .current) -> String? {
+        guard features.menuItemImages else { return nil }
+        return ReaderActions.symbol(for: id)
+    }
+
     public static func source(for event: NSEvent.EventType?) -> ActionSource {
         event == .keyDown ? .keyboard : .menu
     }
@@ -105,8 +113,15 @@ struct MenuItem: View {
 
     var body: some View {
         let enabled = router?.isEnabled(descriptor.id) ?? false
-        Button(title ?? descriptor.title) {
+        let shown = title ?? descriptor.title
+        Button {
             router?.perform(descriptor.id, source: MailCommands.source(for: NSApp.currentEvent?.type))
+        } label: {
+            if let symbol = MailCommands.menuSymbol(for: descriptor.id) {
+                Label(shown, systemImage: symbol)
+            } else {
+                Text(shown)
+            }
         }
         .disabled(!enabled)
         .keyboardShortcut(MailCommands.keyboardShortcut(for: router?.environment.actions.descriptor(descriptor.id) ?? descriptor))

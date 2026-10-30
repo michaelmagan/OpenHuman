@@ -180,7 +180,7 @@ private struct CalendarFixture {
         #expect(draft.title == "Quarterly planning")
         #expect(draft.start == at(10, 14, 14) && draft.end == at(10, 14, 16), "the mention's span")
         #expect(draft.attendees.map(\.email) == ["alice@example.com", "bob@example.org"], "never the user's own address")
-        #expect(draft.timeZone == "America/New_York" && draft.sendUpdates == .none)
+        #expect(draft.timeZone == "America/New_York" && draft.sendUpdates == .all, "guests are invited unless turned off")
         #expect(f.calendar.createCalls == 0, "opening a draft creates nothing")
         model.cancelDraft()
         #expect(model.draft == nil)
@@ -433,7 +433,9 @@ private final class WakeCounter: Sendable {
         let window = TestGate()
         model.sleep = { _ in await window.wait() }
         await model.beginDraft(for: f.thread)
-        #expect(model.draft?.sendUpdates == CalendarSendUpdates.none && model.draft?.mayEmailAttendees == true)
+        #expect(model.draft?.sendUpdates == .all, "a draft with guests invites them by default")
+        model.draft?.sendUpdates = CalendarSendUpdates.none
+        #expect(model.draft?.emailsAttendees == false && model.draft?.mayEmailAttendees == true)
         #expect(await model.createEvent())
         #expect(model.heldCreateCount == 1 && f.calendar.createCalls == 0, "held, invitations off")
         window.release()
@@ -442,6 +444,70 @@ private final class WakeCounter: Sendable {
         #expect(!f.env.notices.toasts.contains { $0.message == "Event created. Google emails the invitations." })
         await f.env.undo?.undoLast()
         #expect(f.calendar.deleteCalls == 0, "an event with attendees is never deleted by undo")
+    }
+
+    @Test func aGuestAddedToABlankDraftGetsAnInvitationByEmail() async throws {
+        let f = CalendarFixture()
+        let model = f.sidebar()
+        let window = TestGate()
+        model.sleep = { _ in await window.wait() }
+        await model.beginDraft(for: nil)
+        let blank = try #require(model.draft)
+        #expect(blank.attendees.isEmpty && blank.sendUpdates == CalendarSendUpdates.none)
+        var form = CalendarEventForm(draft: blank)
+        form.addGuest(alice)
+        model.draft = form.applying(to: blank)
+        #expect(model.draft?.sendUpdates == .all, "the first guest turns invitations on")
+        #expect(await model.createEvent())
+        #expect(model.heldCreateCount == 1 && f.calendar.createCalls == 0)
+        window.release()
+        await eventually { f.calendar.createCalls == 1 }
+        let sent = try #require(f.calendar.calls.compactMap { call -> CalendarEventDraft? in
+            if case .create(let draft) = call { draft } else { nil }
+        }.first)
+        #expect(sent.sendUpdates == .all && sent.attendees.map(\.email) == ["alice@example.com"])
+        await eventually { f.env.notices.toasts.contains { $0.message == "Event created. Google emails the invitations." } }
+    }
+
+    @Test func anAddressLeftInTheGuestFieldIsAddedOnSave() async throws {
+        let f = CalendarFixture()
+        let model = f.sidebar()
+        let window = TestGate()
+        model.sleep = { _ in await window.wait() }
+        await model.beginDraft(for: nil)
+        model.pendingGuest = "Alice <alice@example.com>"
+        #expect(model.draft?.attendees.isEmpty == true, "typed, not yet added with Return")
+        #expect(await model.createEvent())
+        #expect(model.pendingGuest.isEmpty && model.heldCreateCount == 1)
+        window.release()
+        await eventually { f.calendar.createCalls == 1 }
+        let sent = try #require(f.calendar.calls.compactMap { call -> CalendarEventDraft? in
+            if case .create(let draft) = call { draft } else { nil }
+        }.first)
+        #expect(sent.attendees == [alice] && sent.extras.guests.map(\.email) == ["alice@example.com"])
+        #expect(sent.sendUpdates == .all)
+    }
+
+    @Test func textInTheGuestFieldThatIsNotAnAddressStopsTheSave() async throws {
+        let f = CalendarFixture()
+        let model = f.sidebar()
+        await model.beginDraft(for: nil)
+        model.pendingGuest = "Alice"
+        #expect(await model.createEvent() == false)
+        #expect(model.pendingGuestNote == CalendarPendingGuest.notAnAddress && model.pendingGuest == "Alice", "kept, not dropped")
+        #expect(model.draft?.attendees.isEmpty == true && f.calendar.createCalls == 0)
+        model.pendingGuest = ""
+        #expect(model.pendingGuestNote == nil)
+        #expect(await model.createEvent())
+        #expect(f.calendar.createCalls == 1)
+    }
+
+    @Test func theGuestFieldTextIsReadAsAddressesOrRefusedWhole() {
+        #expect(CalendarPendingGuest.addresses(in: "  ") == [])
+        #expect(CalendarPendingGuest.addresses(in: "bob@example.org, Alice <alice@example.com>")?.map(\.email)
+                == ["bob@example.org", "alice@example.com"])
+        #expect(CalendarPendingGuest.addresses(in: "Alice") == nil)
+        #expect(CalendarPendingGuest.addresses(in: "bob@example.org, Alice") == nil, "nothing is added when part is not an address")
     }
 
     @Test func anUnclearCreateThatTheDayShowsCountsAsCreated() async throws {
@@ -554,6 +620,264 @@ private final class WakeCounter: Sendable {
         try await f.env.settings!.set(AppSettings.calendarAddMeetLink, false)
         await model.beginDraft(for: f.thread)
         #expect(model.draft?.addMeetLink == false)
+    }
+}
+
+private final class OwnerLifetimeCalendar: CalendarProviding, Sendable {
+    let inner: FakeCalendar
+    let creating = Checkpoint()
+    let readback = Checkpoint()
+    let refreshing = Checkpoint()
+    private let holdsReads = Mutex(false)
+
+    init(_ inner: FakeCalendar) { self.inner = inner }
+
+    var info: CalendarProviderInfo { inner.info }
+
+    func holdReads() { holdsReads.withLock { $0 = true } }
+
+    func events(from: Date, to: Date) async throws -> [CalendarEvent] {
+        if holdsReads.withLock({ $0 }) { await readback.pass() }
+        return try await inner.events(from: from, to: to)
+    }
+
+    func eventWindow(from: Date, to: Date) async throws -> CalendarEventWindow {
+        if holdsReads.withLock({ $0 }) { await refreshing.pass() }
+        return try await inner.eventWindow(from: from, to: to)
+    }
+
+    func eventDelta(since token: String) async throws -> CalendarEventDelta {
+        if holdsReads.withLock({ $0 }) { await refreshing.pass() }
+        return try await inner.eventDelta(since: token)
+    }
+
+    func freeBusy(from: Date, to: Date) async throws -> CalendarFreeBusy {
+        try await inner.freeBusy(from: from, to: to)
+    }
+
+    func createEvent(_ draft: CalendarEventDraft) async throws -> CalendarEvent {
+        await creating.pass()
+        return try await inner.createEvent(draft)
+    }
+
+    func deleteEvent(_ event: CalendarEvent) async throws { try await inner.deleteEvent(event) }
+}
+
+@MainActor
+private func configureOwnerLifetimeSidebar(_ model: CalendarSidebarModel) {
+    model.timeZone = newYork
+    model.now = { at(10, 10, 9) }
+    model.loadText = { _ in
+        CalendarThreadText(subject: "Lunch?", texts: ["Lunch?", "October 15, 2026 at 12:30 PM"],
+                           participants: [EmailAddress(name: "Alice", email: "alice@example.com")])
+    }
+}
+
+@MainActor
+@Suite struct CalendarSidebarOwnerLifetimeTests {
+    @Test(arguments: [false, true])
+    func anOwnerGoneBeforeDispatchAbandonsThePlaceholderWithoutWritingOrRecovery(_ retainingOpenWindow: Bool) async throws {
+        let corpus = FakeCorpus.make(threadCount: 6, now: fixedNow)
+        let calendar = FakeCalendar()
+        let notices = NoticeCenter(autoExpire: false)
+        var owner: AppEnvironment? = .fake(corpus: corpus, options: .init(remoteAck: .immediate),
+                                           featureFlags: FeatureFlags(), calendar: calendar, notices: notices)
+        weak var weakOwner = owner
+        let model = try #require(owner?.calendarSidebar)
+        let pending = try #require(owner?.pendingEvents)
+        let store = model.eventStore
+        let key = CalendarEventStore.key(for: calendar)
+        let sleeper = Checkpoint()
+        defer { sleeper.release() }
+        configureOwnerLifetimeSidebar(model)
+        model.sleep = { _ in await sleeper.pass() }
+        let thread = corpus.threads[0].row.id
+        await model.show(thread: thread)
+        await model.beginDraft(for: thread)
+        var retainedWindow: CalendarWindowModel?
+        if retainingOpenWindow {
+            let window = try #require(owner?.calendarWindow)
+            window.timeZone = newYork
+            window.now = { at(10, 10, 9) }
+            await window.open(.week, around: at(10, 12))
+            #expect(window.isOpen && window.eventStore === store)
+            #expect(window.storeKeys.values.contains(key))
+            retainedWindow = window
+        }
+        guard await model.createEvent() else {
+            Issue.record("the guest create must enter the real hold window")
+            return
+        }
+        #expect(model.heldCreateCount == 1)
+        await sleeper.arrived()
+        #expect(model.days.flatMap(\.events).contains { $0.id.hasPrefix(CalendarSidebarModel.placeholderPrefix) })
+        if let retainedWindow {
+            #expect(retainedWindow.events.contains { $0.id.hasPrefix(CalendarSidebarModel.placeholderPrefix) })
+        }
+        let calls = calendar.calls
+        let messages = notices.toasts.map(\.message)
+        #expect(pending.events.isEmpty && pending.active == nil)
+
+        owner = nil
+        #expect(weakOwner == nil, "owner destruction precedes dispatch, even while the sidebar/store survive")
+        sleeper.release()
+        await eventually { model.heldCreateCount == 0 && model.days.flatMap(\.events).isEmpty }
+
+        #expect(weakOwner == nil)
+        #expect(calendar.calls == calls && calendar.createCalls == 0 && calendar.created.isEmpty)
+        #expect(model.heldCreateCount == 0 && !model.hasQuitWork)
+        #expect(store.events(key, from: at(10, 15), to: at(10, 16)) == [])
+        #expect(model.days.flatMap(\.events).isEmpty, "the loaded store observer also loses the provisional event")
+        #expect(model.draft == nil && model.draftNote == nil)
+        #expect(pending.events.isEmpty && pending.active == nil && pending.returnRequest == nil)
+        #expect(notices.toasts.map(\.message) == messages, "no success, failure or recovery notice after owner loss")
+        if let retainedWindow {
+            #expect(retainedWindow.isOpen && retainedWindow.storeKeys.values.contains(key))
+            #expect(retainedWindow.progress == nil)
+        }
+    }
+
+    @Test(arguments: [FakeCalendar.CreateOutcome.normal, .unclear(created: true), .unclear(created: false)],
+          [CalendarSendUpdates.all, .none])
+    func anOwnerReleasedDuringCreateLivesThroughReadbackAndRefresh(_ outcome: FakeCalendar.CreateOutcome,
+                                                                  _ sendUpdates: CalendarSendUpdates) async throws {
+        let corpus = FakeCorpus.make(threadCount: 6, now: fixedNow)
+        let calendar = FakeCalendar(info: CalendarProviderInfo(name: "Original calendar"))
+        calendar.createOutcome = outcome
+        let provider = OwnerLifetimeCalendar(calendar)
+        let notices = NoticeCenter(autoExpire: false)
+        var owner: AppEnvironment? = .fake(corpus: corpus, options: .init(remoteAck: .immediate),
+                                           featureFlags: FeatureFlags(), calendar: provider, notices: notices)
+        weak var weakOwner = owner
+        let model = try #require(owner?.calendarSidebar)
+        let pending = try #require(owner?.pendingEvents)
+        let store = model.eventStore
+        let key = CalendarEventStore.key(for: provider)
+        let writes = WakeCounter()
+        defer {
+            provider.creating.release()
+            provider.readback.release()
+            provider.refreshing.release()
+        }
+        configureOwnerLifetimeSidebar(model)
+        model.sleep = { _ in try await Task.sleep(for: .seconds(3_600)) }
+        model.didWrite = { writes.increment() }
+        let thread = corpus.threads[0].row.id
+        await model.show(thread: thread)
+        await model.beginDraft(for: thread)
+        model.draft?.sendUpdates = sendUpdates
+        let original = try #require(model.draft)
+        guard await model.createEvent() else {
+            Issue.record("the original guest draft must be held")
+            return
+        }
+        #expect(model.heldCreateCount == 1)
+        let settlement = Task { await model.prepareForQuit() }
+        await provider.creating.arrived()
+        #expect(model.heldCreateCount == 0, "dispatch bookkeeping is not terminal completion")
+        owner = nil
+        #expect(weakOwner != nil, "the dispatched operation leases its live owner")
+        provider.holdReads()
+        provider.creating.release()
+
+        let found: Bool
+        let message: String
+        switch outcome {
+        case .normal:
+            found = true
+            message = original.emailsAttendees ? "Event created. Google emails the invitations." : "Event created."
+        case .unclear(let created):
+            found = created
+            message = created ? "Event created." : CalendarSidebarModel.unclearWithAttendees
+            await provider.readback.arrived()
+            #expect(weakOwner != nil, "uncertain readback remains inside the same lease")
+            provider.readback.release()
+        }
+        if found {
+            await provider.refreshing.arrived()
+            #expect(weakOwner != nil, "a notice and provider return precede awaited refresh completion")
+            #expect(notices.toasts.contains { $0.message == message })
+            provider.refreshing.release()
+        }
+        await settlement.value
+
+        #expect(weakOwner == nil, "the actual joined settlement releases the operation lease")
+        #expect(calendar.calls.compactMap { call -> CalendarEventDraft? in
+            if case .create(let sent) = call { sent } else { nil }
+        } == [original], "one submission through the original provider, with the original invitation choice")
+        #expect(calendar.createCalls == 1 && calendar.deleteCalls == 0 && calendar.allEvents.count == (found ? 1 : 0))
+        #expect(writes.value == (found ? 1 : 0))
+        #expect(model.heldCreateCount == 0 && model.draft == nil && model.draftNote == nil)
+        #expect(pending.events.isEmpty && pending.active == nil && pending.returnRequest == nil, "no uncertain replay offer")
+        #expect(notices.toasts.filter { $0.message != "Creating event…" }.map(\.message) == [message])
+        #expect(notices.toasts.contains { $0.message == message && $0.style == (found ? .info : .error) })
+        #expect(store.events(key, from: at(10, 15), to: at(10, 16))?.map(\.id) == calendar.allEvents.map(\.id))
+        #expect(model.days.flatMap(\.events).map(\.id) == calendar.allEvents.map(\.id))
+        #expect(!model.days.flatMap(\.events).contains { $0.id.hasPrefix(CalendarSidebarModel.placeholderPrefix) })
+    }
+
+    @Test(arguments: [false, true])
+    func anOwnerReleasedDuringFailurePreservesMatchingAndOtherActiveDrafts(_ otherActiveDraft: Bool) async throws {
+        let corpus = FakeCorpus.make(threadCount: 6, now: fixedNow)
+        let calendar = FakeCalendar(info: CalendarProviderInfo(name: "Original calendar"))
+        let provider = OwnerLifetimeCalendar(calendar)
+        let notices = NoticeCenter(autoExpire: false)
+        var owner: AppEnvironment? = .fake(corpus: corpus, options: .init(remoteAck: .immediate),
+                                           featureFlags: FeatureFlags(), calendar: provider, notices: notices)
+        weak var weakOwner = owner
+        let model = try #require(owner?.calendarSidebar)
+        let pending = try #require(owner?.pendingEvents)
+        defer {
+            provider.creating.release()
+            provider.readback.release()
+            provider.refreshing.release()
+        }
+        configureOwnerLifetimeSidebar(model)
+        model.sleep = { _ in try await Task.sleep(for: .seconds(3_600)) }
+        let first = corpus.threads[0].row.id, second = corpus.threads[1].row.id
+        await model.show(thread: first)
+        await model.beginDraft(for: first)
+        model.draft?.sendUpdates = .all
+        let original = try #require(model.draft)
+        guard await model.createEvent() else {
+            Issue.record("the failing guest create must enter the hold window")
+            return
+        }
+        #expect(model.heldCreateCount == 1)
+        let settlement = Task { await model.prepareForQuit() }
+        await provider.creating.arrived()
+        if otherActiveDraft {
+            await model.show(thread: second)
+            await model.beginDraft(for: second)
+            model.draft?.title = "Plan for B"
+            model.draft?.sendUpdates = CalendarSendUpdates.none
+        }
+        let other = model.draft
+        calendar.failure = "The calendar is offline."
+        owner = nil
+        #expect(weakOwner != nil, "failure restoration still needs a live owner")
+        provider.creating.release()
+        await settlement.value
+
+        #expect(weakOwner == nil)
+        #expect(calendar.calls.compactMap { call -> CalendarEventDraft? in
+            if case .create(let sent) = call { sent } else { nil }
+        } == [original])
+        #expect(calendar.createCalls == 1 && calendar.created.isEmpty && calendar.deleteCalls == 0)
+        #expect(model.heldCreateCount == 0 && !model.hasQuitWork && model.days.flatMap(\.events).isEmpty)
+        #expect(pending.pending(for: .thread(first))?.draft == original)
+        if otherActiveDraft {
+            #expect(other != nil && model.draft == other && model.draft?.title == "Plan for B")
+            #expect(pending.pending(for: .thread(second))?.draft == other && pending.active == .thread(second))
+            #expect(pending.events.count == 2 && model.draftNote == nil)
+        } else {
+            #expect(model.draft == original && model.draftKey == .thread(first))
+            #expect(model.draftNote == "Couldn't create the event. The calendar is offline.")
+            #expect(pending.events.count == 1 && pending.active == .thread(first))
+        }
+        #expect(notices.toasts.filter { $0.message != "Creating event…" }.map(\.message)
+                == ["Couldn't create the event. The calendar is offline."])
+        #expect(notices.toasts.contains { $0.message == "Couldn't create the event. The calendar is offline." && $0.style == .error })
     }
 }
 

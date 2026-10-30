@@ -166,7 +166,20 @@ public final class ClassificationCorrectionHandler: ActionHandler {
         func choice(_ option: (String, ClassificationRule)) -> NoticeCenter.Choice {
             NoticeCenter.Choice(option.0) { _ = await ruleSet.add(option.1) }
         }
-        environment.notices.postChoice("Always label \(category) for:", choice(options[0]), choice(options[1]))
+        var second = choice(options[1])
+        if listID == nil, let domain {
+            let ask = environment.domainWideRuleAsking
+            let senderRule = options[0], domainRule = options[1]
+            second = NoticeCenter.Choice(domainRule.0) {
+                switch await DomainWideRules.resolve(domain: domain, address: sender, effect: .autoLabel(category),
+                                                     ask: ask) {
+                case .entireDomain?: _ = await ruleSet.add(domainRule.1)
+                case .thisAddressOnly?: _ = await ruleSet.add(senderRule.1)
+                case nil: break
+                }
+            }
+        }
+        environment.notices.postChoice("Always label \(category) for:", choice(options[0]), second)
     }
 
     nonisolated static func labelRuleOptions(_ label: AutoLabelCategory, sender: String?, domain: String?,

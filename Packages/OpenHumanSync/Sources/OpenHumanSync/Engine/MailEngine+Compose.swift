@@ -9,11 +9,13 @@ extension MailEngine {
                          origin: DraftOrigin, initial: DraftContent? = nil) async throws -> NewDraft {
         try checkMailWrite([account], what: "newDraft")
         let skeleton = try await replySkeleton(account: account, mode: mode, replyTo: replyTo)
+        let forwarded = try forwardedAttachments(account: account, mode: mode, replyTo: replyTo)
         let byAgent = origin != .user
         var headers = ComposeSupport.threadingHeaders(skeleton)
         if byAgent { headers[ComposeSupport.originHeader] = origin.rawValue }
         let id = try store.createDraft(account: account, mode: mode, replyTo: replyTo,
-                                       content: ComposeSupport.merge(initial, skeleton), origin: origin,
+                                       content: ComposeSupport.merge(initial, skeleton, forwarded: forwarded),
+                                       origin: origin,
                                        reviewState: byAgent ? .pending : .none, agentNote: nil, extraHeaders: headers)
         if byAgent { try await saveRemotelyNow(id, account: account) }
         return NewDraft(id: id, version: 1, skeleton: try skeleton.map { try withThread($0, of: id) })
@@ -23,6 +25,7 @@ extension MailEngine {
         let draft = try requireDraft(id)
         try checkMailWrite([draft.accountID], what: "saveDraft")
         let version = try store.updateDraft(id, content: content, expectedVersion: expectedVersion)
+        if version == draft.localVersion, !draft.isDirty { return version }
         if configuration.role == .app {
             await debouncer().noteEdit(id)
         } else {
@@ -153,6 +156,12 @@ extension MailEngine {
         return try DraftSkeleton.skeleton(message: message, body: body, store: store, account: account, mode: mode)
     }
 
+    func forwardedAttachments(account: AccountID, mode: ComposeMode, replyTo: GmailMessageID?) throws -> [DraftAttachment] {
+        guard mode == .forward, let replyTo,
+              let message = try store.message(account: account, gmailMessageID: replyTo) else { return [] }
+        return DraftSkeleton.forwardedAttachments(message.attachments, html: try store.body(message.id)?.html)
+    }
+
     private func withThread(_ skeleton: ReplySkeleton, of draft: DraftID) throws -> ReplySkeleton {
         var out = skeleton
         guard skeleton.gmailThreadID != nil else { return out }
@@ -191,9 +200,22 @@ public enum DraftSkeleton {
         guard let message = try store.message(account: account, gmailMessageID: replyTo) else {
             throw StoreError.notFound("message \(replyTo.rawValue)")
         }
-        let skeleton = try skeleton(message: message, body: try store.body(message.id), store: store, account: account,
-                                    mode: mode)
-        return skeleton.map { ComposeSupport.merge(nil, $0) }
+        let body = try store.body(message.id)
+        let skeleton = try skeleton(message: message, body: body, store: store, account: account, mode: mode)
+        let forwarded = mode == .forward ? forwardedAttachments(message.attachments, html: body?.html) : []
+        return skeleton.map { ComposeSupport.merge(nil, $0, forwarded: forwarded) }
+    }
+
+    // As in the reader's tiles: only an inline part whose Content-ID the HTML shows stays out (an inline PDF is a file)
+    public static func forwardedAttachments(_ attachments: [AttachmentItem], html: String?) -> [DraftAttachment] {
+        let shown = html?.lowercased() ?? ""
+        return attachments.filter { item in
+            guard item.isInline, let cid = item.contentID, !cid.isEmpty else { return true }
+            return !shown.contains("cid:" + cid.lowercased())
+        }.map {
+            DraftAttachment(sourceAttachmentID: $0.id, filename: $0.filename, mimeType: $0.mimeType, size: $0.size,
+                            isInline: false)
+        }
     }
 
     static func logicalText(_ body: MessageBody) -> String? {
@@ -236,7 +258,8 @@ enum ComposeSupport {
         return headers
     }
 
-    static func merge(_ initial: DraftContent?, _ skeleton: ReplySkeleton?) -> DraftContent {
+    static func merge(_ initial: DraftContent?, _ skeleton: ReplySkeleton?,
+                      forwarded: [DraftAttachment] = []) -> DraftContent {
         let base = initial ?? DraftContent(to: [], cc: [], bcc: [], subject: "", bodyHTML: "", attachments: [])
         guard let skeleton else { return base }
         var out = base
@@ -245,6 +268,8 @@ enum ComposeSupport {
         if out.subject.isEmpty { out.subject = skeleton.subject }
         out.bodyHTML = base.bodyHTML + skeleton.quotedHTML
         out.bodyText = joinedText(base.bodyText, skeleton.quotedText)
+        let present = Set(base.attachments.compactMap(\.sourceAttachmentID))
+        out.attachments += forwarded.filter { $0.sourceAttachmentID.map { !present.contains($0) } ?? true }
         return out
     }
 

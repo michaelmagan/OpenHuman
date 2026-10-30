@@ -32,24 +32,24 @@ struct SplitSettingsPage: View {
                 List {
                     ForEach(model.splits) { split in
                         HStack(spacing: theme.space3) {
-                            Image(systemName: "line.3.horizontal").foregroundStyle(theme.textTertiary.color).accessibilityHidden(true)
-                            Text(split.name).themeFont(theme.typeBodyStrong).foregroundStyle(theme.textPrimary.color)
-                            Text(SplitSettingsModel.ruleSummary(split.ruleText)).themeFont(theme.typeMeta).monospaced()
-                                .foregroundStyle(theme.textSecondary.color)
+                            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary).accessibilityHidden(true)
+                            Text(split.name).fontWeight(.semibold).foregroundStyle(.primary)
+                            Text(SplitSettingsModel.ruleSummary(split.ruleText)).font(.system(size: NativeMetrics.Text.secondary)).monospaced()
+                                .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .help(split.ruleText)
                                 .accessibilityLabel(split.ruleText)
                             Spacer()
                             if split.unreadThreads > 0 {
-                                Text(SplitSettingsModel.unreadTitle(split.unreadThreads)).themeFont(theme.typeMeta)
-                                    .foregroundStyle(theme.textTertiary.color)
+                                Text(SplitSettingsModel.unreadTitle(split.unreadThreads)).font(.system(size: NativeMetrics.Text.secondary))
+                                    .foregroundStyle(.tertiary)
                             }
                             if model.isHiddenWhenEmpty(split) {
-                                Text("Hidden when empty").themeFont(theme.typeMeta).foregroundStyle(theme.textTertiary.color)
+                                Text("Hidden when empty").font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.tertiary)
                             }
                             if model.isAlsoShownInInbox(split) {
-                                Text("Also in Important/Other").themeFont(theme.typeMeta)
-                                    .foregroundStyle(theme.textTertiary.color)
+                                Text("Also in Important/Other").font(.system(size: NativeMetrics.Text.secondary))
+                                    .foregroundStyle(.tertiary)
                             }
                             tabOptions(isOn: model.isHiddenWhenEmpty(split), set: { hidden in
                                 Task { await model.setHiddenWhenEmpty(split, hidden) }
@@ -66,16 +66,16 @@ struct SplitSettingsPage: View {
                     .onMove { source, destination in Task { await model.move(from: source, to: destination) } }
                     .moveDisabled(!model.canEdit)
                     HStack(spacing: theme.space3) {
-                        Image(systemName: "lock").foregroundStyle(theme.textTertiary.color).accessibilityHidden(true)
-                        Text("Other").themeFont(theme.typeBodyStrong).foregroundStyle(theme.textPrimary.color)
-                        Text(SplitSettingsModel.otherNote).themeFont(theme.typeMeta).foregroundStyle(theme.textTertiary.color)
+                        Image(systemName: "lock").foregroundStyle(.tertiary).accessibilityHidden(true)
+                        Text("Other").fontWeight(.semibold).foregroundStyle(.primary)
+                        Text(SplitSettingsModel.otherNote).font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.tertiary)
                         Spacer()
                         if model.otherTotal != nil, let unread = model.otherUnread, unread > 0 {
                             Text(SplitSettingsModel.unreadTitle(unread))
-                                .themeFont(theme.typeMeta).foregroundStyle(theme.textTertiary.color)
+                                .font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.tertiary)
                         }
                         if model.isOtherHiddenWhenEmpty {
-                            Text("Hidden when empty").themeFont(theme.typeMeta).foregroundStyle(theme.textTertiary.color)
+                            Text("Hidden when empty").font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.tertiary)
                         }
                         tabOptions(isOn: model.isOtherHiddenWhenEmpty) { hidden in
                             Task { await model.setOtherHiddenWhenEmpty(hidden) }
@@ -90,12 +90,13 @@ struct SplitSettingsPage: View {
                 .scrollContentBackground(.hidden)
                 .scrollDisabled(true)
                 .frame(height: CGFloat(model.splits.count + 1) * Self.listRowHeight)
-                .padding(.vertical, theme.space2)
             }
             if model.draft != nil { editor } else {
-                HStack(spacing: theme.space3) {
-                    Button("Add split…") { model.beginAdd() }.disabled(!model.canEdit)
-                    presetMenu
+                Section {
+                    HStack(spacing: theme.space3) {
+                        Button("Add split…") { model.beginAdd() }.disabled(!model.canEdit)
+                        presetMenu
+                    }
                 }
             }
             eventsSection
@@ -118,7 +119,7 @@ struct SplitSettingsPage: View {
             SettingsSection("Events") {
                 VStack(alignment: .leading, spacing: theme.space2) {
                     if let offer = model.eventsOffer {
-                        Text(offer.explanation).themeFont(theme.typeBody).foregroundStyle(theme.textSecondary.color)
+                        Text(offer.explanation).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     HStack(spacing: theme.space3) {
@@ -135,10 +136,10 @@ struct SplitSettingsPage: View {
                         Spacer()
                     }
                     if let note = model.eventsNote {
-                        Text(note).themeFont(theme.typeMeta).foregroundStyle(theme.textTertiary.color)
+                        Text(note).font(.system(size: NativeMetrics.Text.secondary)).foregroundStyle(.tertiary)
                     }
                 }
-                .padding(.vertical, theme.space2)
+                .settingsRowPadding()
             }
         }
     }
@@ -149,7 +150,7 @@ struct SplitSettingsPage: View {
             if let alsoShow { Toggle("Also show in Important/Other", isOn: alsoShow) }
         } label: {
             Image(systemName: isOn ? "eye.slash" : "eye")
-                .foregroundStyle(isOn ? theme.textSecondary.color : theme.textTertiary.color)
+                .foregroundStyle(isOn ? HierarchicalShapeStyle.secondary : .tertiary)
         }
             .ohBorderlessMenuStyle().fixedSize()
             .tint(isOn ? theme.textSecondary.color : theme.textTertiary.color)
@@ -160,7 +161,7 @@ struct SplitSettingsPage: View {
     }
 
     private func rowMenu<Items: View>(@ViewBuilder _ items: () -> Items) -> some View {
-        Menu(content: items) { Image(systemName: "ellipsis").foregroundStyle(theme.textSecondary.color) }
+        Menu(content: items) { Image(systemName: "ellipsis").foregroundStyle(.secondary) }
             .ohBorderlessMenuStyle().fixedSize()
             .tint(theme.textSecondary.color)
             .accessibilityLabel("More actions for this split")
@@ -227,13 +228,13 @@ struct SnippetSettingsPage: View {
                         .settingsTextField()
                     List(model.visible, selection: selection) { snippet in
                         HStack {
-                            Text(snippet.name).themeFont(theme.typeBody).foregroundStyle(theme.textPrimary.color)
+                            Text(snippet.name)
                             Spacer()
                             if let shortcut = snippet.shortcut {
-                                KeycapView(text: ";;" + shortcut)
+                                NativeKeycap(";;" + shortcut)
                             }
                         }
-                        .frame(height: 28)
+                        .frame(minHeight: SettingsMetrics.rowMinHeight)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(snippet.name)
                         .accessibilityValue(snippet.shortcut.map { ";;" + $0 } ?? "")
@@ -244,16 +245,15 @@ struct SnippetSettingsPage: View {
                     if let note = model.availability.storedItemsNote { SettingsFootnote(note, tone: .warning) }
                     snippetFile
                 }
-                .padding(theme.space4)
+                .padding(theme.space5)
                 .frame(width: 220)
                 .frame(maxHeight: .infinity, alignment: .top)
-                Rectangle().fill(theme.borderHairline.color).frame(width: theme.borderWidthHairline)
+                Divider()
                 editor.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .background(RoundedRectangle(cornerRadius: theme.radiusLG).fill(theme.bgSunken.color))
-            .clipShape(RoundedRectangle(cornerRadius: theme.radiusLG))
-            .overlay(RoundedRectangle(cornerRadius: theme.radiusLG)
-                .strokeBorder(theme.borderHairline.color, lineWidth: theme.borderWidthHairline))
+            .background(.quinary, in: RoundedRectangle(cornerRadius: theme.radiusXL))
+            .clipShape(RoundedRectangle(cornerRadius: theme.radiusXL))
+            .overlay(RoundedRectangle(cornerRadius: theme.radiusXL).strokeBorder(.quaternary))
         }
         .task { model.start() }
         .fileExporter(isPresented: Binding(get: { exporting != nil }, set: { if !$0 { exporting = nil } }),
@@ -287,7 +287,7 @@ struct SnippetSettingsPage: View {
                 .disabled(!model.canEdit)
                 .accessibilityIdentifier("settings.snippets.import")
             if let preview = transfer.preview {
-                Text(preview.summary).themeFont(theme.typeMeta).foregroundStyle(theme.textPrimary.color)
+                Text(preview.summary).font(.system(size: NativeMetrics.Text.secondary))
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail = preview.detail { SettingsFootnote(detail) }
                 if preview.shortcutsDropped > 0 {
@@ -338,8 +338,7 @@ struct SnippetSettingsPage: View {
         if let draft = model.draft {
             ScrollView {
                 VStack(alignment: .leading, spacing: theme.space3) {
-                    Text(draft.isNew ? "New snippet" : "Edit snippet").themeFont(theme.typeHeadline)
-                        .foregroundStyle(theme.textPrimary.color)
+                    Text(draft.isNew ? "New snippet" : "Edit snippet").font(.headline)
                         .accessibilityAddTraits(.isHeader)
                     field("Name") {
                         TextField("Name", text: Binding(get: { model.draft?.name ?? "" }, set: { model.draft?.name = $0 }),
@@ -361,9 +360,8 @@ struct SnippetSettingsPage: View {
                             .scrollContentBackground(.hidden)
                             .padding(theme.space2)
                             .frame(minHeight: 160)
-                            .background(RoundedRectangle(cornerRadius: theme.radiusMD).fill(theme.bgWindow.color))
-                            .overlay(RoundedRectangle(cornerRadius: theme.radiusMD)
-                                .strokeBorder(theme.borderControl.color, lineWidth: theme.borderWidthControl))
+                            .background(.background, in: RoundedRectangle(cornerRadius: theme.radiusMD))
+                            .overlay(RoundedRectangle(cornerRadius: theme.radiusMD).strokeBorder(.quaternary))
                             .accessibilityLabel("Body")
                     }
                     if draft.hadFormatting {
@@ -387,7 +385,7 @@ struct SnippetSettingsPage: View {
                 Task { await addFiles(urls) }
             }
         } else {
-            Text("Choose a snippet or make a new one.").themeFont(theme.typeBody).foregroundStyle(theme.textSecondary.color)
+            Text("Choose a snippet or make a new one.").foregroundStyle(.secondary)
                 .padding(theme.space5)
         }
     }
@@ -418,7 +416,7 @@ struct SnippetSettingsPage: View {
                     Image(systemName: "paperclip").font(.system(size: 11)).accessibilityHidden(true)
                     Text(file.filename).lineLimit(1).truncationMode(.middle)
                     Text(ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file))
-                        .foregroundStyle(theme.textTertiary.color)
+                        .foregroundStyle(.tertiary)
                     Spacer(minLength: 0)
                     Button { model.removeAttachment(file) } label: {
                         Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
@@ -427,11 +425,11 @@ struct SnippetSettingsPage: View {
                     .disabled(!model.canEdit)
                     .accessibilityLabel("Remove \(file.filename)")
                 }
-                .themeFont(theme.typeMeta)
-                .foregroundStyle(theme.textSecondary.color)
-                .padding(.horizontal, theme.space2)
+                .font(.system(size: NativeMetrics.Text.secondary))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, theme.space3)
                 .frame(height: 26)
-                .background(RoundedRectangle(cornerRadius: theme.radiusMD).fill(theme.bgWindow.color))
+                .background(.background, in: RoundedRectangle(cornerRadius: theme.radiusMD))
                 .accessibilityElement(children: .combine)
             }
             HStack(spacing: theme.space3) {
@@ -452,7 +450,8 @@ struct SnippetSettingsPage: View {
 
     private func field<Field: View>(_ name: String, @ViewBuilder _ content: () -> Field) -> some View {
         VStack(alignment: .leading, spacing: theme.space1) {
-            Text(name).themeFont(theme.typeLabel).foregroundStyle(theme.textSecondary.color).accessibilityHidden(true)
+            Text(name).font(.system(size: NativeMetrics.Text.secondary, weight: .medium)).foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             content().labelsHidden().settingsTextField()
         }
     }
@@ -465,10 +464,11 @@ struct SnippetSettingsPage: View {
                 Text("Variables").settingsSectionLabel(theme)
                 ForEach(variables, id: \.name) { variable in
                     HStack(spacing: theme.space3) {
-                        Text("{{\(variable.name)}}").themeFont(theme.typeMono).foregroundStyle(theme.textPrimary.color)
+                        Text("{{\(variable.name)}}").monospaced()
                             .frame(width: 120, alignment: .leading)
                         if variable.isBuiltIn {
-                            Text("filled automatically").themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
+                            Text("filled automatically").font(.system(size: NativeMetrics.Text.secondary))
+                                .foregroundStyle(.secondary)
                         } else {
                             TextField("Default for \(variable.name)", text: Binding(get: { model.draft?.defaults[variable.name] ?? "" },
                                                                                 set: { model.setDefault($0, for: variable.name) }),

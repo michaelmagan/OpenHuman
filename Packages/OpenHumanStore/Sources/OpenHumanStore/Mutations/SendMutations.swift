@@ -96,7 +96,8 @@ enum SendMutations {
         let stamp = ScheduleStamp.format(label.due)
         let due = MailStore.storeMillis(label.due)
         guard due > now else { throw StoreError.conflict("the scheduled time has passed") }
-        let hasCondition = DraftRowCodec.header(OHGmailLabels.sendAtConditionHeader, in: row.headers) != nil
+        let condition = DraftRowCodec.header(OHGmailLabels.sendAtConditionHeader, in: row.headers)
+        let hasCondition = condition != nil
         if row.state == .scheduled, row.sendAt == due,
            DraftRowCodec.header(OHGmailLabels.sendAtHeader, in: row.headers) == stamp, hasCondition == onlyIfNoReply { return }
         if try LabelIndex.load(account: row.account, in: db).keyByName[label.name] == nil {
@@ -104,7 +105,9 @@ enum SendMutations {
         }
         var headers = DraftMutations.withoutSendAt(row.headers)
         headers[OHGmailLabels.sendAtHeader] = stamp
-        if onlyIfNoReply, let tid = row.tid {
+        if onlyIfNoReply, row.state == .scheduled, let condition {
+            headers[OHGmailLabels.sendAtConditionHeader] = condition
+        } else if onlyIfNoReply, let tid = row.tid {
             let newest = try String.fetchOne(db, sql: """
                 SELECT gmail_message_id FROM messages WHERE tid = ? AND is_draft = 0 AND in_trash = 0 AND in_spam = 0
                 ORDER BY internal_date DESC, mid DESC LIMIT 1

@@ -1,5 +1,6 @@
 import AppKit
 import MailRender
+import OpenHumanCore
 import WebKit
 
 @MainActor
@@ -39,8 +40,17 @@ public final class ReaderWebView: WKWebView {
     public var isShown: Bool { shown }
     public private(set) var measuredHeight: CGFloat?
     private var cssHeight: CGFloat?
-    var awaitsLayoutWidth = false
+    var awaitsLayoutWidth = false {
+        didSet { if awaitsLayoutWidth != oldValue { cancelHeightRecheck() } }
+    }
     private var pendingReport: (cssHeight: CGFloat, loaded: Bool, width: CGFloat?)?
+    private var selfGrowth = ReaderSelfGrowthGuard()
+    private var heightRecheck: Task<Void, Never>?
+    private var heightRecheckID = UUID()
+    var isRecheckingHeight: Bool { heightRecheck != nil }
+    var correctiveHeightTask: Task<Void, Never>? { heightRecheck }
+    // Internal seam for controlled completion of the asynchronous DOM measurement.
+    var measureCorrectiveHeight: (() async throws -> CGFloat)?
     var inlineParts: InlinePartSource?
     weak var owner: ReaderWebViewOwner?
     public private(set) var hoveredLink: HoveredLink?
@@ -76,6 +86,7 @@ public final class ReaderWebView: WKWebView {
     }
 
     func load(_ message: RenderedMessage, width: CGFloat, zoom: CGFloat) {
+        cancelHeightRecheck()
         rendered = message
         contentHash = message.contentHash
         shown = false
@@ -83,6 +94,7 @@ public final class ReaderWebView: WKWebView {
         measuredHeight = nil
         cssHeight = nil
         pendingReport = nil
+        selfGrowth = ReaderSelfGrowthGuard()
         pageZoom = zoom
         alphaValue = 0
         setFrameSize(NSSize(width: max(width, 100), height: frame.height))
@@ -112,8 +124,24 @@ public final class ReaderWebView: WKWebView {
         if navigation === currentNavigation { committed = true }
     }
 
-    func contentHeightDidChange(_ cssHeight: CGFloat, loaded: Bool = true, width: CGFloat? = nil) {
+    func contentHeightDidChange(_ reported: CGFloat, loaded: Bool = true, width: CGFloat? = nil) {
+        cancelHeightRecheck()
+        let id = heightRecheckID
+        applyContentHeight(reported, loaded: loaded, width: width)
+        if heightRecheckID == id, loaded, committed, rendered != nil, !awaitsLayoutWidth,
+           width.map({ abs($0 - bounds.width / pageZoom) <= 1 }) ?? true {
+            recheckHeightAfterLayout()
+        }
+    }
+
+    private func applyContentHeight(_ reported: CGFloat, loaded: Bool, width: CGFloat?) {
         guard committed, rendered != nil else { return }
+        let stoppedBefore = selfGrowth.stopped
+        let cssHeight = selfGrowth.height(for: reported, width: width)
+        if selfGrowth.stopped, !stoppedBefore {
+            Log(.app).notice("reader: the body grew by the same step \(ReaderSelfGrowthGuard.limit) times; "
+                + "it stays at \(Int(cssHeight)) pt")
+        }
         self.cssHeight = cssHeight
         let height = (cssHeight * pageZoom).rounded(.up)
         measuredHeight = height
@@ -131,6 +159,54 @@ public final class ReaderWebView: WKWebView {
             onShown?()
         }
         onHeightChange?(height)
+    }
+
+    private func cancelHeightRecheck() {
+        heightRecheckID = UUID()
+        heightRecheck?.cancel()
+        heightRecheck = nil
+    }
+
+    public override func setFrameSize(_ newSize: NSSize) {
+        if newSize.width != frame.width { cancelHeightRecheck() }
+        super.setFrameSize(newSize)
+    }
+
+    private func recheckHeightAfterLayout() {
+        cancelHeightRecheck()
+        let id = heightRecheckID
+        let navigation = currentNavigation
+        let width = bounds.width
+        let zoom = pageZoom
+        heightRecheck = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                if heightRecheckID == id { heightRecheck = nil }
+            }
+            @MainActor func isCurrent() -> Bool {
+                !Task.isCancelled && heightRecheckID == id && currentNavigation === navigation
+                    && committed && rendered != nil && !awaitsLayoutWidth
+                    && bounds.width == width && pageZoom == zoom
+            }
+            while isCurrent() {
+                let actual: CGFloat
+                do {
+                    if let measureCorrectiveHeight {
+                        actual = try await measureCorrectiveHeight()
+                    } else {
+                        guard let value = try await evaluateJavaScript(
+                            "Math.ceil(document.getElementById('oh-root').getBoundingClientRect().height)",
+                            in: nil, contentWorld: .defaultClient) as? Double else { return }
+                        actual = CGFloat(value)
+                    }
+                } catch { return }
+                guard isCurrent(), actual.isFinite, let previous = cssHeight else { return }
+                guard abs(actual - previous) > 1 else { return }
+                applyContentHeight(actual, loaded: true, width: width / zoom)
+                // Callbacks can supersede this task. Clamping can accept the same height.
+                guard isCurrent(), cssHeight != previous else { return }
+            }
+        }
     }
 
     func layoutWidthSettled() {
@@ -185,8 +261,10 @@ public final class ReaderWebView: WKWebView {
     }
 
     func resetForPool() {
+        cancelHeightRecheck()
         removeFromSuperview()
         stopLoading()
+        measureCorrectiveHeight = nil
         owner = nil
         inlineParts = nil
         onHeightChange = nil
@@ -198,6 +276,7 @@ public final class ReaderWebView: WKWebView {
         measuredHeight = nil
         cssHeight = nil
         pendingReport = nil
+        selfGrowth = ReaderSelfGrowthGuard()
         awaitsLayoutWidth = false
         shown = false
         committed = false
@@ -208,6 +287,7 @@ public final class ReaderWebView: WKWebView {
 
     func setZoom(_ zoom: CGFloat) {
         guard pageZoom != zoom else { return }
+        cancelHeightRecheck()
         pageZoom = zoom
         if let cssHeight { contentHeightDidChange(cssHeight, loaded: shown) }
     }
@@ -295,5 +375,37 @@ public final class ReaderWebView: WKWebView {
             if item.isSeparatorItem, previousWasSeparator { menu.removeItem(item) }
             previousWasSeparator = item.isSeparatorItem
         }
+    }
+}
+
+// A body that grows by the same step on every report is following its own height: content sized from the viewport
+// (which is as tall as the view) with something below it. After `limit` such steps in a row the height stops growing
+// until the next load or another width; it can still shrink.
+struct ReaderSelfGrowthGuard {
+    static let limit = 32
+
+    private var last: CGFloat?
+    private var step: CGFloat?
+    private var streak = 0
+    private var width: CGFloat?
+    private(set) var ceiling: CGFloat?
+
+    var stopped: Bool { ceiling != nil }
+
+    mutating func height(for reported: CGFloat, width newWidth: CGFloat?) -> CGFloat {
+        if let newWidth, let width, abs(newWidth - width) > 1 { self = ReaderSelfGrowthGuard() }
+        if let newWidth { width = newWidth }
+        if let ceiling { return min(reported, ceiling) }
+        defer { last = reported }
+        guard let last, reported > last else {
+            streak = 0
+            step = nil
+            return reported
+        }
+        let delta = reported - last
+        streak = step.map { abs(delta - $0) <= 1 } == true ? streak + 1 : 1
+        step = delta
+        if streak >= Self.limit { ceiling = reported }
+        return reported
     }
 }

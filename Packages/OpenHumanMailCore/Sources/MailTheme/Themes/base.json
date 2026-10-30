@@ -33,8 +33,8 @@
   "border": { "hairline": 1, "control": 1, "focus": 2, "focusOffset": 2, "cursorBar": 2 },
   "density": {
     "compact":     { "row": 32, "splitRow": 48 },
-    "default":     { "row": 36, "splitRow": 52 },
-    "comfortable": { "row": 44, "splitRow": 60 }
+    "default":     { "row": 40, "splitRow": 52 },
+    "comfortable": { "row": 48, "splitRow": 60 }
   },
   "motion": {
     "instant":    { "duration": 0 },

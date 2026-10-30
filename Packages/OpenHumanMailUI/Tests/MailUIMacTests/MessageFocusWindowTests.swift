@@ -74,8 +74,8 @@ import Testing
             #expect(model.focusedMessage == focused)
             try await until {
                 guard let reader = w.liveReader, let view = reader.messageViews[focused] else { return false }
-                return view.isExpanded && view.focusPlate.isHidden && !view.focusBar.isHidden
-                    && reader.messageViews.filter { !$0.value.focusBar.isHidden }.count == 1
+                return view.isExpanded && view.plateLook == .focus
+                    && reader.messageViews.filter { !$0.value.focusPlate.isHidden }.count == 1
             }
             let reader = try #require(w.liveReader)
             let theme = reader.theme
@@ -83,14 +83,13 @@ import Testing
             let image = try #require(snapshot(reader.view), "reader view \(reader.view.bounds)")
             let container = try #require(reader.messageViews[focused])
             let other = try #require(reader.messageViews[keys.last!])
-            let bar = container.focusBar.convert(NSPoint(x: container.focusBar.bounds.midX, y: container.focusBar.bounds.midY),
-                                                 to: reader.view)
             let plate = container.focusPlate.convert(NSPoint(x: container.focusPlate.bounds.maxX - 2,
                                                              y: container.focusPlate.bounds.midY), to: reader.view)
-            let otherBar = other.convert(NSPoint(x: 1, y: other.bounds.midY), to: reader.view)
-            #expect(image.color(at: bar, in: reader.view).matches(theme.component.row.cursorBar), "bar, \(mode)")
-            #expect(image.color(at: plate, in: reader.view).matches(theme.component.thread.cardBg), "no plate, \(mode)")
-            #expect(image.color(at: otherBar, in: reader.view).matches(theme.component.thread.cardBg), "no bar elsewhere, \(mode)")
+            let otherEdge = other.convert(NSPoint(x: other.bounds.maxX - 2, y: other.bounds.midY), to: reader.view)
+            let tint = theme.component.row.bgCursor.composited(over: theme.bgCanvas)
+            #expect(image.color(at: plate, in: reader.view).matches(tint), "the plate, \(mode)")
+            #expect(other.focusPlate.isHidden, "no plate elsewhere, \(mode)")
+            #expect(image.color(at: otherEdge, in: reader.view).matches(theme.bgCanvas), "no plate elsewhere, \(mode)")
             let message = container.accessibilityLabel() ?? ""
             #expect(message.hasSuffix(", focused") && container.isAccessibilitySelected())
         }
@@ -274,8 +273,7 @@ private extension InlineReplyWindow {
     }
 
     func highlighted() -> [MessageKey] {
-        reader.messageViews.filter { !$0.value.focusBar.isHidden && $0.value.cardAppearance == .raised && $0.value.focusPlate.isHidden }
-            .map(\.key)
+        reader.messageViews.filter { $0.value.plateLook == .focus }.map(\.key)
     }
 
     func frameInDocument(_ key: MessageKey) -> NSRect? {

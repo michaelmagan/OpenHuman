@@ -37,14 +37,13 @@ extension RenderSweepTests {
         try await sweepShoot(w.window, screen: "reader-flat-row-focused", theme: theme)
         if let newest { model.focus(newest) }
 
-        let done = try #require(reader.threadActionButtons.first { $0.identifier?.rawValue == ActionID.markDone.rawValue })
-        reader.showTooltipNow(for: done)
-        try await sweepShoot(w.window, screen: "reader-tooltip-title", theme: theme)
-        reader.hideTooltip()
-
         let open = try #require(model.messages.last { $0.isExpanded }?.id)
         let card = try #require(reader.messageViews[open])
         card.mouseEntered(with: enter)
+        let reply = try #require(card.header?.actionButtons.first { $0.identifier?.rawValue == ActionID.reply.rawValue })
+        reader.showTooltipNow(for: reply)
+        try await sweepShoot(w.window, screen: "reader-tooltip-title", theme: theme)
+        reader.hideTooltip()
         let chevron = try #require(card.header?.detailsButton)
         reader.showTooltipNow(for: chevron)
         try await sweepShoot(w.window, screen: "reader-tooltip-details", theme: theme)

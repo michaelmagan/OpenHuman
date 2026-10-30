@@ -7,6 +7,7 @@ import SwiftUI
 
 struct CategoriesTab: View {
     let environment: AppEnvironment?
+    @Environment(\.theme) private var theme
 
     var body: some View {
         SettingsSectionStack {
@@ -24,9 +25,24 @@ struct CategoriesTab: View {
                     Button("Open General") { environment?.settingsNavigator.open(SettingsPageID.general.rawValue) }
                         .disabled(environment == nil)
                 }
+                if let environment, environment.ai != nil {
+                    SettingsRow("Instructions to the model", detail: Self.promptsNote) {
+                        HStack(spacing: theme.space3) {
+                            ForEach(Self.prompts, id: \.self) { id in
+                                Button(PromptCatalog.entry(id)?.title ?? id) { environment.settingsNavigator.openPrompt(id) }
+                                    .accessibilityLabel("Edit the \(PromptCatalog.entry(id)?.title ?? id) prompt")
+                                    .accessibilityIdentifier("settings.categories.prompt.\(id)")
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+
+    static let prompts = [PromptName.autoLabel.rawValue, PromptName.classify.rawValue]
+    static let promptsNote = "Auto labels picks the label; Triage sorts conversations by what they need from you. "
+        + "Each opens its prompt in AI › Prompts."
 
     static func meaning(_ category: AutoLabelCategory) -> String {
         switch category {

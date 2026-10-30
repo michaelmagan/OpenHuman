@@ -18,6 +18,7 @@ public enum CompositionRoot {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 
+    static let storeBusyTitle = "Another copy of OpenHuman Mail is using your mail"
     static let storeNoticeTitle = "Mail couldn't open the mail on this Mac"
 
     static func storeNoticeMessage(_ error: any Error) -> String {
@@ -28,6 +29,11 @@ public enum CompositionRoot {
     }
 
     public static func storeProblem(_ error: any Error) -> StartupProblem {
+        if case StoreError.busy = error {
+            return StartupProblem(title: storeBusyTitle,
+                                  message: "Quit the other copy, then open OpenHuman Mail again. Your Gmail is unchanged.",
+                                  details: nil)
+        }
         if case StoreError.schemaTooNew = error {
             return StartupProblem(title: storeNoticeTitle, message: storeNoticeMessage(error))
         }

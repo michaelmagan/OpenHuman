@@ -64,8 +64,8 @@ public enum InviteCardBuilder {
         case .publish, .other: kind = invite.isCancelled ? .cancelled : .notice
         }
         let title = invite.title ?? String(localized: "(No title)")
-        let me = invite.attendee(in: mine)
-        var response = known ?? me?.response
+        let me = invite.attendees.first { mine.contains($0.email) && $0.email != invite.organizer?.email }
+        var response = me == nil ? nil : (known ?? me?.response)
         if response == .needsAction { response = nil }
         var compact: String?
         if kind == .reply || kind == .counter {
@@ -160,7 +160,7 @@ public enum InviteCardBuilder {
         var out: [InviteCard.Guest] = []
         func add(_ person: CalendarInvite.Person, organizer: Bool) {
             guard !person.isResource, seen.insert(person.email).inserted else { return }
-            let isMe = me.contains(person.email)
+            let isMe = !organizer && person.email != invite.organizer?.email && me.contains(person.email)
             let response = organizer ? invite.attendees.first { $0.email == person.email }?.response ?? person.response
                                      : person.response
             out.append(InviteCard.Guest(title: isMe ? String(localized: "Me") : person.name ?? person.email,

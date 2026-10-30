@@ -47,6 +47,8 @@ public struct ActionContext: Hashable, Sendable {
     public var canRedo: Bool
     public var togglesOn: Set<ActionID>
     public var accountTitles: [String] = []
+    /// The search field is open over the list, whether or not its results are shown yet.
+    public var searchOpen = false
 
     public init(scope: ActionScope = .global, account: AccountID? = nil, accountCount: Int = 0,
                 location: MailLocation? = nil, selection: [ThreadKey] = [], checkedCount: Int = 0,

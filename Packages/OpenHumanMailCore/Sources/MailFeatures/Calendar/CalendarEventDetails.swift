@@ -74,10 +74,12 @@ public struct CalendarEventDetails: Sendable, Hashable {
         let place = event.location?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         location = place.isEmpty ? nil : place
         joinLink = event.meetLink.flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
-        let mine = Set(myAddresses.map { $0.lowercased() })
+        var mine = Set(myAddresses.map { $0.lowercased() })
+        if let alias = event.respondsAs { mine.insert(alias.lowercased()) }
         let people = event.extras.guests.isEmpty ? event.attendees.map { CalendarGuest($0) } : event.extras.guests
         let shownGuests = people.map { person in
-            let isMe = mine.contains(person.email.lowercased())
+            let isMe = (person.isOrganizer == false || (event.organizerIsMe == true && person.isOrganizer == true))
+                && mine.contains(person.email.lowercased())
             let answer = isMe ? (myResponse ?? person.response ?? event.myResponse) : person.response
             return Guest(email: person.email, name: person.name, isOptional: person.isOptional, isMe: isMe, response: answer)
         }
@@ -91,7 +93,9 @@ public struct CalendarEventDetails: Sendable, Hashable {
         let organizes = event.organizerIsMe == true || (event.organizerIsMe == nil && event.attendees.isEmpty)
         organizedByMe = organizes
         canOpenEditor = organizes && !event.id.isEmpty && !event.id.hasPrefix(CalendarSidebarModel.placeholderPrefix)
-        answerText = organizes ? nil : event.myResponse.map { String(localized: "Your answer: \($0.title)") }
+        answerText = organizes ? nil
+            : event.myResponse.map { String(localized: "Your answer: \($0.title)") }
+            ?? (event.hidesMyResponse ? CalendarEvent.responseNotShown : nil)
         if !organizes {
             organizerText = String(localized: "Someone else organizes this event: only they can change it.")
         } else if event.organizerIsMe == true, !event.attendees.isEmpty {

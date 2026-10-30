@@ -36,6 +36,20 @@ struct ComposeTextSettingsTests {
         #expect(defaults.object(forKey: "compose.auto_lists") as? Bool == false, "the documented key")
     }
 
+    @Test func thePastedImageSizeStartsAtMediumAndStays() {
+        let defaults = suite()
+        defer { defaults.cleanup() }
+        let a = ComposeTextSettings(defaults: defaults, system: FakeSystemTextSettings())
+        #expect(a.pastedImageSize == .medium)
+        a.pastedImageSize = .small
+        let b = ComposeTextSettings(defaults: defaults, system: FakeSystemTextSettings())
+        #expect(b.pastedImageSize == .small)
+        #expect(defaults.string(forKey: "compose.pasted_image_size") == "small", "the documented key")
+        defaults.set("huge", forKey: "compose.pasted_image_size")
+        #expect(ComposeTextSettings(defaults: defaults, system: FakeSystemTextSettings()).pastedImageSize == .medium,
+                "an unknown value falls back to the default")
+    }
+
     @Test func sameAsMacOSFollowsTheSystemAndOnOrOffOverride() {
         let system = FakeSystemTextSettings(SystemTextValues(autocorrect: false, textReplacement: false,
                                                              quoteSubstitution: true, dashSubstitution: false))

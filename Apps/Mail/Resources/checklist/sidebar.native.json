@@ -1,0 +1,15 @@
+{
+  "id": "sidebar.native",
+  "area": "Sidebar",
+  "title": "The sidebar lists All Inboxes, each account with its mailboxes, coloured labels and Calendar, with the system selection",
+  "steps": [
+    "Launch with -UseFakeData (two fake accounts) and press Control-Command-S if the sidebar is hidden",
+    "Click Sent under the second account, then Inbox under the first, then All Inboxes; press Control-1 and G S",
+    "Expand Projects under Labels and click Atlas; collapse the second account's section, then click another app so the window is inactive",
+    "Right-click the first account's title and the All Inboxes row and read the menus"
+  ],
+  "deepLink": null,
+  "expected": "Each account shows its picture and name, an Inbox row (its split tabs) and its folders with unread badges. Clicking a row opens it in that account; keys move the selection too. Tags match the label chips in the list. Selection uses the system style and turns grey while the window is inactive. Account menus offer Switch to and Sign in again; All Inboxes offers Hide count and Hide All Inboxes.",
+  "requires": "fake",
+  "addedIn": "2026-10-20"
+}

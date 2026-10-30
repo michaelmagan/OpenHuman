@@ -2,6 +2,8 @@ import MailFeatures
 import MailTheme
 import SwiftUI
 
+/// The hint line at the foot of the mail column: shortcut hints with stroked keycaps on the left, sync and send
+/// status on the right.
 public struct FooterView: View {
     let status: StatusModel?
     let hints: HintBarModel?
@@ -13,17 +15,17 @@ public struct FooterView: View {
         self.theme = theme
     }
 
+    public static var height: CGFloat { NativeMetrics.HintLine.height }
+
     public static func isVisible(status: StatusModel?, hints: HintBarModel?) -> Bool {
         hints?.isVisible == true || status?.isVisible == true
     }
 
     public var body: some View {
-        let footer = theme.component.footer
         let showsHints = hints?.isVisible == true
-        HStack(spacing: theme.space5) {
-            Spacer(minLength: 0)
+        HStack(spacing: NativeMetrics.HintLine.itemGap) {
             if let hints, showsHints {
-                HStack(spacing: theme.space2) {
+                HStack(spacing: NativeMetrics.HintLine.keyGap) {
                     HintBarView(model: hints, theme: theme)
                     closeButton(hints)
                 }
@@ -31,13 +33,11 @@ public struct FooterView: View {
             Spacer(minLength: 0)
             if let status { StatusBarView(model: status, theme: theme) }
         }
-        .padding(.horizontal, theme.space5)
-        .frame(height: theme.footerHeight)
+        .padding(.horizontal, NativeMetrics.HintLine.paddingX)
+        .frame(height: Self.height)
         .frame(maxWidth: .infinity)
-        .background(footer.bg.color)
-        .overlay(alignment: .top) {
-            Rectangle().fill(footer.divider.color).frame(height: theme.borderWidthHairline)
-        }
+        .background(.background)
+        .overlay(alignment: .top) { Divider() }
         .contextMenu {
             if let hints, showsHints {
                 Button("Hide Shortcut Hints") { Task { await hints.dismiss() } }
@@ -51,9 +51,9 @@ public struct FooterView: View {
             Task { await hints.dismiss() }
         } label: {
             Image(systemName: "xmark")
-                .font(.system(size: ShellMetrics.statusIconSize, weight: .light))
-                .foregroundStyle(theme.textTertiary.color)
-                .frame(width: theme.footerHeight, height: theme.footerHeight)
+                .font(.system(size: NativeMetrics.HintLine.textSize, weight: .regular))
+                .foregroundStyle(.tertiary)
+                .frame(width: Self.height, height: Self.height)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

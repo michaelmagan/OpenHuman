@@ -182,6 +182,25 @@ func describe(_ term: SearchTerm) -> String {
         #expect(throws: Never.self) { try parseSearchQuery(String(repeating: "(", count: 10) + "a" + String(repeating: ")", count: 10)) }
     }
 
+    @Test(arguments: ["larger:9999999999g", "smaller:8589934592g", "size:9999999999g", "larger:9999999999999999m"])
+    func sizesThatOverflowAreRejected(_ input: String) {
+        #expect(throws: StoreError.self) { try parseSearchQuery(input) }
+    }
+
+    @Test func extremeSizesAndDatesStillParse() throws {
+        #expect(try parseSearchQuery("larger:8589934591g").terms == [.larger(8_589_934_591 << 30)])
+        #expect(try parseSearchQuery("smaller:9999999999k").terms == [.smaller(9_999_999_999 << 10)])
+        #expect(try parseSearchQuery("size:9999999999").terms == [.and([.larger(9_999_999_998), .smaller(10_000_000_000)])])
+        #expect(try parseSearchQuery("larger:0").terms == [.larger(0)])
+        for input in ["after:99999999999", "before:100000000", "before:9999/12/31", "after:0001/01/01",
+                      "older_than:999999y", "newer_than:999999m", "older_than:999999d", "newer_than:0d"] {
+            let query = try parseSearchQuery(input)
+            let compiled = SearchCompiler.compile(query, accounts: nil)
+            #expect(!compiled.predicate.isEmpty, "\(input)")
+            #expect(!query.canonicalText.isEmpty, "\(input)")
+        }
+    }
+
     @Test func parseSearchOnTheStoreUsesTheSameParser() throws {
         let store = try MailStore.openInMemoryForTesting()
         #expect(try store.parseSearch("from:a invoice").terms == [.address(.from, "a"), .text("invoice", field: nil)])

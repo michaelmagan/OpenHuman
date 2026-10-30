@@ -25,7 +25,6 @@ public actor OperationDrainer {
     public static let maxSendAttempts = 5
     public static let unconfirmedRetry: Duration = .seconds(30)
     public static let staleScheduleAge: Duration = .seconds(120)
-    static let maxBisectionDepth = 6
     static let perMessageConcurrency = 4
 
     public let account: AccountID
@@ -240,7 +239,7 @@ public actor OperationDrainer {
             let named = try await context.labels.ensure(addNames, report: &report)
             for start in stride(from: 0, to: ids.count, by: Self.maxIDsPerCall) {
                 let chunk = Array(ids[start..<min(start + Self.maxIDsPerCall, ids.count)])
-                try await batchModify(chunk, add: add + named, remove: remove, depth: 0, report: &report)
+                try await batchModify(chunk, add: add + named, remove: remove, report: &report)
             }
         } catch {
             return Self.classify(error, now: clock.now)
@@ -248,20 +247,20 @@ public actor OperationDrainer {
         return Decision(.complete(.labelsApplied))
     }
 
-    private func batchModify(_ ids: [String], add: [String], remove: [String], depth: Int,
-                             report: inout PassReport) async throws {
+    // Why: halving down to single ids drops only the missing ones; 1000 ids need at most 10 levels
+    private func batchModify(_ ids: [String], add: [String], remove: [String], report: inout PassReport) async throws {
         guard !ids.isEmpty else { return }
         do {
             report.gmailCalls += 1
             try await api.batchModifyMessages(ids: ids, add: add, remove: remove)
         } catch GmailError.notFound {
-            guard ids.count > 1, depth < Self.maxBisectionDepth else {
-                log.notice("batchModify dropped \(ids.count) missing message id(s)")
+            guard ids.count > 1 else {
+                log.notice("batchModify dropped a missing message id")
                 return
             }
             let half = ids.count / 2
-            try await batchModify(Array(ids[..<half]), add: add, remove: remove, depth: depth + 1, report: &report)
-            try await batchModify(Array(ids[half...]), add: add, remove: remove, depth: depth + 1, report: &report)
+            try await batchModify(Array(ids[..<half]), add: add, remove: remove, report: &report)
+            try await batchModify(Array(ids[half...]), add: add, remove: remove, report: &report)
         }
     }
 
@@ -331,14 +330,17 @@ public actor OperationDrainer {
 
     private func apply(_ decision: Decision, to ops: [OperationItem], report: inout PassReport) {
         let now = clock.now
+        var completed = 0
         for op in ops {
             switch decision.disposition {
             case .complete(let outcome):
                 do {
                     try store.complete(op.id, outcome: outcome)
                     report.succeeded += 1
+                    completed += 1
                 } catch {
                     log.error("complete failed for op \(op.id.rawValue): \(AccountSyncer.code(error))")
+                    completionFailed(op, at: now, report: &report)
                 }
             case let .retry(code, message, at, limit):
                 if op.attempts + 1 >= limit {
@@ -371,11 +373,31 @@ public actor OperationDrainer {
             try? store.setAccountStatus(account, .needsReauth)
             emit(.accountNeedsReauth(account))
         }
-        if let event = decision.event { emit(event) }
         if case .complete = decision.disposition {
+            guard completed > 0 else { return }
+            if let event = decision.event { emit(event) }
             onApplied(now)
-        } else if case .sent? = decision.event {
-            onApplied(now)
+        } else {
+            if let event = decision.event { emit(event) }
+            if case .sent? = decision.event { onApplied(now) }
+        }
+    }
+
+    // Why: Gmail has the change but the store did not record it; the retry checks Gmail again (a send looks for its
+    // sent copy instead of sending twice), so the op neither sits in flight until relaunch nor reports success early
+    private func completionFailed(_ op: OperationItem, at now: Date, report: inout PassReport) {
+        let message = "applied in Gmail but not recorded on this Mac"
+        let limit = op.kind == .sendDraft ? Self.maxSendAttempts : Self.maxAttempts
+        guard op.attempts + 1 < limit else {
+            failPermanently(op, code: "complete_failed", message: message, report: &report)
+            return
+        }
+        do {
+            let when = now.addingTimeInterval(Self.backoff(attempts: op.attempts).timeInterval)
+            try store.fail(op.id, code: "complete_failed", message: message, retryAt: when)
+            report.retried += 1
+        } catch {
+            log.error("fail(retry) failed for op \(op.id.rawValue): \(AccountSyncer.code(error))")
         }
     }
 

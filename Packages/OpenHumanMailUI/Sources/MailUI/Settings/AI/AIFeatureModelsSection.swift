@@ -6,6 +6,7 @@ import SwiftUI
 public struct AIFeatureModelsSection: View {
     @State private var choices: [AIModelChoiceModel]
     @State private var background: [AIBackgroundModel] = []
+    @State private var loaded = false
     private let center: AICenter
     private let reloadKey: Int
     @Environment(\.theme) private var theme
@@ -22,34 +23,40 @@ public struct AIFeatureModelsSection: View {
         })
     }
 
+    // Why: the grouped form builds rows lazily, so the reload rides on the footer, which shows with the section
     public var body: some View {
         let shown = choices.filter { !$0.options.isEmpty }
-        VStack(alignment: .leading, spacing: 0) {
-            if !shown.isEmpty || !background.isEmpty { section(shown) }
-        }
-        .task(id: reloadKey) { await reload() }
-    }
-
-    private func reload() async {
-        for choice in choices { await choice.refresh() }
-        background = await center.backgroundModels()
-    }
-
-    private func section(_ shown: [AIModelChoiceModel]) -> some View {
-        SettingsSection(String(localized: "Model for each feature"), footnote: Self.footnote) {
+        Section {
+            if shown.isEmpty && background.isEmpty {
+                SettingsRow(String(localized: "Models"), detail: loaded ? Self.noModelsText : Self.checkingText)
+                    .accessibilityIdentifier("settings.ai.model.none")
+            }
             ForEach(shown, id: \.feature) { choice in
                 row(choice).accessibilityIdentifier("settings.ai.model.\(choice.feature.rawValue)")
             }
             ForEach(background) { item in
                 SettingsRow(item.title, detail: item.detail) {
                     Text(verbatim: item.model)
-                        .themeFont(theme.typeBody)
-                        .foregroundStyle(theme.textSecondary.color)
+                        .foregroundStyle(.secondary)
                 }
                 .accessibilityIdentifier("settings.ai.model.background.\(item.id)")
             }
+        } header: {
+            Text(String(localized: "Model for each feature")).accessibilityAddTraits(.isHeader)
+        } footer: {
+            SettingsFootnote(Self.footnote)
+                .task(id: reloadKey) { await reload() }
         }
     }
+
+    private func reload() async {
+        for choice in choices { await choice.refresh() }
+        background = await center.backgroundModels()
+        loaded = true
+    }
+
+    static let checkingText = String(localized: "Checking which models are ready…")
+    static let noModelsText = String(localized: "No feature has a model it can use yet. Allow one under Models.")
 
     @ViewBuilder private func row(_ choice: AIModelChoiceModel) -> some View {
         let title = AITraceWording.feature(choice.feature)
@@ -58,8 +65,7 @@ public struct AIFeatureModelsSection: View {
                         status: choice.note, statusTone: .warning) {
                 HStack(spacing: theme.space2) {
                     Text(verbatim: choice.chosenName ?? choice.options.first?.name ?? "")
-                        .themeFont(theme.typeBody)
-                        .foregroundStyle(theme.textSecondary.color)
+                        .foregroundStyle(.secondary)
                     if choice.options.first?.isDefault == true { AIDefaultTag() }
                 }
             }

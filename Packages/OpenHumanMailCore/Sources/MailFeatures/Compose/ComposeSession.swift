@@ -132,6 +132,7 @@ public final class ComposeSession: Identifiable {
 
     public private(set) var saveState: SaveState = .idle
     public private(set) var sendAt: Date?
+    public private(set) var sendCondition: SendLaterCondition = .always
     public private(set) var draftStatus: DraftStatus = .editing
     public private(set) var draftError: String?
     public private(set) var source: DraftSource = .user
@@ -141,7 +142,10 @@ public final class ComposeSession: Identifiable {
     public private(set) var linkRecipients: [EmailAddress]?
     public private(set) var linkTriedBcc = false
     public var isLinkConfirmationShown = false
+    public internal(set) var linkScheduleDate: Date?
+    @ObservationIgnored var linkScheduleCondition: SendLaterCondition = .always
     public var sendConfirmation: SendConfirmation?
+    public var preSendWarning: PreSendWarning?
     public private(set) var snippetPicker: SnippetPickerModel?
     public internal(set) var mentionPicker: MentionPickerModel?
     @ObservationIgnored let mentionState = MentionState()
@@ -172,6 +176,7 @@ public final class ComposeSession: Identifiable {
     @ObservationIgnored var linkConfirmed = false
     @ObservationIgnored var placeholdersAcknowledged = false
     @ObservationIgnored var sendConfirmed = false
+    @ObservationIgnored var preSendChecked = false
     @ObservationIgnored var unresolvedPlaceholders: [String] = []
     @ObservationIgnored var snippetPhrases: [String] = []
     @ObservationIgnored public private(set) var hasUserEdits = false
@@ -556,6 +561,7 @@ public final class ComposeSession: Identifiable {
 
     public func editLinkRecipients() {
         isLinkConfirmationShown = false
+        linkScheduleDate = nil
     }
 
     public func cancelSendConfirmation() {
@@ -569,6 +575,7 @@ public final class ComposeSession: Identifiable {
             linkRecipients = nil
             linkConfirmed = true
             isLinkConfirmationShown = false
+            linkScheduleDate = nil
         }
         if notice?.kind != .info { notice = nil }
         edited()
@@ -724,6 +731,7 @@ public final class ComposeSession: Identifiable {
 
     func apply(row: DraftSummary) {
         sendAt = row.sendAt
+        sendCondition = row.sendCondition
         draftStatus = row.status
         draftError = row.lastError
         source = row.source
@@ -820,9 +828,15 @@ public final class ComposeSession: Identifiable {
         let typed = document
         let typedSubject = subject
         let typedTo = to.tokens, typedCc = cc.tokens, typedBcc = bcc.tokens
+        let typedAttachments = attachments
         let wasDirty = dirty
         load(from: row, recovered: nil)
         applyQuickQuote()
+        let added = typedAttachments.filter { !attachments.contains($0) }
+        if !added.isEmpty {
+            attachments += added
+            dirty = true
+        }
         if wasDirty {
             loading = true
             if typed != RichTextDocument() { document = typed; documentRevision += 1 }

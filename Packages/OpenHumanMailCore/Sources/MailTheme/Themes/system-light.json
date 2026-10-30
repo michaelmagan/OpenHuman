@@ -124,7 +124,7 @@
       "bg.sidebar": "{win.925}",
       "bg.elevated": "{white}",
       "bg.sunken": "{sunk.906}",
-      "bg.canvas": "{win.925}",
+      "bg.canvas": "{white}",
       "bg.card": "{white}",
       "bg.row.hover": "{hov.949}",
       "bg.row.selected": "{sel.863}",
