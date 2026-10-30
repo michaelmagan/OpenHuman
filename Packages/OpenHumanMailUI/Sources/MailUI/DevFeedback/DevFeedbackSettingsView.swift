@@ -18,7 +18,7 @@ public struct DevFeedbackSettingsView: View {
     public var body: some View {
         if availability.isAvailable {
             SettingsSection("Developer feedback (temporary)") {
-                SettingsRow("Developer feedback mode", detail: "Adds the Developer menu: Test checklist… (⌥⌘T) and Give "
+                SettingsRow("Developer feedback mode", detail: "Adds the Developer menu: Test checklist… (⌃⌥⌘T) and Give "
                             + "feedback… (⌃⌥⌘F). Temporary, for dogfooding; nothing leaves this Mac unless you send it.",
                             isOn: $settings.isEnabled)
                 SettingsRow("Receiving device's Tailscale name", status: targetProblem, statusTone: .warning, labelsControl: true) {

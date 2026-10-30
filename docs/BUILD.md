@@ -109,6 +109,10 @@ The app has three build configurations, all from the one `Mail` target:
 | `DevTools` | `OH_DEV_TOOLS` | Release optimisation plus the developer tools: the Developer menu (test checklist, feedback over Tailscale), Settings › Advanced › Developer options (including Show debugging tools), the sample-data launch arguments and the developer variables below. Same bundle id and data as Release. |
 | `Release` | none | Nothing developer-only. This is the build `Tools/release/make-dmg.sh` ships; it updates itself only when made with `--enable-updates`. |
 
+The Developer menu uses ⌃⌥⌘T for Test checklist… and ⌃⌥⌘F for Give feedback….
+The key router leaves these shortcuts unbound so SwiftUI's menu commands handle
+them. ⌥⌘T belongs to the system View › Show/Hide Toolbar command.
+
 ```sh
 Tools/ci/build-app.sh --configuration DevTools --local-install
 ```
