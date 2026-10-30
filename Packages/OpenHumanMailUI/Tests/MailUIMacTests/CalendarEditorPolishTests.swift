@@ -262,7 +262,18 @@ struct CalendarEditorPolishTests {
         #expect(hosting.fittingSize == size, "the list floats; the editor keeps its height")
         #expect(CalendarEditorProbe.frames(of: others, in: hosting) == frames, "no other field moved")
         let field = window.convertToScreen(guests.convert(guests.bounds, to: nil))
-        #expect(panel.frame.maxY - CompletionPanel.shadowRoom <= field.minY, "the list hangs under the field")
+        let screen = window.screen?.visibleFrame ?? window.frame
+        let content = panel.frame.insetBy(dx: CompletionPanel.shadowRoom, dy: CompletionPanel.shadowRoom)
+        let fitsBelow = field.minY - CompletionPanel.gap - content.height >= screen.minY
+        let fitsAbove = field.maxY + CompletionPanel.gap + content.height <= screen.maxY
+        #expect(fitsBelow || fitsAbove, "the screen has room for six suggestions beside the field")
+        if fitsBelow {
+            #expect(content.maxY == (field.minY - CompletionPanel.gap).rounded(), "the list hangs just under the field")
+        } else {
+            #expect(content.minY == (field.maxY + CompletionPanel.gap).rounded(),
+                    "near the screen bottom the list opens just above the field")
+        }
+        #expect(screen.contains(content), "the suggestions stay inside the visible screen")
         #expect(panel.frame.height == CompletionPanel.size(fieldWidth: field.width, rows: 6).height)
 
         #expect(list.handle(.down) == .moved && list.cursor == 1)

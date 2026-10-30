@@ -12,8 +12,11 @@ import Testing
 // Counts the window's constraint passes. AppKit stops a window that keeps asking for another pass inside one display
 // cycle; before it does, the count climbs here.
 final class ConstraintPassWindow: NSWindow {
-    // Every call in this display cycle; AppKit also makes one before each layout of a subtree
+    // Every call in this sampling interval; AppKit also makes one before each layout of a subtree
     var constraintPasses = 0
+    // A suspended sample can span several run-loop turns. Keep their maximum, rather than adding them together.
+    var maxPassesInTurn = 0
+    private var passesInTurn = 0
     // Calls that found a view asking to update its constraints
     var pendingPasses = 0
     // Calls made from inside another call
@@ -23,8 +26,19 @@ final class ConstraintPassWindow: NSWindow {
 
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 
+    func finishTurn() { passesInTurn = 0 }
+
+    func startSample() {
+        constraintPasses = 0
+        pendingPasses = 0
+        nestedPasses = 0
+        maxPassesInTurn = passesInTurn
+    }
+
     override func updateConstraintsIfNeeded() {
         constraintPasses += 1
+        passesInTurn += 1
+        maxPassesInTurn = max(maxPassesInTurn, passesInTurn)
         if inside > 0 { nestedPasses += 1 }
         let tracer = self.tracer?.traces == true ? self.tracer : nil
         if let tracer {
@@ -171,12 +185,10 @@ final class LayoutStallWatchdog: @unchecked Sendable {
 enum LayoutLoopProbe {
     static let cycles = 200
     static let settledCycles = 20
-    // The limit counts every call of the window's updateConstraintsIfNeeded in one display cycle. AppKit makes one
-    // before each layout of a subtree as well as for each real pass, so a settled cycle shows a few and the cycle
-    // that first lays out a card full of AppKit controls shows more. 32 is a first bound: each run prints its
-    // counts on a "LayoutLoop" line and in its report, and the bound belongs a margin above the most the card, the
-    // event card and the reply take. AppKit itself stops a cycle once its passes outnumber the window's views (the
-    // report gives that number); a count far below it that comes back cycle after cycle is still a loop.
+    // Count every updateConstraintsIfNeeded call in an actual main run-loop turn, including redundant calls before
+    // subtree layouts. A sleep is only a sampling interval: on a busy runner several turns can pass before its
+    // continuation runs. Their sum is not a display-cycle cost. Keep the same 32-call bound for each turn, and keep
+    // the raw interval totals in the report. The watchdog also catches a pass that never returns.
     static let passesPerCycle = 32
     // Once a cycle is over the limit, this many more run so the report shows whether the loop lasts
     static let cyclesAfterLimit = 10
@@ -189,6 +201,7 @@ enum LayoutLoopProbe {
 
     struct Cycle {
         var calls: Int
+        var peakCalls: Int
         var pending: Int
         var nested: Int
         var milliseconds: Int
@@ -209,17 +222,17 @@ enum LayoutLoopProbe {
         var reportPath = ""
     }
 
-    // The calls in each of the first cycles, each as calls/with a view asking/from inside another call
+    // Each sample's total calls / peak in one turn / calls with a view asking / nested calls
     static func sequence(_ report: Report) -> String {
-        report.cycles.prefix(reportedCycles).map { "\($0.calls)/\($0.pending)/\($0.nested)" }.joined(separator: " ")
+        report.cycles.prefix(reportedCycles).map { "\($0.calls)/\($0.peakCalls)/\($0.pending)/\($0.nested)" }.joined(separator: " ")
     }
 
     static func summary(_ report: Report) -> String {
         let top = report.askers.prefix(3).map { ConstraintPassTracer.line($0) }.joined(separator: "\n  ")
-        let over = report.firstOverLimit.map { "cycle \($0)" } ?? "none"
-        return "max \(report.maxPasses) calls in a cycle (first over \(passesPerCycle): \(over)), "
-            + "\(report.viewCount) views in the window; first \(reportedCycles) cycles "
-            + "(calls/with a view asking/nested): \(sequence(report))\n"
+        let over = report.firstOverLimit.map { "sample \($0)" } ?? "none"
+        return "max \(report.maxPasses) calls in a run-loop turn (first sample over \(passesPerCycle): \(over)), "
+            + "\(report.viewCount) views in the window; first \(reportedCycles) samples "
+            + "(total calls/peak in one turn/with a view asking/nested): \(sequence(report))\n"
             + "views asking most:\n  \(top.isEmpty ? "none" : top)\nreport: \(report.reportPath)"
     }
 
@@ -268,8 +281,8 @@ enum LayoutLoopProbe {
             .flatMap { [$0.convert($0.bounds, to: nil), $0.contentView.convert($0.contentView.bounds, to: nil)] }
     }
 
-    // Runs the window for `cycles` display cycles, `step` running before each one. A cycle over the pass limit ends
-    // the run `cyclesAfterLimit` cycles later: a loop is found, and the cycles after those would only spin
+    // Samples the window `cycles` times, running `step` before each interval. A turn over the pass limit ends the
+    // run `cyclesAfterLimit` samples later so the report also shows whether the loop lasts.
     static func run(_ w: InlineReplyWindow, _ state: String, step: (Int) -> Void = { _ in }) async throws -> Report {
         let window = try #require(w.window as? ConstraintPassWindow)
         let watchdog = LayoutStallWatchdog(seconds: stallSeconds, state: state)
@@ -278,6 +291,17 @@ enum LayoutLoopProbe {
         defer {
             watchdog.stop()
             window.tracer = nil
+        }
+        window.finishTurn()
+        // Observe after AppKit's work, immediately before the run loop sleeps or exits. This also covers turns
+        // that occur while Task.sleep's continuation is waiting for the main actor.
+        let boundaries = CFRunLoopActivity.beforeWaiting.rawValue | CFRunLoopActivity.exit.rawValue
+        let observer = try #require(CFRunLoopObserverCreateWithHandler(nil, boundaries, true, .max) { [weak window] _, _ in
+            MainActor.assumeIsolated { window?.finishTurn() }
+        })
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        defer {
+            CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes)
         }
         let clock = ContinuousClock()
         let deadline = clock.now + runBudget
@@ -288,27 +312,25 @@ enum LayoutLoopProbe {
             watchdog.beat("cycle \(cycle)")
             step(cycle)
             forced.append(forceLegacyScrollBars(in: window))
-            window.constraintPasses = 0
-            window.pendingPasses = 0
-            window.nestedPasses = 0
+            window.startSample()
             tracer.startCycle()
             let started = clock.now
             window.displayIfNeeded()
-            try await Task.sleep(for: .milliseconds(4)) // flake-ok: room for a display cycle, not a wait for a result
+            try await Task.sleep(for: .milliseconds(4)) // flake-ok: sampling interval; the observer measures turn boundaries
             let took = clock.now - started
-            report.cycles.append(Cycle(calls: window.constraintPasses, pending: window.pendingPasses,
-                                       nested: window.nestedPasses,
+            report.cycles.append(Cycle(calls: window.constraintPasses, peakCalls: window.maxPassesInTurn,
+                                       pending: window.pendingPasses, nested: window.nestedPasses,
                                        milliseconds: Int(took.components.seconds * 1000
                                            + took.components.attoseconds / 1_000_000_000_000_000),
                                        windowFrame: window.frame))
             report.cyclesRun = cycle + 1
-            report.maxPasses = max(report.maxPasses, window.constraintPasses)
+            report.maxPasses = max(report.maxPasses, window.maxPassesInTurn)
             let now = shape(of: window)
             if let last = shapes.last, last != now { report.changes += 1 }
             shapes.append(now)
-            if window.constraintPasses > passesPerCycle, report.firstOverLimit == nil {
+            if window.maxPassesInTurn > passesPerCycle, report.firstOverLimit == nil {
                 report.firstOverLimit = cycle
-                report.stopped = "cycle \(cycle) took \(window.constraintPasses) constraint passes"
+                report.stopped = "sample \(cycle) had \(window.maxPassesInTurn) constraint calls in one run-loop turn"
             }
             if let first = report.firstOverLimit, cycle >= first + cyclesAfterLimit { break }
             if clock.now > deadline {
@@ -336,17 +358,17 @@ enum LayoutLoopProbe {
         var lines = [
             state,
             "views in the window: \(report.viewCount) (AppKit stops a cycle whose passes outnumber them)",
-            "cycles run: \(report.cyclesRun), stopped: \(report.stopped ?? "no"), "
-                + "max calls in a cycle: \(report.maxPasses)",
-            "first cycle over \(passesPerCycle): \(report.firstOverLimit.map { String($0) } ?? "none")",
+            "samples run: \(report.cyclesRun), stopped: \(report.stopped ?? "no"), "
+                + "max calls in a run-loop turn: \(report.maxPasses)",
+            "first sample over \(passesPerCycle): \(report.firstOverLimit.map { String($0) } ?? "none")",
             "scroll views and clips moved \(report.changes) times; still in the last \(settledCycles) cycles: "
                 + "\(report.tailStable)",
             "",
-            "cycle: calls, with a view asking, nested, ms, window frame",
+            "sample: total calls, max calls in one turn, with a view asking, nested, ms, window frame",
         ]
         for (index, cycle) in report.cycles.enumerated()
         where index < 40 || cycle.calls > passesPerCycle || index >= report.cycles.count - 5 {
-            lines.append("\(index): \(cycle.calls), \(cycle.pending), \(cycle.nested), \(cycle.milliseconds), "
+            lines.append("\(index): \(cycle.calls), \(cycle.peakCalls), \(cycle.pending), \(cycle.nested), \(cycle.milliseconds), "
                 + "\(NSStringFromRect(cycle.windowFrame))")
         }
         lines.append("")
@@ -368,11 +390,11 @@ enum LayoutLoopProbe {
 
     static func expectSettled(_ report: Report, _ state: String, sourceLocation: SourceLocation = #_sourceLocation) {
         #expect(report.maxPasses <= passesPerCycle,
-                "\(state): at most \(passesPerCycle) constraint passes a cycle; \(summary(report))",
+                "\(state): at most \(passesPerCycle) constraint calls per run-loop turn; \(summary(report))",
                 sourceLocation: sourceLocation)
         if report.maxPasses <= passesPerCycle {
             #expect(report.stopped == nil && report.cyclesRun == cycles,
-                    "\(state): all \(cycles) display cycles run, stopped after \(report.stopped ?? "none")",
+                    "\(state): all \(cycles) sampling intervals run, stopped after \(report.stopped ?? "none")",
                     sourceLocation: sourceLocation)
         }
         // A scroll view whose style SwiftUI keeps resetting is switched every cycle, which moves its clip by itself

@@ -62,7 +62,8 @@ private final class SurfaceRecord {
         hosting.layoutSubtreeIfNeeded()
         try await until(timeout: testBackstop) {
             hosting.layoutSubtreeIfNeeded()
-            return record.surface == requested
+            // Wait for the signal; Reduce Transparency can resolve the requested glass to material.
+            return record.surface != nil
         }
         return record.surface
     }
