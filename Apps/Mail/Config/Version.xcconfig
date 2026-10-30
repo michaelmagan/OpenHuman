@@ -1,4 +1,4 @@
 // The version people see (three numbers) and the release channel shown beside it. Tools/release/bump-version.sh
 // raises the version. The release scripts and the app read both from here.
-MARKETING_VERSION = 0.1.0
+MARKETING_VERSION = 0.1.1
 OH_RELEASE_CHANNEL = early-development
