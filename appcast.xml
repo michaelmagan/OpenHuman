@@ -2,8 +2,40 @@
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
     <title>OpenHuman Mail</title>
-    <link>https://github.com/michaelmagan/OpenHuman</link>
-    <description>Update feed for OpenHuman Mail.</description>
+    <link>https://raw.githubusercontent.com/michaelmagan/OpenHuman/gh-pages/appcast.xml</link>
+    <description>Most recent updates to OpenHuman Mail</description>
     <language>en</language>
+    <item>
+      <title>Version 0.1.1</title>
+      <pubDate>Fri, 30 Oct 2026 05:42:47 +0000</pubDate>
+      <sparkle:version>1213</sparkle:version>
+      <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+      <style>
+        h2, h3, h4 { font-size: 1em; margin: 1em 0 0.3em; }
+        p { margin: 0.4em 0; }
+        ul { margin: 0.2em 0; padding-left: 1.4em; }
+        li { margin: 0.15em 0; }
+      </style>
+      <p>Early development build — expect rough edges. Please send feedback.</p>
+      <p>Requires Apple silicon and macOS 26.0 or later. During onboarding, import your own Google Desktop OAuth client.</p>
+      <h3>Changes since 0.1.0</h3>
+      <ul>
+        <li>A native redesign across the inbox, reader, composer, settings, and calendar.</li>
+        <li>Calendar invites with guest editing, drag interactions, an outline view, and an RSVP card in the reader.</li>
+        <li>Calendar fixes for using two accounts, including account-specific event identity and RSVP handling.</li>
+        <li>Reader layout and lifetime fixes for more reliable message viewing.</li>
+        <li>In-app updates through Check for Updates and Settings.</li>
+      </ul>
+      <h3>Known limitations</h3>
+      <ul>
+        <li>This is an early development pre-release.</li>
+        <li>No iCloud sync in this build.</li>
+        <li>A Google Desktop OAuth client of your own is required; no shared client is bundled.</li>
+      </ul>
+      ]]></description>
+      <enclosure url="https://github.com/michaelmagan/OpenHuman/releases/download/v0.1.1/OpenHuman-Mail-0.1.1.dmg" length="36445536" type="application/octet-stream" sparkle:edSignature="O0YGqeh1G+0iwbN0qbm88NpxwKuYFSnO505MppsJKVawBgAMPqcgeUlZN9Y3pMdZfhDJNjpznp22kXLfJ5uxCg==" />
+    </item>
   </channel>
 </rss>
