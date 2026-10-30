@@ -24,8 +24,6 @@ final class ConstraintPassWindow: NSWindow {
     var tracer: ConstraintPassTracer?
     private var inside = 0
 
-    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
-
     func finishTurn() { passesInTurn = 0 }
 
     func startSample() {
@@ -243,10 +241,11 @@ enum LayoutLoopProbe {
         let root = MainWindowRoot(environment: environment, themes: themes) { attached = $0 }
         let hosting = NSHostingView(rootView: root)
         hosting.sceneBridgingOptions = [.toolbars, .title]
-        let frame = NSRect(origin: NSPoint(x: -6000, y: -6000), size: size)
+        let screen = try #require(NSScreen.main ?? NSScreen.screens.first)
+        let frame = fittedFrame(NSRect(origin: screen.visibleFrame.origin, size: size), within: screen.visibleFrame)
         UserDefaults.standard.removeObject(forKey: "NSWindow Frame \(frameName)")
         let window = ConstraintPassWindow(contentRect: frame, styleMask: [.titled, .resizable, .fullSizeContentView],
-                                          backing: .buffered, defer: false)
+                                          backing: .buffered, defer: false, screen: screen)
         window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
         #expect(window.setFrameAutosaveName(frameName), "the frame name \(frameName) is free")
@@ -258,6 +257,42 @@ enum LayoutLoopProbe {
         try await settleWindowChrome(of: window)
         content.keyRouter.isMailWindow = { $0 === window }
         return InlineReplyWindow(environment: environment, window: window, content: content)
+    }
+
+    static func fittedFrame(_ frame: NSRect, within visible: NSRect) -> NSRect {
+        let width = min(frame.width, visible.width)
+        let height = min(frame.height, visible.height)
+        return NSRect(x: min(max(frame.minX, visible.minX), visible.maxX - width),
+                      y: min(max(frame.minY, visible.minY), visible.maxY - height), width: width, height: height)
+    }
+
+    // Loading the sidebar's data does not wait for SwiftUI's inspector to finish resizing the window. Finish that
+    // fixture setup at a size the display can hold before testing the layout caused by legacy scroll bars.
+    static func settleFixtureFrame(of window: NSWindow, state: String, watchdog: LayoutStallWatchdog) async throws {
+        let screen = try #require(window.screen ?? NSScreen.main ?? NSScreen.screens.first)
+        let visible = screen.visibleFrame
+        var lastFrame: NSRect?
+        var lastLayout: NSRect?
+        var stableSamples = 0
+        try await until(timeout: .seconds(10)) {
+            watchdog.beat("settling the fixture frame")
+            window.contentView?.layoutSubtreeIfNeeded()
+            let frame = window.frame
+            let fitted = fittedFrame(frame, within: visible)
+            if frame != fitted {
+                window.setFrame(fitted, display: true)
+                lastFrame = nil
+                lastLayout = nil
+                stableSamples = 0
+                return false
+            }
+            let layout = window.contentLayoutRect
+            stableSamples = frame == lastFrame && layout == lastLayout ? stableSamples + 1 : 0
+            lastFrame = frame
+            lastLayout = layout
+            return window.toolbar != nil && stableSamples >= settledCycles
+        }
+        print("LayoutLoop fixture \(state): frame \(NSStringFromRect(window.frame)), visible \(NSStringFromRect(visible))")
     }
 
     // A legacy scroll bar (a mouse attached, or Show scroll bars: Always) takes width beside the content, so content
@@ -287,11 +322,12 @@ enum LayoutLoopProbe {
         let window = try #require(w.window as? ConstraintPassWindow)
         let watchdog = LayoutStallWatchdog(seconds: stallSeconds, state: state)
         let tracer = ConstraintPassTracer()
-        window.tracer = tracer
         defer {
             watchdog.stop()
             window.tracer = nil
         }
+        try await settleFixtureFrame(of: window, state: state, watchdog: watchdog)
+        window.tracer = tracer
         window.finishTurn()
         // Observe after AppKit's work, immediately before the run loop sleeps or exits. This also covers turns
         // that occur while Task.sleep's continuation is waiting for the main actor.
