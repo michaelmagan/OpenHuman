@@ -196,6 +196,9 @@ import Testing
         f.heldGate.release()
         f.store.completeHeldSends()
         await f.posted("Sent.", "Reminder set for")
+        // The reminder toast precedes the store mutation; join the action before reading it.
+        let reminder = try #require(f.env.actions.threadActions?.lastTask)
+        await reminder.value
         let items = try await f.store.threadPage(.system(.reminders), account: thread.account, after: nil, limit: 1_000).rows
         #expect(items.contains { $0.id == thread })
         #expect(!(await inInbox(f, thread)))

@@ -98,6 +98,9 @@ struct NotificationResponseTests {
         let row = try await f.firstThread()
         f.notifier.respond(NotificationResponse(identifier: "n1", action: .markDone, userInfo: NotificationRouting.userInfo(for: row.id)))
         await eventually(timeout: .seconds(15)) { f.env.undo?.nextUndo != nil }
+        // The undo entry is posted optimistically, before its command finishes.
+        let action = try #require(f.env.actions.lastTask)
+        await action.value
         let rows = try #require(await first(f.store.threadWindow(.system(.inbox), account: f.account, limit: 200))).rows
         #expect(!rows.contains { $0.id == row.id })
         #expect(f.env.notices.toasts.contains { $0.actionTitle == "Undo" || $0.style == .undo })
@@ -111,6 +114,8 @@ struct NotificationResponseTests {
         await eventually(timeout: .seconds(15)) {
             f.env.undo?.nextUndo != nil
         }
+        let action = try #require(f.env.actions.lastTask)
+        await action.value
         let after = try #require(await first(f.store.threadWindow(.system(.inbox), account: f.account, limit: 200))).rows
         #expect(after.first { $0.id == unread.id }?.isUnread == false)
     }
@@ -120,6 +125,8 @@ struct NotificationResponseTests {
         let row = try await f.firstThread()
         f.notifier.respond(NotificationResponse(identifier: "n4", action: .snooze, userInfo: NotificationRouting.userInfo(for: row.id)))
         await eventually(timeout: .seconds(15)) { f.env.undo?.nextUndo != nil }
+        let action = try #require(f.env.actions.threadActions?.lastTask)
+        await action.value
         let inbox = try #require(await first(f.store.threadWindow(.system(.inbox), account: f.account, limit: 200))).rows
         #expect(!inbox.contains { $0.id == row.id })
         let snoozed = try #require(await first(f.store.threadWindow(.system(.snoozed), account: f.account, limit: 200))).rows
@@ -133,6 +140,8 @@ struct NotificationResponseTests {
         let row = try await f.firstThread()
         f.notifier.respond(NotificationResponse(identifier: "n5", action: .remindIfNoReply, userInfo: NotificationRouting.userInfo(for: row.id)))
         await eventually(timeout: .seconds(15)) { f.env.undo?.nextUndo != nil }
+        let action = try #require(f.env.actions.threadActions?.lastTask)
+        await action.value
         let reminders = try #require(await first(f.store.reminders(nil)))
         let reminder = try #require(reminders.first { $0.thread == row.id })
         #expect(reminder.kind == .ifNoReply)
@@ -144,6 +153,8 @@ struct NotificationResponseTests {
         let row = try await f.firstThread()
         f.notifier.respond(NotificationResponse(identifier: "n6", action: .markDone, userInfo: NotificationRouting.userInfo(for: row.id)))
         await eventually(timeout: .seconds(15)) { f.env.undo?.nextUndo != nil }
+        let action = try #require(f.env.actions.lastTask)
+        await action.value
         #expect(f.active.activations == 0)
         f.notifier.respond(NotificationResponse(identifier: "n7", action: .open, userInfo: NotificationRouting.userInfo(for: row.id)))
         #expect(f.active.activations == 1)
