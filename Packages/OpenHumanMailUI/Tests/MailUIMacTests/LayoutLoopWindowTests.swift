@@ -296,9 +296,11 @@ enum LayoutLoopProbe {
         // Observe after AppKit's work, immediately before the run loop sleeps or exits. This also covers turns
         // that occur while Task.sleep's continuation is waiting for the main actor.
         let boundaries = CFRunLoopActivity.beforeWaiting.rawValue | CFRunLoopActivity.exit.rawValue
-        let observer = try #require(CFRunLoopObserverCreateWithHandler(nil, boundaries, true, .max) { [weak window] _, _ in
+        let created = CFRunLoopObserverCreateWithHandler(nil, boundaries, true, .max) {
+            [weak window] (_: CFRunLoopObserver?, _: CFRunLoopActivity) in
             MainActor.assumeIsolated { window?.finishTurn() }
-        })
+        }
+        let observer = try #require(created)
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
         defer {
             CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes)
