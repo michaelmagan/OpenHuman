@@ -297,7 +297,22 @@ struct WireEvent: Decodable {
         return email != calendarID.lowercased()
     }
 
-    func event(defaultZone: TimeZone, selfAddress: String? = nil) -> GoogleCalendarEvent? {
+    // Google's `self` flags describe the calendar holding this copy, not the signed-in user or a send-as alias.
+    // An omitted organizer.self defaults to false, but absent organizer identity must remain unknown.
+    private func organizerIsSelf(on calendarID: String?) -> Bool? {
+        let own = (attendees ?? []).filter { $0.`self` == true }
+        if organizer?.`self` == true || own.contains(where: { $0.organizer == true }) { return true }
+        guard let email = Self.text(organizer?.email) else { return organizer?.`self` }
+        if let calendarID = Self.text(calendarID), calendarID.contains("@") {
+            return email.caseInsensitiveCompare(calendarID) == .orderedSame
+        }
+        if own.count == 1, let address = Self.text(own.first?.email) {
+            return email.caseInsensitiveCompare(address) == .orderedSame
+        }
+        return organizer?.`self`
+    }
+
+    func event(defaultZone: TimeZone, calendarID: String? = nil, selfAddress: String? = nil) -> GoogleCalendarEvent? {
         guard let id, !id.isEmpty, status != "cancelled", let start, let end else { return nil }
         let zone = (start.timeZone ?? end.timeZone).flatMap(TimeZone.init(identifier:)) ?? defaultZone
         let begins: Date
@@ -357,7 +372,7 @@ struct WireEvent: Decodable {
         var made = GoogleCalendarEvent(id: id, title: title?.isEmpty == false ? title : nil, start: begins, end: ends,
                                    isAllDay: allDay, timeZone: start.timeZone ?? end.timeZone, attendees: people,
                                    meetLink: meetLink, conferenceStatus: conferenceData?.createRequest?.status?.statusCode,
-                                   organizerIsSelf: organizer?.`self`, location: Self.text(location),
+                                   organizerIsSelf: organizerIsSelf(on: calendarID), location: Self.text(location),
                                    notes: Self.text(description), recurringEventID: Self.text(recurringEventId),
                                    selfResponse: own.map { $0.responseStatus ?? "needsAction" },
                                    originalStartTime: originalStartTime?.original)

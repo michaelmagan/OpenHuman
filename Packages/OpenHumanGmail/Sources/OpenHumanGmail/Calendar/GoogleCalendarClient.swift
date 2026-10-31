@@ -115,7 +115,7 @@ public struct GoogleCalendarClient: Sendable {
             let response = try await send("GET", url(["calendars", calendarID, "events"], query: query))
             let page: WireEventList = try decode(response.body, "events.list")
             for item in page.items ?? [] {
-                if let event = item.event(defaultZone: timeZone, selfAddress: calendarID) { events.append(event) } else { skipped += 1 }
+                if let event = item.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: calendarID) { events.append(event) } else { skipped += 1 }
             }
             guard let next = page.nextPageToken, !next.isEmpty, next != pageToken else { break }
             pageToken = next
@@ -188,7 +188,7 @@ public struct GoogleCalendarClient: Sendable {
                     } else { skipped += 1 }
                     continue
                 }
-                guard let event = item.event(defaultZone: timeZone, selfAddress: calendarID) else {
+                guard let event = item.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: calendarID) else {
                     skipped += 1
                     continue
                 }
@@ -228,7 +228,7 @@ public struct GoogleCalendarClient: Sendable {
         for item in identities.items ?? [] {
             if let id = item.id { byID[id] = item }
         }
-        let candidates = (page.items ?? []).compactMap { $0.event(defaultZone: timeZone, selfAddress: calendarID) }
+        let candidates = (page.items ?? []).compactMap { $0.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: calendarID) }
             .map { event in
                 let identity = byID[event.id]
                 let original = identity?.originalStartTime.flatMap { time in
@@ -261,7 +261,7 @@ public struct GoogleCalendarClient: Sendable {
                            + "sendUpdates \(sendUpdates.rawValue))")
         // Why: after a 2xx the event exists, so an unreadable answer is not reported as a failure
         let wire = (try? JSONDecoder().decode(WireEvent.self, from: response.body)) ?? WireEvent()
-        if let created = wire.event(defaultZone: zone) { return created }
+        if let created = wire.event(defaultZone: zone, calendarID: calendarID) { return created }
         Log(.gmail).notice("calendar event created; its answer could not be read in full")
         return GoogleCalendarEvent(id: wire.id ?? "", title: event.title, start: event.start, end: event.end,
                                    timeZone: zone.identifier,
@@ -349,7 +349,7 @@ public struct GoogleCalendarClient: Sendable {
                                       body: try json(body), isWrite: true)
         Log(.gmail).notice("calendar event moved (sendUpdates \(sendUpdates.rawValue))")
         let wire = try? JSONDecoder().decode(WireEvent.self, from: response.body)
-        return wire?.event(defaultZone: zone)
+        return wire?.event(defaultZone: zone, calendarID: calendarID)
     }
 
     // `alias` is the account's other address the invitation was sent to; it answers only when no entry is the calendar's own
@@ -388,7 +388,7 @@ public struct GoogleCalendarClient: Sendable {
         Log(.gmail).notice("calendar invitation answered (sendUpdates \(sendUpdates.rawValue)"
                            + (answerAs == nil ? ")" : ", as an alias)"))
         let wire = try? JSONDecoder().decode(WireEvent.self, from: answer.body)
-        return wire?.event(defaultZone: timeZone, selfAddress: answerAs ?? calendarID)
+        return wire?.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: answerAs ?? calendarID)
     }
 
     public func patchEvent(id: String, patch: GoogleEventPatch, sendUpdates: GoogleSendUpdates) async throws -> GoogleCalendarEvent? {
@@ -411,13 +411,13 @@ public struct GoogleCalendarClient: Sendable {
                                       extraHeaders: [CalendarGuardTransport.editRuleHeader: CalendarGuardTransport.editRuleValue])
         Log(.gmail).notice("calendar event patched (fields \(body.count), sendUpdates \(sendUpdates.rawValue))")
         let wire = try? JSONDecoder().decode(WireEvent.self, from: response.body)
-        return wire?.event(defaultZone: timeZone, selfAddress: calendarID)
+        return wire?.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: calendarID)
     }
 
     public func readEvent(id: String) async throws -> GoogleCalendarEvent? {
         let read = try await send("GET", url(["calendars", calendarID, "events", id]))
         let wire = try? JSONDecoder().decode(WireEvent.self, from: read.body)
-        return wire?.event(defaultZone: timeZone, selfAddress: calendarID)
+        return wire?.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: calendarID)
     }
 
     public func seriesRecurrence(id: String) async throws -> [String] {
