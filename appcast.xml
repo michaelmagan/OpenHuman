@@ -6,6 +6,30 @@
     <description>Most recent updates to OpenHuman Mail</description>
     <language>en</language>
     <item>
+      <title>Version 0.1.2</title>
+      <pubDate>Sat, 31 Oct 2026 21:48:04 +0000</pubDate>
+      <sparkle:version>1214</sparkle:version>
+      <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+      <style>
+        h2, h3, h4 { font-size: 1em; margin: 1em 0 0.3em; }
+        p { margin: 0.4em 0; }
+        ul { margin: 0.2em 0; padding-left: 1.4em; }
+        li { margin: 0.15em 0; }
+      </style>
+      <h3>OpenHuman Mail v0.1.2</h3>
+      <p>This pre-release is available as a DMG download only.</p>
+      <ul>
+        <li>Send several drafts at once from the Drafts list: select drafts, then choose “Send N Drafts.” You can undo the batch with one action and turn off reminders for the batch. Drafts that cannot be sent are listed and left alone.</li>
+        <li>Remove a calendar invitation from your calendar without sending a decline, including repeating events. Google may still show the organizer that you declined. Removing your own events still notifies guests.</li>
+        <li>A meeting on two connected accounts now appears as one calendar block, with an account label and separate answers for each account.</li>
+      </ul>
+      <p>The first launch after updating re-reads your calendar once.</p>
+      ]]></description>
+      <enclosure url="https://github.com/michaelmagan/OpenHuman/releases/download/v0.1.2/OpenHuman-Mail-0.1.2.dmg" length="37067941" type="application/octet-stream" sparkle:edSignature="wNN8W8XiCCMPt9Jf90NiP8PTKcHedzzC4Zry+sG/klAjKKMAJo8Lj95VvoyaQJpvXNcvxhBnObpz66/6ZNJ1Bw==" />
+    </item>
+    <item>
       <title>Version 0.1.1</title>
       <pubDate>Fri, 30 Oct 2026 05:42:47 +0000</pubDate>
       <sparkle:version>1213</sparkle:version>
