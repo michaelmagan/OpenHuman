@@ -3,7 +3,8 @@ import MailModel
 import SwiftUI
 
 // An event's right-click menu: the answers and, beside them, Delete for the user's own event or Remove for an
-// invitation. Each item opens the event's card first, so the confirmation and the held change are the card's own.
+// invitation, plus Remove for each other invited copy of a meeting on several calendars. Each item opens the event's
+// card first, so the confirmation and the held change are the card's own.
 struct CalendarEventContextMenu: ViewModifier {
     let model: CalendarWindowModel
     let event: CalendarEvent
@@ -25,10 +26,18 @@ struct CalendarEventContextMenu: ViewModifier {
                         .accessibilityIdentifier("calendar.event.menu.rsvp.\(choice.rawValue)")
                     }
                 }
+                let copies = model.copyRemovals(for: event)
                 if let removal = model.removalTitle(for: event) {
                     Divider()
                     Button(removal, role: .destructive) { model.askToRemove(event) }
                         .accessibilityIdentifier("calendar.event.menu.remove")
+                }
+                if !copies.isEmpty {
+                    if model.removalTitle(for: event) == nil { Divider() }
+                    ForEach(Array(copies.enumerated()), id: \.element.id) { index, removal in
+                        Button(removal.title, role: .destructive) { model.askToRemove(event, copy: removal.copyKey) }
+                            .accessibilityIdentifier("calendar.event.menu.remove.copy.\(index)")
+                    }
                 }
             }
         }

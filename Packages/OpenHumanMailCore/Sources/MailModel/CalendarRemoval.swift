@@ -42,7 +42,8 @@ extension CalendarEvent {
         var enriched = CalendarEvent(id: id, title: title, start: start, end: end, isAllDay: isAllDay, timeZone: timeZone,
             attendees: attendees, calendarName: calendarName, meetLink: meetLink, organizerIsMe: organizerIsMe,
             account: account, location: location, notes: notes, myResponse: myResponse,
-            recurringEventID: recurringEventID ?? fresh.recurringEventID, originalStartTime: original, extras: extras)
+            recurringEventID: recurringEventID ?? fresh.recurringEventID, originalStartTime: original, extras: extras,
+            uid: uid ?? fresh.uid, organizer: organizer ?? fresh.organizer, guestsOmitted: guestsOmitted)
         enriched.respondsAs = respondsAs
         return enriched
     }

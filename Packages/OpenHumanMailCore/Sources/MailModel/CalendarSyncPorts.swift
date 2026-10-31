@@ -93,7 +93,8 @@ public struct CalendarEventRecord: Sendable, Hashable {
                                     meetLink: event.meetLink, organizerIsMe: event.organizerIsMe, account: event.account,
                                     location: event.location, notes: event.notes, myResponse: event.myResponse,
                                     recurringEventID: moved.event.recurringEventID, originalStartTime: event.originalStartTime,
-                                    extras: event.extras)
+                                    extras: event.extras, uid: event.uid, organizer: event.organizer,
+                                    guestsOmitted: event.guestsOmitted)
         moved.event.respondsAs = event.respondsAs
         return moved
     }

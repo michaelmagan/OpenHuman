@@ -94,6 +94,8 @@ public struct CalendarTimeGrid: Sendable, Hashable {
         public let colorIndex: Int
         public let isTentative: Bool
         public let isDeclined: Bool
+        // Waits for the user's answer: drawn dashed
+        public var isInvited = false
         public let startsBefore: Bool
         public let endsAfter: Bool
         public let isPast: Bool
@@ -142,11 +144,12 @@ public struct CalendarTimeGrid: Sendable, Hashable {
                 let event = item.event
                 let top = Self.offset(event.start, day: day, next: next, calendar: calendar)
                 let bottom = Self.offset(event.end, day: day, next: next, calendar: calendar)
+                let attendance = event.drawnAttendance
                 placed.append(Block(event: event, dayIndex: index, top: top,
                                     height: max(bottom - top, Self.minimumHeight), column: item.column,
                                     columns: item.columns, colorIndex: colorIndex(event),
-                                    isTentative: event.myResponse == .tentative,
-                                    isDeclined: event.myResponse == .declined,
+                                    isTentative: attendance == .maybe, isDeclined: attendance == .declined,
+                                    isInvited: attendance == .invited,
                                     startsBefore: event.start < day, endsAfter: event.end > next,
                                     isPast: event.end <= now))
             }

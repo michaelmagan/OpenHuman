@@ -89,6 +89,7 @@ struct CalendarEventCardView: View {
         let duplicates = mode == .form && !card.event.id.isEmpty && card.rights.hasAnyEditable && card.pendingMove == nil
         let link = card.event.meetLink
         let removal = removal(card, mode)
+        let copyRemovals = removal == nil ? [] : card.copies.enumerated().filter { $0.element.canRemove }
         if offersEdit || duplicates || link != nil || removal != nil {
             Menu {
                 if offersEdit {
@@ -106,7 +107,15 @@ struct CalendarEventCardView: View {
                 }
                 if let removal {
                     Divider()
-                    removalItem(removal)
+                    removalItem(removal, card)
+                    // A meeting on several calendars: another invited copy can leave alone, from its own account
+                    ForEach(copyRemovals, id: \.element.id) { index, row in
+                        Button("Remove from \(row.account)…", role: .destructive) {
+                            model.askToRemoveCardEvent(copy: row.id)
+                        }
+                        .help("Removes only this calendar's copy without answering. The meeting stays on your other calendars.")
+                        .accessibilityIdentifier("calendar.card.copy.\(index).remove")
+                    }
                 }
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 13, weight: .semibold))
@@ -131,13 +140,17 @@ struct CalendarEventCardView: View {
     }
 
     @ViewBuilder
-    private func removalItem(_ removal: CalendarDeleteRight) -> some View {
+    private func removalItem(_ removal: CalendarDeleteRight, _ card: CalendarEventCard) -> some View {
         switch removal {
         case .delete:
             Button("Delete…", role: .destructive) { model.askToRemoveCardEvent() }
+                .help(card.copies.count > 1
+                      ? String(localized: "Deletes the meeting. Your invited calendars lose their copy too.") : "")
                 .accessibilityIdentifier("calendar.card.delete")
         case .removeInvite:
-            Button("Remove from Calendar…", role: .destructive) { model.askToRemoveCardEvent() }
+            Button(card.copies.count > 1 ? String(localized: "Remove from \(card.calendarKey)…")
+                                         : String(localized: "Remove from Calendar…"),
+                   role: .destructive) { model.askToRemoveCardEvent() }
                 .help("Removes your copy without answering. It stays on the organizer's calendar.")
                 .accessibilityIdentifier("calendar.card.removeInvite")
         case .declineInstead(let why):
@@ -170,6 +183,7 @@ struct CalendarEventCardView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("calendar.card.title")
+            if !card.copies.isEmpty { CalendarEventCardCopiesView(card: card, model: model) }
             CalendarEventDetailRows(details: details, colorIndex: model.colorIndex(for: card.event), idPrefix: "calendar.card",
                                     showsZone: false)
             if card.event.hidesMyResponse {
@@ -194,6 +208,7 @@ struct CalendarEventCardView: View {
     private func formBody(_ card: CalendarEventCard) -> some View {
         VStack(alignment: .leading, spacing: theme.space3) {
             if let move = card.pendingMove { pendingHeader(move, card) }
+            if !card.copies.isEmpty, card.pendingMove == nil { CalendarEventCardCopiesView(card: card, model: model) }
             CalendarEventFormView(
                 form: Binding(get: { model.card?.form ?? card.form! }, set: { model.card?.form = $0 }),
                 rights: card.rights, timeZone: model.cardTimeZone, idPrefix: "calendar.card",
@@ -245,6 +260,7 @@ struct CalendarEventCardView: View {
     private func legacyBody(_ card: CalendarEventCard) -> some View {
         VStack(alignment: .leading, spacing: theme.space3) {
             title(card)
+            if !card.copies.isEmpty { CalendarEventCardCopiesView(card: card, model: model) }
             timeRow(card)
             attendees(card)
             if let link = card.event.meetLink {
@@ -351,13 +367,16 @@ struct CalendarEventCardView: View {
         }
     }
 
+    // A meeting on several calendars is answered on each copy's own row, never from one shared footer
+    private func answersInFooter(_ card: CalendarEventCard) -> Bool { card.event.canRespond && card.copies.isEmpty }
+
     private func hasFooter(_ card: CalendarEventCard, _ mode: CalendarCardMode) -> Bool {
-        card.event.canRespond || mode == .form || mode == .legacyEdit
+        answersInFooter(card) || mode == .form || mode == .legacyEdit
     }
 
     private func footerBar(_ card: CalendarEventCard, _ mode: CalendarCardMode) -> some View {
         HStack(spacing: theme.space2) {
-            if card.event.canRespond { answers(card) }
+            if answersInFooter(card) { answers(card) }
             Spacer(minLength: theme.space2)
             switch mode {
             case .form: formActions(card)

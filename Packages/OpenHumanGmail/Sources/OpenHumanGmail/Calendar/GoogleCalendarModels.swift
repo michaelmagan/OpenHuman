@@ -17,6 +17,12 @@ public struct GoogleCalendarEvent: Sendable, Hashable {
     public let originalStartTime: GoogleOriginalStart?
     public let selfResponse: String?
     public var extras = GoogleEventExtras()
+    // Every copy of one meeting shares this UID, on each calendar it reaches
+    public var iCalUID: String?
+    public var organizerEmail: String?
+    public var organizerName: String?
+    // Google returned only part of the guest list
+    public var attendeesOmitted = false
 
     public init(id: String, title: String?, start: Date, end: Date, isAllDay: Bool = false, timeZone: String? = nil,
                 attendees: [GoogleCalendarAttendee] = [], meetLink: URL? = nil, conferenceStatus: String? = nil,
@@ -258,8 +264,11 @@ struct WireEvent: Decodable {
     struct Organizer: Decodable {
         var `self`: Bool?
         var email: String?
+        var displayName: String?
     }
     var id: String?
+    var iCalUID: String?
+    var attendeesOmitted: Bool?
     var status: String?
     var summary: String?
     var organizer: Organizer?
@@ -377,6 +386,10 @@ struct WireEvent: Decodable {
                                    selfResponse: own.map { $0.responseStatus ?? "needsAction" },
                                    originalStartTime: originalStartTime?.original)
         made.extras = extras
+        made.iCalUID = Self.text(iCalUID)
+        made.organizerEmail = Self.text(organizer?.email)
+        made.organizerName = Self.text(organizer?.displayName)
+        made.attendeesOmitted = attendeesOmitted == true
         return made
     }
 

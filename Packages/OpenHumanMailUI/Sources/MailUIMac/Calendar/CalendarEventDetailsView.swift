@@ -199,6 +199,11 @@ struct CalendarEventDetailRows: View {
                             .themeFont(theme.typeMeta)
                             .accessibilityIdentifier("\(idPrefix).allGuests")
                     }
+                    if let note = details.guestListNote {
+                        Text(verbatim: note).themeFont(theme.typeCaption).foregroundStyle(theme.textTertiary.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("\(idPrefix).guestListNote")
+                    }
                 }
             }
             .accessibilityElement(children: .contain)
@@ -280,11 +285,12 @@ struct CalendarGuestRow: View {
         }
         .help(guest.email)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(guest.spokenText)
+        .accessibilityLabel(guest.isOrganizer ? String(localized: "\(guest.spokenText), organizer") : guest.spokenText)
     }
 
     private var marker: String? {
-        let parts = [guest.isMe ? String(localized: "you") : nil, guest.isOptional ? String(localized: "optional") : nil]
+        let parts = [guest.isOrganizer ? String(localized: "organizer") : nil, guest.isMe ? String(localized: "you") : nil,
+                     guest.isOptional ? String(localized: "optional") : nil]
             .compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }

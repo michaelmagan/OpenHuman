@@ -28,6 +28,9 @@ public struct CalendarEventCard: Sendable, Hashable {
     public var pendingGuestNote: String?
     /// Removing takes only the user's copy of someone else's event off their calendar; no answer goes out.
     public var removesInvite = false
+    // A meeting on several connected calendars: one row per copy, and why the shown time may differ from another copy's
+    public var copies: [CalendarCopyRow] = []
+    public var copiesNote: String?
 
     public var formPatch: CalendarEventPatch {
         form?.patch(from: event, defaultZone: defaultZone) ?? CalendarEventPatch()
@@ -59,6 +62,52 @@ public struct CalendarEventCard: Sendable, Hashable {
         return true
     }
     public var emailsPeople: Bool { !event.attendees.isEmpty }
+
+    // Changes to the event itself go to this copy's calendar
+    public var changesAccount: String? { copies.first(where: \.receivesChanges)?.account }
+}
+
+// One connected calendar that holds a copy of the card's meeting, with that account's own answer
+public struct CalendarCopyRow: Sendable, Hashable, Identifiable {
+    public let event: CalendarEvent
+    public var response: CalendarResponse?
+    public let canRespond: Bool
+    public let receivesChanges: Bool
+    // Set when this copy shows a time other than the card's
+    public let timeText: String?
+    // Another copy than the shown one that its own calendar can take off alone, without answering
+    public let canRemove: Bool
+
+    public init(event: CalendarEvent, response: CalendarResponse?, canRespond: Bool, receivesChanges: Bool,
+                timeText: String? = nil, canRemove: Bool = false) {
+        self.event = event
+        self.response = response
+        self.canRespond = canRespond
+        self.receivesChanges = receivesChanges
+        self.timeText = timeText
+        self.canRemove = canRemove
+    }
+
+    public var id: String { event.copyKey }
+    public var account: String { event.account ?? "" }
+
+    public var status: String {
+        if event.organizerIsMe == true { return String(localized: "You organize it") }
+        guard let response else { return String(localized: "Invited · answer not shown") }
+        return String(localized: "Invited · \(response.title)")
+    }
+}
+
+public struct CalendarCopyRemoval: Sendable, Hashable, Identifiable {
+    public let copyKey: String
+    public let title: String
+
+    public init(copyKey: String, title: String) {
+        self.copyKey = copyKey
+        self.title = title
+    }
+
+    public var id: String { copyKey }
 }
 
 public struct CalendarScopeQuestion: Sendable, Hashable {
@@ -90,22 +139,38 @@ public struct CalendarRemoveQuestion: Sendable, Hashable {
     public var isInvite = false
     public var availableScopes: [CalendarRecurrenceScope] = [.thisEvent]
     public var note: String?
+    // A meeting on several connected calendars: the calendar this removal acts on, the user's other calendars that
+    // keep their copy, and the invited ones that lose it too because the user deletes the meeting they organize
+    public var account: String?
+    public var keptOn: [String] = []
+    public var alsoOn: [String] = []
+    public var organizerKept = false
 
     public var confirmTitle: String { isInvite ? String(localized: "Remove") : String(localized: "Delete") }
 
     public var text: String {
         if isInvite {
-            return isRecurring ? Self.inviteSeriesText(title) : Self.inviteText(title)
+            guard let account, !keptOn.isEmpty else {
+                return isRecurring ? Self.inviteSeriesText(title) : Self.inviteText(title)
+            }
+            return Self.copyText(title, from: account, keptOn: Self.list(keptOn), series: isRecurring,
+                                 organizerKept: organizerKept)
         }
+        let base: String
         if isRecurring {
-            return String(localized: "Delete \(title)? Choose which events to remove. Google will notify guests. You can undo for a few seconds before your calendar changes.")
+            base = String(localized: "Delete \(title)? Choose which events to remove. Google will notify guests. You can undo for a few seconds before your calendar changes.")
+        } else if !emailsPeople && !canRecreate {
+            base = String(localized: "Delete \(title)? You can undo for a few seconds before your calendar changes.")
+        } else {
+            base = emailsPeople
+                ? String(localized: "Delete \(title)? Google will email the guests that it is canceled. You can undo for a few seconds; after that the emails are sent and Undo cannot take them back.")
+                : String(localized: "Delete \(title)? You can undo for a few seconds, and Undo brings it back as a new event.")
         }
-        if !emailsPeople && !canRecreate {
-            return String(localized: "Delete \(title)? You can undo for a few seconds before your calendar changes.")
-        }
-        return emailsPeople
-            ? String(localized: "Delete \(title)? Google will email the guests that it is canceled. You can undo for a few seconds; after that the emails are sent and Undo cannot take them back.")
-            : String(localized: "Delete \(title)? You can undo for a few seconds, and Undo brings it back as a new event.")
+        guard !alsoOn.isEmpty else { return base }
+        let also = Self.list(alsoOn)
+        return base + " " + (isRecurring
+            ? String(localized: "The events you delete are canceled on \(also) too, since that calendar is invited.")
+            : String(localized: "It is canceled on \(also) too, since that calendar is invited."))
     }
 
     // Google records a removed invitation as declined on the organizer's guest list; Mail sends no reply itself.
@@ -115,6 +180,20 @@ public struct CalendarRemoveQuestion: Sendable, Hashable {
 
     public static func inviteSeriesText(_ title: String) -> String {
         String(localized: "Remove \(title) from your calendar? Choose which events to remove. They stay on the organizer's calendar. Mail sends no reply, but Google may show the organizer that you declined. You can undo for a few seconds before your calendar changes.")
+    }
+
+    // One invited copy of a meeting the user also has on another connected calendar: only this copy leaves
+    static func copyText(_ title: String, from account: String, keptOn: String, series: Bool, organizerKept: Bool) -> String {
+        let head = series ? String(localized: "Remove \(title) from \(account)? Choose which events to remove.")
+                          : String(localized: "Remove \(title) from \(account)?")
+        let tail = organizerKept
+            ? String(localized: "It stays on \(keptOn), where you organize it, and its guest list may show \(account) as declined. Mail sends no reply. You can undo for a few seconds before your calendar changes.")
+            : String(localized: "It stays on \(keptOn) and on the organizer's calendar. Mail sends no reply, but Google may show the organizer that you declined. You can undo for a few seconds before your calendar changes.")
+        return head + " " + tail
+    }
+
+    static func list(_ accounts: [String]) -> String {
+        accounts.formatted(.list(type: .and))
     }
 
     public static var organizerOnlyFuture: String {
@@ -136,6 +215,14 @@ struct CalendarRemovalContext: Sendable {
     let target: any CalendarProviding
 }
 
+// The copy a removal acts on, with the account and calendar it is removed from
+struct CalendarRemovalSubject {
+    let event: CalendarEvent
+    let isInvite: Bool
+    let account: String
+    let provider: (any CalendarProviding)?
+}
+
 public enum CalendarEditScope: Sendable, Hashable { case thisEvent, allEvents }
 
 extension CalendarWindowModel {
@@ -148,7 +235,8 @@ extension CalendarWindowModel {
     func provider(for event: CalendarEvent) -> (key: String, provider: (any CalendarProviding)?) {
         let key = event.account?.lowercased() ?? sources.first?.key ?? ""
         if let found = providers[key] { return (key, found) }
-        guard providers.count <= 1 else { return (key, nil) }
+        // Why: a meeting drawn for several calendars must never fall back to another account's calendar
+        guard providers.count <= 1, !event.isMerged else { return (key, nil) }
         let only: any CalendarProviding = providers.values.first ?? sidebar.provider
         return (key, only)
     }
@@ -188,7 +276,35 @@ extension CalendarWindowModel {
             opened.form = CalendarEventForm(event: event, calendarKey: key, defaultZone: timeZone.identifier)
             opened.rights = fullRights
         }
+        if event.isMerged {
+            let editable = canMove || canEdit || canRemove || fullRights?.hasAnyEditable == true
+            opened.copies = event.copies.map { copy in
+                let isShown = copy.copyKey == event.copyKey
+                let answers = isShown ? canRespond : copyProvider(for: copy).map { found in
+                    found.info.createRefusal == nil && copy.canRespond && found.abilities.contains(.respond)
+                } ?? false
+                return CalendarCopyRow(event: copy, response: copy.myResponse, canRespond: answers,
+                                       receivesChanges: editable && isShown, timeText: copyTime(copy, shown: event),
+                                       canRemove: !isShown && canRemoveCopyAlone(copy))
+            }
+            opened.copiesNote = CalendarCopyGroups.timeNote(for: event)
+        }
         card = opened
+    }
+
+    // Each copy of a meeting is answered on its own account's calendar only
+    func copyProvider(for copy: CalendarEvent) -> (any CalendarProviding)? {
+        guard let account = copy.account?.lowercased(), !account.isEmpty else { return nil }
+        return providers[account]
+    }
+
+    func copyTime(_ copy: CalendarEvent, shown: CalendarEvent) -> String? {
+        guard copy.start != shown.start || copy.end != shown.end || copy.isAllDay != shown.isAllDay else { return nil }
+        if copy.isAllDay { return String(localized: "All day") }
+        let range = CalendarSidebarModel.range(copy.start, copy.end, timeZone)
+        guard !calendar.isDate(copy.start, inSameDayAs: shown.start) else { return range }
+        let day = copy.start.formatted(Date.FormatStyle(timeZone: timeZone).weekday(.abbreviated).month(.abbreviated).day())
+        return "\(day), \(range)"
     }
 
     public func closeCard() {
@@ -239,10 +355,12 @@ extension CalendarWindowModel {
         }
         let event = current.event
         current.response = response
+        if let row = current.copies.firstIndex(where: { $0.id == event.copyKey }) { current.copies[row].response = response }
         current.note = nil
         card = current
         let id = UUID()
         overlays[id] = .response(id: event.copyKey, response)
+        noteCopies(event, id)
         let series = event.isRecurring ? String(localized: " (this event only)") : ""
         hold(id, title: String(localized: "Answering \(response.title) to \(event.title)\(series)… Google tells the organizer.")) {
             [weak self] in
@@ -275,8 +393,22 @@ extension CalendarWindowModel {
         }
         let mine = event.organizerIsMe == true || (event.organizerIsMe == nil && event.attendees.isEmpty)
         if mine { return found.abilities.contains(.remove) ? String(localized: "Delete…") : nil }
-        return event.isInvitationCopy && found.abilities.contains(.removeInvite)
-            ? String(localized: "Remove from Calendar…") : nil
+        guard event.isInvitationCopy && found.abilities.contains(.removeInvite) else { return nil }
+        if event.isMerged, let account = event.account { return String(localized: "Remove from \(account)…") }
+        return String(localized: "Remove from Calendar…")
+    }
+
+    /// The other copies of a meeting on several calendars that the menus offer to remove alone, each from its own account.
+    public func copyRemovals(for event: CalendarEvent) -> [CalendarCopyRemoval] {
+        guard event.isMerged else { return [] }
+        return event.copies.filter { $0.copyKey != event.copyKey && canRemoveCopyAlone($0) }.compactMap { copy in
+            copy.account.map { CalendarCopyRemoval(copyKey: copy.copyKey, title: String(localized: "Remove from \($0)…")) }
+        }
+    }
+
+    public func askToRemove(_ event: CalendarEvent, copy copyKey: String) {
+        openEvent(event)
+        askToRemoveCardEvent(copy: copyKey)
     }
 
     public func canRespond(to event: CalendarEvent) -> Bool {
@@ -285,32 +417,40 @@ extension CalendarWindowModel {
     }
 
     public func askToRemoveCardEvent() {
+        guard let current = card else { return }
+        askToRemoveCardEvent(copy: current.event.copyKey)
+    }
+
+    /// Removal of one copy of the card's meeting: the shown copy, or another connected calendar's invited copy alone.
+    public func askToRemoveCardEvent(copy copyKey: String) {
         guard var current = card else { return }
-        guard current.canRemove else {
-            current.note = current.reason ?? String(localized: "This calendar can't remove events from Mail yet.")
+        guard let subject = removalSubject(copyKey, in: current) else {
+            current.note = copyKey == current.event.copyKey
+                ? current.reason ?? String(localized: "This calendar can't remove events from Mail yet.")
+                : String(localized: "Mail can't remove this copy from its calendar.")
             card = current
             return
         }
         scopeQuestion = nil
         do {
-            guard let provider = provider(for: current.event).provider else { throw CalendarError.notConfigured }
-            let target = try provider.removalProvider(for: current.event)
-            guard let source = storeKey(for: current.event) else { throw CalendarError.notConfigured }
+            guard let provider = subject.provider else { throw CalendarError.notConfigured }
+            let target = try provider.removalProvider(for: subject.event)
+            guard let source = storeKey(for: subject.event) else { throw CalendarError.notConfigured }
             guard CalendarEventStore.key(for: target) == source else {
                 throw CalendarError.refused("This calendar can't keep deletion bound to the selected source. Open the event again.")
             }
-            let key = CalendarRemovalKey(source: source, account: current.calendarKey.lowercased(), eventID: current.event.id)
+            let key = CalendarRemovalKey(source: source, account: subject.account, eventID: subject.event.id)
             guard !pendingRemovals.contains(key) else {
                 current.note = String(localized: "A deletion for this event is already pending.")
                 card = current
                 return
             }
-            var question = CalendarRemoveQuestion(eventID: current.event.copyKey, title: current.event.title,
-                                                  emailsPeople: current.emailsPeople)
-            question.isInvite = current.removesInvite
-            question.isRecurring = current.event.isRecurringForRemoval
-            question.canRecreate = !question.isInvite && !question.isRecurring && !current.emailsPeople
-                && !current.event.isAllDay
+            var question = CalendarRemoveQuestion(eventID: subject.event.copyKey, title: subject.event.title,
+                                                  emailsPeople: !subject.event.attendees.isEmpty)
+            question.isInvite = subject.isInvite
+            question.isRecurring = subject.event.isRecurringForRemoval
+            question.canRecreate = !question.isInvite && !question.isRecurring && !question.emailsPeople
+                && !subject.event.isAllDay
             question.availableScopes = question.isRecurring ? target.removalScopes : [.thisEvent]
             if question.isInvite && question.isRecurring {
                 question.availableScopes = question.availableScopes.filter {
@@ -328,12 +468,77 @@ extension CalendarWindowModel {
                 question.availableScopes = []
                 question.note = String(localized: "This calendar can't keep deletion bound to the selected source.")
             }
+            if current.event.isMerged {
+                let others = current.event.copies.filter { $0.copyKey != subject.event.copyKey }
+                question.account = subject.account
+                if question.isInvite {
+                    question.keptOn = others.compactMap(\.account)
+                    question.organizerKept = others.contains { $0.organizerIsMe == true }
+                } else if subject.event.organizerIsMe == true {
+                    question.alsoOn = others.compactMap(\.account)
+                }
+            }
             removalContext = CalendarRemovalContext(questionID: question.id, cardID: current.identity,
                 activeAccount: environment.router.activeAccountID, key: key, target: target)
             removeQuestion = question
         } catch {
             current.note = CalendarSidebarModel.message(error)
             card = current
+        }
+    }
+
+    // The copy of the card's meeting a removal acts on: the shown event, with its card's rights, or another copy whose
+    // own calendar takes the invitation off alone. Each is removed only through its own account's calendar.
+    func removalSubject(_ copyKey: String, in current: CalendarEventCard) -> CalendarRemovalSubject? {
+        if copyKey == current.event.copyKey {
+            guard current.canRemove else { return nil }
+            return CalendarRemovalSubject(event: current.event, isInvite: current.removesInvite,
+                                          account: current.calendarKey.lowercased(),
+                                          provider: provider(for: current.event).provider)
+        }
+        guard let row = current.copies.first(where: { $0.id == copyKey }), row.canRemove,
+              let found = copyProvider(for: row.event) else { return nil }
+        return CalendarRemovalSubject(event: row.event, isInvite: true, account: row.account.lowercased(), provider: found)
+    }
+
+    // Another copy than the shown one can leave alone only when it is an invitation its own calendar removes silently
+    func canRemoveCopyAlone(_ copy: CalendarEvent) -> Bool {
+        guard copy.isInvitationCopy, let found = copyProvider(for: copy) else { return false }
+        return found.info.createRefusal == nil && found.abilities.contains(.removeInvite)
+    }
+
+    // Answers the invitation on one copy of a meeting, as that copy's own account
+    public func respond(_ response: CalendarResponse, onCopy copyKey: String) async {
+        guard var current = card else { return }
+        guard copyKey != current.event.copyKey else { return await respond(response) }
+        guard let index = current.copies.firstIndex(where: { $0.id == copyKey }) else { return }
+        let row = current.copies[index]
+        let copy = row.event
+        guard response != .needsAction, row.canRespond, let target = copyProvider(for: copy) else {
+            current.note = copyProvider(for: copy) == nil
+                ? String(localized: "\(row.account) is no longer connected, so Mail can't answer for it.")
+                : String(localized: "Mail can't answer this invitation for \(row.account).")
+            card = current
+            return
+        }
+        current.copies[index].response = response
+        current.note = nil
+        card = current
+        let id = UUID()
+        overlays[id] = .response(id: copy.copyKey, response)
+        settling.insert(id)
+        let account = row.account
+        let series = copy.isRecurring ? String(localized: " (this event only)") : ""
+        hold(id, title: String(localized: "Answering \(response.title) to \(copy.title) as \(account)\(series)… Google tells the organizer.")) {
+            [weak self] in
+            do {
+                let answer = try await target.respond(to: copy, with: response, sendUpdates: .all)
+                self?.store(answer, replacing: copy)
+            } catch {
+                self?.failed(String(localized: "Couldn't answer \(copy.title) as \(account). \(CalendarSidebarModel.message(error))"), id)
+                return
+            }
+            await self?.changed(id, line: String(localized: "Answered \(response.title) to \(copy.title) as \(account)."))
         }
     }
 
@@ -345,15 +550,15 @@ extension CalendarWindowModel {
     public func confirmRemove(_ scope: CalendarRecurrenceScope, questionID: UUID) async {
         guard let question = removeQuestion, question.id == questionID,
               let context = removalContext, context.questionID == questionID,
-              let current = card, current.identity == context.cardID, current.event.copyKey == question.eventID,
-              current.calendarKey.lowercased() == context.key.account, current.canRemove,
+              let current = card, current.identity == context.cardID,
+              let subject = removalSubject(question.eventID, in: current), subject.account == context.key.account,
               environment.router.activeAccountID == context.activeAccount,
               !pendingRemovals.contains(context.key) else { return }
         do {
-            guard let provider = provider(for: current.event).provider,
+            guard let provider = subject.provider,
                   context.target.removalIdentity != nil,
-                  try provider.removalProvider(for: current.event).removalIdentity == context.target.removalIdentity,
-                  storeKey(for: current.event) == context.key.source else {
+                  try provider.removalProvider(for: subject.event).removalIdentity == context.target.removalIdentity,
+                  storeKey(for: subject.event) == context.key.source else {
                 throw CalendarError.refused("The selected calendar changed. Open the event again.")
             }
             guard question.availableScopes.contains(scope), !question.isRecurring || context.target.removalScopes.contains(scope),
@@ -366,7 +571,7 @@ extension CalendarWindowModel {
         }
         removeQuestion = nil
         removalContext = nil
-        commitRemove(current, scope: scope, context: context)
+        commitRemove(current, subject, scope: scope, context: context)
     }
 
     public func removeCardEvent() async {
@@ -391,7 +596,7 @@ extension CalendarWindowModel {
         case .remove:
             askToRemoveCardEvent()
         case .move(let start, let end):
-            if let event = events.first(where: { $0.copyKey == question.eventID }) { await commitMove(event, start: start, end: end) }
+            if let event = shownEvents.first(where: { $0.copyKey == question.eventID }) { await commitMove(event, start: start, end: end) }
         }
     }
 
@@ -425,6 +630,7 @@ extension CalendarWindowModel {
         let timesChanged = current.timesChanged
         let id = UUID()
         if timesChanged { overlays[id] = .times(id: event.copyKey, start: start, end: end) }
+        noteCopies(event, id)
         closeCard()
         if current.emailsPeople {
             hold(id, title: String(localized: "Saving \(event.title)… Google emails the attendees.")) { [weak self] in
@@ -463,21 +669,51 @@ extension CalendarWindowModel {
         await changed(id, line: nil)
     }
 
-    private func commitRemove(_ current: CalendarEventCard, scope: CalendarRecurrenceScope, context: CalendarRemovalContext) {
+    private func commitRemove(_ current: CalendarEventCard, _ subject: CalendarRemovalSubject,
+                              scope: CalendarRecurrenceScope, context: CalendarRemovalContext) {
         let target = context.target
-        let event = current.event
+        let event = subject.event.single
         let id = UUID()
         let recurring = event.isRecurringForRemoval
         let known = CalendarRemovalResult(selectedID: event.id, parentID: event.recurringEventID
             ?? (recurring ? event.id : nil), scope: scope, originalCutoff: event.originalStartTime)
         overlays[id] = .removed(context.key, known)
         pendingRemovals.insert(context.key)
+        noteCopies(current.event, id)
+        let invite = subject.isInvite
+        // Why: deleting a meeting the user organizes cancels it for their invited calendars too, so those copies leave
+        // with it (and stay hidden until the later re-read shows Google removed them). Removing one invited copy hides
+        // only that copy: the meeting stays drawn from the others.
+        var cancelled: [String] = []
+        if !invite, current.event.isMerged, subject.event.organizerIsMe == true {
+            var linked: [UUID] = []
+            for copy in current.event.copies where copy.copyKey != subject.event.copyKey {
+                guard let account = copy.account?.lowercased(), let source = storeKey(for: copy) else { continue }
+                let parent = copy.recurringEventID ?? (copy.isRecurringForRemoval ? copy.id : nil)
+                let linkedID = UUID()
+                overlays[linkedID] = .removed(CalendarRemovalKey(source: source, account: account, eventID: copy.id),
+                                              CalendarRemovalResult(selectedID: copy.id, parentID: parent, scope: scope,
+                                                                    originalCutoff: copy.originalStartTime))
+                linked.append(linkedID)
+                cancelled.append(copy.account ?? account)
+            }
+            linkedOverlays[id] = linked
+        }
+        let alsoOn = cancelled
         closeCard()
-        let invite = current.removesInvite
-        let emails = !invite && (recurring || current.emailsPeople)
-        let title = invite ? String(localized: "Removing \(event.title) from your calendar…")
-            : emails ? String(localized: "Deleting \(event.title)… Google emails the attendees.")
-            : String(localized: "Deleting \(event.title)…")
+        let named = current.event.isMerged ? subject.account : nil
+        let emails = !invite && (recurring || !event.attendees.isEmpty)
+        let also = CalendarRemoveQuestion.list(alsoOn)
+        let title: String
+        if invite {
+            title = named.map { String(localized: "Removing \(event.title) from \($0)…") }
+                ?? String(localized: "Removing \(event.title) from your calendar…")
+        } else if !alsoOn.isEmpty {
+            title = String(localized: "Deleting \(event.title)… Google emails the attendees and cancels it on \(also).")
+        } else {
+            title = emails ? String(localized: "Deleting \(event.title)… Google emails the attendees.")
+                           : String(localized: "Deleting \(event.title)…")
+        }
         hold(id, title: title) { [weak self] in
             defer { self?.pendingRemovals.remove(context.key) }
             var confirmedRecurring = recurring
@@ -495,13 +731,17 @@ extension CalendarWindowModel {
                     failedCard.note = CalendarSidebarModel.message(error)
                     self?.card = failedCard
                 }
-                let failure = invite ? String(localized: "Couldn't remove \(event.title) from your calendar.")
-                                     : String(localized: "Couldn't delete \(event.title).")
+                let failure = invite
+                    ? named.map { String(localized: "Couldn't remove \(event.title) from \($0).") }
+                        ?? String(localized: "Couldn't remove \(event.title) from your calendar.")
+                    : String(localized: "Couldn't delete \(event.title).")
                 self?.failed("\(failure) \(CalendarSidebarModel.message(error))", id)
                 return
             }
             if invite {
-                await self?.changed(id, line: String(localized: "Removed \(event.title) from your calendar."))
+                let line = named.map { String(localized: "Removed \(event.title) from \($0).") }
+                    ?? String(localized: "Removed \(event.title) from your calendar.")
+                await self?.changed(id, line: line)
                 return
             }
             if !confirmedRecurring, !emails, !event.isAllDay {
@@ -516,7 +756,9 @@ extension CalendarWindowModel {
                 await self?.changed(id, line: nil)
                 return
             }
-            await self?.changed(id, line: String(localized: "Deleted \(event.title)."))
+            let line = alsoOn.isEmpty ? String(localized: "Deleted \(event.title).")
+                : String(localized: "Deleted \(event.title). It is canceled on \(also) too.")
+            await self?.changed(id, line: line)
         }
     }
 
@@ -524,6 +766,7 @@ extension CalendarWindowModel {
         guard let target = provider(for: event).provider else { return }
         let id = UUID()
         overlays[id] = .times(id: event.copyKey, start: start, end: end)
+        noteCopies(event, id)
         let clock = start.formatted(Date.FormatStyle(date: .omitted, time: .shortened, timeZone: timeZone))
         if !event.attendees.isEmpty {
             hold(id, title: String(localized: "Moving \(event.title) to \(clock)… Google emails the attendees.")) { [weak self] in
@@ -567,11 +810,46 @@ extension CalendarWindowModel {
         if let line { environment.notices.post(line, duration: NoticeCenter.infoDuration) }
         await load(force: true)
         overlays[id] = nil
+        settleOverlays += linkedOverlays.removeValue(forKey: id) ?? []
+        if settling.remove(id) != nil { rereadCopiesLater() }
     }
 
     func failed(_ message: String, _ id: UUID) {
         overlays[id] = nil
+        dropLinkedOverlays(of: id)
+        settling.remove(id)
         environment.notices.post(message, style: .error)
+    }
+
+    func dropLinkedOverlays(of id: UUID) {
+        for linked in linkedOverlays.removeValue(forKey: id) ?? [] { overlays[linked] = nil }
+    }
+
+    func noteCopies(_ event: CalendarEvent, _ id: UUID) {
+        if event.isMerged { settling.insert(id) }
+    }
+
+    func rereadCopiesLater() {
+        settleTask?.cancel()
+        let delay = copySettleDelay
+        let sleep = self.sleep
+        settleTask = Task { [weak self, weak owner = environment] in
+            try? await sleep(delay)
+            guard let self else { return }
+            guard !Task.isCancelled, let owner, self.isOpen else {
+                if !Task.isCancelled { self.clearSettleOverlays() }
+                return
+            }
+            defer { withExtendedLifetime(owner) {} }
+            await self.load(force: true)
+            guard !Task.isCancelled else { return }
+            self.clearSettleOverlays()
+        }
+    }
+
+    func clearSettleOverlays() {
+        for linked in settleOverlays { overlays[linked] = nil }
+        settleOverlays = []
     }
 
     func hold(_ id: UUID, title: String, perform: @escaping @MainActor @Sendable () async -> Void) {
@@ -582,6 +860,8 @@ extension CalendarWindowModel {
             guard let self, self.held.removeValue(forKey: id) != nil else { return }
             guard let owner else {
                 self.overlays[id] = nil
+                self.dropLinkedOverlays(of: id)
+                self.settling.remove(id)
                 return
             }
             // Terminal handling can suspend again in the forced reload after the write.
@@ -594,6 +874,7 @@ extension CalendarWindowModel {
     public var hasQuitWork: Bool { !held.isEmpty }
 
     public func prepareForQuit() async {
+        settleTask?.cancel()
         let pending = Array(held.values)
         for task in pending { task.cancel() }
         for task in pending { await task.value }
@@ -623,6 +904,8 @@ extension CalendarWindowModel {
             task.cancel()
             if case .removed(let key, _)? = overlays[id] { pendingRemovals.remove(key) }
             overlays[id] = nil
+            dropLinkedOverlays(of: id)
+            settling.remove(id)
             environment.notices.post(String(localized: "Canceled. Nothing on your calendar changed."),
                                      duration: NoticeCenter.infoDuration)
             return

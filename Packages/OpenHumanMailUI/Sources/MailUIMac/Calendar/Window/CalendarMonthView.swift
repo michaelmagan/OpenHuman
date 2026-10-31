@@ -99,7 +99,7 @@ struct CalendarMonthView: View {
         let selected = model.selectedEventID == event.copyKey
         let filled = event.isAllDay || CalendarTimeGrid.belongsInAllDayRow(event)
         let colors = CalendarPalette.block(index, state: selected ? .selected : .normal, tokens: theme.tokens)
-        let declined = event.myResponse == .declined
+        let declined = event.drawnAttendance == .declined
         return HStack(spacing: theme.space1) {
             if !filled {
                 Circle().fill(colors.bar.color).frame(width: 6, height: 6)
@@ -119,7 +119,8 @@ struct CalendarMonthView: View {
         .background(RoundedRectangle(cornerRadius: CalendarTimeGridView.blockRadius, style: .continuous)
             .fill(filled || selected ? colors.fill.color : Color.clear))
         .contentShape(Rectangle())
-        .help(event.title + "\n" + model.timeText(event))
-        .accessibilityLabel("\(event.title), \(model.timeText(event))")
+        .help(event.title + "\n" + model.timeText(event) + (event.isMerged ? "\n" + event.copies.compactMap(\.account).joined(separator: "\n") : ""))
+        .accessibilityLabel(event.isMerged ? String(localized: "\(event.title), \(model.timeText(event)), on \(event.copies.count) of your calendars")
+                                           : "\(event.title), \(model.timeText(event))")
     }
 }

@@ -65,6 +65,7 @@ extension CalendarWindowModel {
         let series = event.isRecurring && scope != .thisEvent
         let id = UUID()
         if let time = patch.time { overlays[id] = .times(id: event.copyKey, start: time.start, end: time.end) }
+        noteCopies(event, id)
         closeCard()
         if others, patch.touchesGuests {
             let line = updates == .all ? String(localized: "Saving \(event.title)… Google emails the guests.")

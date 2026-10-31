@@ -37,7 +37,7 @@ import Testing
         let older = try #require(await SQLiteCalendarCache(url: url).load().first)
         #expect(older.records.count == 2 && older.records.allSatisfy { $0.event.originalStartTime == nil })
         #expect(older.records.allSatisfy { $0.event.recurringEventID == "parent" })
-        #expect(SQLiteCalendarCache.schemaVersion == 3, "optional identity adds no schema migration")
+        #expect(SQLiteCalendarCache.schemaVersion == 4, "optional identity adds no schema migration of its own")
         await cache.apply(.save(Self.key, upserted: [], removed: ["identity-0", "identity-1"], ranges: [range], syncToken: nil))
         #expect(try await SQLiteCalendarCache(url: url).load().first?.records.isEmpty == true)
     }

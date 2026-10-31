@@ -155,7 +155,8 @@ final class GoogleCalendarProvider: CalendarProviding {
                 isAllDay: event.isAllDay, timeZone: event.timeZone, attendees: event.attendees,
                 calendarName: event.calendarName, meetLink: event.meetLink, organizerIsMe: event.organizerIsMe,
                 account: event.account, location: event.location, notes: event.notes, myResponse: event.myResponse,
-                recurringEventID: event.recurringEventID, originalStartTime: event.originalStartTime, extras: event.extras)
+                recurringEventID: event.recurringEventID, originalStartTime: event.originalStartTime, extras: event.extras,
+                uid: event.uid, organizer: event.organizer, guestsOmitted: event.guestsOmitted)
             fallback.respondsAs = event.respondsAs
             return moved.map(Self.event) ?? fallback
         } catch GoogleCalendarError.unclear {
@@ -433,7 +434,8 @@ final class GoogleCalendarProvider: CalendarProviding {
                       calendarName: event.calendarName, meetLink: event.meetLink, organizerIsMe: event.organizerIsMe,
                       account: event.account, location: patch.location ?? event.location, notes: patch.notes ?? event.notes,
                       myResponse: event.myResponse, recurringEventID: event.recurringEventID,
-                      originalStartTime: event.originalStartTime, extras: event.extras)
+                      originalStartTime: event.originalStartTime, extras: event.extras, uid: event.uid,
+                      organizer: event.organizer, guestsOmitted: event.guestsOmitted)
         changed.respondsAs = event.respondsAs
         return changed
     }
@@ -471,7 +473,10 @@ final class GoogleCalendarProvider: CalendarProviding {
                       location: event.location, notes: event.notes,
                       myResponse: event.selfResponse.flatMap(CalendarResponse.init(rawValue:)),
                       recurringEventID: event.recurringEventID,
-                      originalStartTime: event.originalStartTime.map(Self.original), extras: extras(event))
+                      originalStartTime: event.originalStartTime.map(Self.original), extras: extras(event),
+                      uid: event.iCalUID,
+                      organizer: event.organizerEmail.map { EmailAddress(name: event.organizerName, email: $0) },
+                      guestsOmitted: event.attendeesOmitted)
     }
 
     static func record(_ synced: GoogleSyncedEvent) -> CalendarEventRecord {

@@ -135,9 +135,9 @@ public final class FakeCalendar: CalendarProviding, Sendable {
                                       recurringEventID: old.recurringEventID, originalStartTime: old.originalStartTime,
                                       extras: old.extras)
             moved.respondsAs = old.respondsAs
-            s.events[index] = moved
+            s.events[index] = Self.keepingMeeting(moved, of: old)
             s.touch(moved.id)
-            return moved
+            return s.events[index]
         }
     }
 
@@ -183,9 +183,9 @@ public final class FakeCalendar: CalendarProviding, Sendable {
                                         myResponse: old.myResponse, recurringEventID: old.recurringEventID,
                                         originalStartTime: old.originalStartTime, extras: old.extras)
             changed.respondsAs = old.respondsAs
-            s.events[index] = changed
+            s.events[index] = Self.keepingMeeting(changed, of: old)
             s.touch(changed.id)
-            return changed
+            return s.events[index]
         }
     }
 
@@ -220,9 +220,9 @@ public final class FakeCalendar: CalendarProviding, Sendable {
                                         myResponse: old.myResponse, recurringEventID: old.recurringEventID,
                                         originalStartTime: old.originalStartTime, extras: extras)
             changed.respondsAs = old.respondsAs
-            s.events[index] = changed
+            s.events[index] = Self.keepingMeeting(changed, of: old)
             s.touch(changed.id)
-            return changed
+            return s.events[index]
         }
     }
 
@@ -508,6 +508,15 @@ public final class FakeCalendar: CalendarProviding, Sendable {
                                         timeZone: timeZone.identifier))
         }
         return FakeCalendar(events: events, abilities: [.respond, .editDetails, .remove, .editFull, .removeMeet])
+    }
+
+    // A real calendar keeps the meeting's UID, organizer and guest-list flag across a change
+    private static func keepingMeeting(_ changed: CalendarEvent, of old: CalendarEvent) -> CalendarEvent {
+        var kept = changed
+        kept.uid = old.uid
+        kept.organizer = old.organizer
+        kept.guestsOmitted = old.guestsOmitted
+        return kept
     }
 
     private static func soonestFirst(_ a: CalendarEvent, _ b: CalendarEvent) -> Bool {
