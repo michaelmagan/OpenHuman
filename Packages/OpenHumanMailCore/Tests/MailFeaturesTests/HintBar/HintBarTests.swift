@@ -85,6 +85,16 @@ import Testing
                 "no toggle has a short title")
     }
 
+    @Test func checkedDraftsLeadWithSendingThemInPlaceOfOpen() {
+        let hints = HintBar.hints(for: .list, checkedDrafts: true, descriptors: ActionCatalog.all,
+                                  title: { $0.id == .sendDrafts ? "Send 2 drafts…" : $0.title }) { _ in .enabled }
+        #expect(hints.map(line) == ["⌘↵ Send 2 drafts", "E Mark done", "\(Self.remindKey) Remind me", "⌘K Commands"])
+        let plain = HintBar.hints(for: .list, descriptors: ActionCatalog.all) { _ in .enabled }
+        #expect(!plain.contains { $0.action == .sendDrafts }, "nothing checked: the usual hints")
+        let search = HintBar.hints(for: .search, checkedDrafts: true, descriptors: ActionCatalog.all) { _ in .enabled }
+        #expect(!search.contains { $0.action == .sendDrafts }, "only the list itself")
+    }
+
     @Test func aRefusedActionStaysButIsMarkedDisabled() async {
         let hints = HintBar.hints(for: .list, descriptors: ActionCatalog.all) {
             $0 == .markDone ? .disabled(.unavailable("Mark done")) : .enabled

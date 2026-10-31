@@ -73,12 +73,14 @@ import Testing
         #expect((f.env.undo?.stack.count ?? 0) == entriesBefore + 1, "one entry for the whole batch")
         #expect(f.env.undo?.stack.last.map { String(localized: $0.title) } == "Sending 3 drafts…")
         #expect(f.compose.sending.filter { made.map(\.id).contains($0.draft) }.count == 3)
+        #expect(f.env.status.sendingLine == "Sending 3 drafts…", "the same word as the Undo toast")
         #expect(sent(f).isEmpty, "nothing leaves during the undo window")
 
         await letThemGo(f)
         #expect(Set(sent(f)) == Set(made.map(\.id)))
         await f.posted("Sending 3 drafts…", "Sent 3 drafts.")
         #expect(f.compose.heldSendCount == 0 && f.compose.lastBatchFailures.isEmpty)
+        #expect(!f.toasts.contains { $0.hasPrefix("Sending ") }, "the Undo toast goes once the batch is out")
     }
 
     @Test func oneUndoBringsTheWholeBatchBack() async throws {
@@ -107,7 +109,9 @@ import Testing
         await letThemGo(f)
         #expect(Set(sent(f)) == [made[0].id, made[2].id])
         #expect(await f.draftRow(failing)?.status == .failed, "the draft that failed is still there")
-        await f.posted("Sent 2 of 3. 1 couldn't be sent and stays in Drafts.")
+        await f.posted("2 of 3 sent. “Batch 1-2” is still in Drafts.")
+        #expect(!f.toasts.contains { $0.hasPrefix("Sending ") }, "no Undo next to the result")
+        #expect(f.env.undo?.stack.contains { String(localized: $0.title) == "Sending 3 drafts…" } == false)
         #expect(f.compose.lastBatchFailures == [failing])
         #expect(f.compose.sending.first { $0.draft == failing }?.state == .failed)
 
@@ -129,8 +133,22 @@ import Testing
         #expect(await f.draftRow(made[0].id)?.status == .editing)
         await letThemGo(f)
         #expect(Set(sent(f)) == [made[1].id, made[2].id])
-        await f.posted("Sent 2 of 3. 1 couldn't be sent and stays in Drafts.")
+        await f.posted("2 of 3 sent. “Batch 1-1” is still in Drafts.")
         #expect(f.compose.lastBatchFailures == [made[0].id])
+    }
+
+    @Test func aFailedDraftWithALongSubjectIsCountedNotNamed() async throws {
+        let f = ComposeFixture()
+        await f.loaded()
+        let targets = try await freshThreads(f, count: 3)
+        var made: [DraftSummary] = []
+        for (index, target) in targets.enumerated() {
+            made.append(try await makeDraft(f, target, subject: "Thursday project notes \(index + 1): agenda and next steps"))
+        }
+        f.store.failDelivery(of: made[2].id)
+        await f.compose.sendBatch(made, reminders: nil)
+        await letThemGo(f)
+        await f.posted("2 of 3 sent. 1 is still in Drafts.")
     }
 
     @Test func draftsFromTwoAccountsEachGoFromTheirOwnAccount() async throws {
@@ -190,6 +208,9 @@ import Testing
         let state = try #require(f.router.active)
         let threads = try made.map { try #require($0.thread) }
         for thread in threads { state.selection.toggle(thread) }
+        let hints = HintBarModel(router: f.router)
+        #expect(hints.hints.first?.action == .sendDrafts && hints.hints.first?.title == "Send 3 drafts",
+                "the hint bar shows ⌘↵ while drafts are checked")
 
         #expect(await f.run(.sendDrafts))
         guard case .batchSend(let model) = f.env.overlays.overlay else {
@@ -197,9 +218,11 @@ import Testing
             return
         }
         #expect(model.count == 2 && model.title == "Send 2 drafts?")
-        #expect(model.summary == "To someone@else.example.")
+        #expect(model.summary == "To someone@else.example. 1 won't be sent.")
         #expect(model.plan.skipped.map(\.reason) == [.scheduled(scheduledAt)])
-        #expect(model.skippedTitle == "1 stays in Drafts")
+        #expect(model.skippedTitle == "Staying in Drafts (1)")
+        let hold = AppSettings.undoSendHold((try? await f.store.get(AppSettings.undoSendSeconds)) ?? 10)
+        #expect(model.undoNote == "You can undo the whole batch for \(hold) seconds after sending.")
         #expect(!model.remindersOn, "the reminder setting is off by default")
 
         await model.confirm()?.value

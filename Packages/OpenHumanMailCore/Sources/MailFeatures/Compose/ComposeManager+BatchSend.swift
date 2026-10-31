@@ -31,6 +31,7 @@ struct BatchSend {
     var items: [Item] = []
     var failedAtStart: [Failure] = []
     var reminders: SentMailReminderRule?
+    var undoEntry: UndoCoordinator.Entry.ID?
 
     var isSettled: Bool {
         items.allSatisfy { $0.state != .held && $0.state != .sending }
@@ -76,10 +77,12 @@ extension ComposeManager {
         let open = Set(sessions.filter(\.isOpen).compactMap(\.draftKey))
         let plan = BatchSendPlan.make(rows: threads, drafts: drafts, openInComposer: open)
         let rule = await SentMailReminderRule.load(from: environment.settings)
+        let undoSeconds = AppSettings.undoSendHold(await Self.read(environment.settings, AppSettings.undoSendSeconds) ?? 10)
         let state = environment.router.active
         let names = Dictionary(environment.router.accounts.map { ($0.id, $0.account.alias ?? $0.account.email) },
                                uniquingKeysWith: { first, _ in first })
-        let model = BatchSendModel(plan: plan, remindersOn: rule.enabled, reminderDays: rule.days, accountNames: names,
+        let model = BatchSendModel(plan: plan, remindersOn: rule.enabled, reminderDays: rule.days,
+                                   undoSeconds: undoSeconds, accountNames: names,
                                    formatDate: { [weak self] in self?.formatSendAt($0) ?? $0.formatted() }) {
             [weak self, weak state] plan, remindersOn in
             guard let self else { return nil }
@@ -135,8 +138,10 @@ extension ComposeManager {
         let expiresAt = Date().addingTimeInterval(earliest.timeIntervalSince(timing.now()))
         let title: LocalizedStringResource = count == 1 ? "Sending 1 draft…" : "Sending \(count) drafts…"
         if let entry = push(title, .sendBatch(batch: id), expiresAt: expiresAt) {
+            batches[id]?.undoEntry = entry
             for item in batch.items { sendingUndoEntries[item.id] = entry }
         }
+        updateSendingLine()
         for item in batch.items { track(watchBatchItem(id, item: item)) }
         // Why: every reminder intent is stored before the batch is reported started, so all survive a relaunch
         if batch.items.contains(where: { $0.reminder != nil }) { await sendReminderUpdate?.value }
@@ -182,6 +187,7 @@ extension ComposeManager {
             else { return }
             self.setBatchItem(batch, item.id, .sending)
             self.setSending(item.id, .sending)
+            self.dropBatchUndoOncePast(batch)
             await self.followBatchItem(batch, item: item)
         }
     }
@@ -254,8 +260,21 @@ extension ComposeManager {
 
     private func settleBatch(_ id: UUID) {
         guard let batch = batches[id], batch.isSettled else { return }
+        dropBatchUndo(batch)
         batches[id] = nil
         report(batch)
+    }
+
+    /// Once no draft in the batch can be held back any more, its Undo toast goes, even if the pointer is keeping it.
+    private func dropBatchUndoOncePast(_ id: UUID) {
+        guard let batch = batches[id], !batch.items.contains(where: { $0.state == .held }) else { return }
+        dropBatchUndo(batch)
+        batches[id]?.undoEntry = nil
+    }
+
+    private func dropBatchUndo(_ batch: BatchSend) {
+        guard let entry = batch.undoEntry else { return }
+        environment.undo?.discard(entry)
     }
 
     private func report(_ batch: BatchSend) {
@@ -268,11 +287,15 @@ extension ComposeManager {
             return
         }
         let failed = failures.count
+        let total = sent + failed
         let message: String
         if sent > 0 {
-            message = failed == 1
-                ? String(localized: "Sent \(sent) of \(sent + failed). 1 couldn't be sent and stays in Drafts.")
-                : String(localized: "Sent \(sent) of \(sent + failed). \(failed) couldn't be sent and stay in Drafts.")
+            if failed == 1, let name = Self.noticeName(failures[0].draft) {
+                message = String(localized: "\(sent) of \(total) sent. “\(name)” is still in Drafts.")
+            } else {
+                message = failed == 1 ? String(localized: "\(sent) of \(total) sent. 1 is still in Drafts.")
+                                      : String(localized: "\(sent) of \(total) sent. \(failed) are still in Drafts.")
+            }
         } else if failed == 1 {
             let detail = failures[0].detail.map { " " + $0 } ?? ""
             message = String(localized: "Couldn't send the draft.\(detail) It stays in Drafts.")
@@ -288,6 +311,15 @@ extension ComposeManager {
                                  secondary: show) { [weak self] in
             await self?.retryBatch(keys, reminders: reminders)
         }
+    }
+
+    /// The longest subject the one-line result notice can name next to its Retry and Show Drafts buttons.
+    static let noticeNameLimit = 24
+
+    /// A failed draft's subject for the result notice, or nil when it is empty or too long to fit.
+    static func noticeName(_ draft: DraftSummary) -> String? {
+        let subject = draft.fields.subject.trimmingCharacters(in: .whitespacesAndNewlines)
+        return subject.isEmpty || subject.count > noticeNameLimit ? nil : subject
     }
 
     private func showDrafts(_ account: AccountID) {
@@ -341,8 +373,8 @@ extension ComposeManager {
         }
         if let failure, batches[id]?.items.contains(where: { $0.state == .held }) == true { throw failure }
         if late > 0 {
-            let text = late == 1 ? String(localized: "Too late to undo 1 message: it's already on its way.")
-                                 : String(localized: "Too late to undo \(late) messages: they're already on their way.")
+            let text = late == 1 ? String(localized: "Too late to undo 1 draft: it's already on its way.")
+                                 : String(localized: "Too late to undo \(late) drafts: they're already on their way.")
             environment.notices.post(text, style: .info, duration: NoticeCenter.infoDuration)
         } else if cancelled > 0 {
             let text = cancelled == 1 ? String(localized: "Not sent. The draft is back in Drafts.")

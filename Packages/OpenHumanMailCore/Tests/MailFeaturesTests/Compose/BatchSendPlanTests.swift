@@ -101,12 +101,25 @@ import Testing
         let plan = BatchSendPlan.make(rows: [row(1), row(2), row(3)], drafts: drafts)
         let model = BatchSendModel(plan: plan, remindersOn: true, reminderDays: 3) { _, _ in nil }
         #expect(model.title == "Send 2 drafts?" && model.confirmTitle == "Send 2 Drafts")
-        #expect(model.summary == "To ana@example.org and ben@example.org.")
-        #expect(model.skippedTitle == "1 stays in Drafts")
+        #expect(model.summary == "To ana@example.org and ben@example.org. 1 won't be sent.")
+        #expect(model.skippedTitle == "Staying in Drafts (1)")
         #expect(model.skippedLines.map(\.detail) == ["No recipients"])
-        #expect(model.reminderDetail.hasPrefix("Conversations come back after 3 days if no one replies."))
+        #expect(model.reminderDetail == "You'll get a reminder after 3 days if no one replies. "
+                + "Only for these drafts. Your reminder setting won't change.")
         model.toggleReminders()
-        #expect(!model.remindersOn && model.reminderDetail == "For these drafts only. Your reminder setting stays as it is.")
+        #expect(!model.remindersOn && model.reminderDetail == "Only for these drafts. Your reminder setting won't change.")
+        #expect(model.undoNote == "You can undo the whole batch for a few seconds after sending.")
+    }
+
+    @Test func theTextsUseTheRealDayCountUndoWindowAndScheduledTime() {
+        let drafts = [draft(1, in: row(1), to: ["ana@example.org"])]
+        let plan = BatchSendPlan.make(rows: [row(1)], drafts: drafts)
+        let model = BatchSendModel(plan: plan, remindersOn: true, reminderDays: 1, undoSeconds: 20,
+                                   formatDate: { _ in "Oct 31, 10:00 AM" }) { _, _ in nil }
+        #expect(model.reminderDetail.hasPrefix("You'll get a reminder after 1 day if no one replies."))
+        #expect(model.undoNote == "You can undo the whole batch for 20 seconds after sending.")
+        #expect(model.text(for: .scheduled(Date(timeIntervalSince1970: 0))) == "Stays scheduled for Oct 31, 10:00 AM")
+        #expect(model.summary == "To ana@example.org.", "nothing skipped: no count")
     }
 
     @Test func twoAccountsAreNamedInTheSummaryAndEachLine() {
@@ -114,8 +127,10 @@ import Testing
         let plan = BatchSendPlan.make(rows: [row(1), row(2, account: Self.home)], drafts: drafts)
         let model = BatchSendModel(plan: plan, remindersOn: false, reminderDays: 3,
                                    accountNames: [Self.work: "Work", Self.home: "Personal"]) { _, _ in nil }
-        #expect(model.summary == "To ana@example.org, from 2 accounts.")
+        #expect(model.summary == "To ana@example.org. From Work and Personal.")
         #expect(model.lines.map(\.detail) == ["ana@example.org · Work", "ana@example.org · Personal"])
+        let unnamed = BatchSendModel(plan: plan, remindersOn: false, reminderDays: 3) { _, _ in nil }
+        #expect(unnamed.summary == "To ana@example.org. From 2 accounts.")
     }
 
     @Test func confirmingHandsOverThePlanAndTheReminderChoiceOnce() async {

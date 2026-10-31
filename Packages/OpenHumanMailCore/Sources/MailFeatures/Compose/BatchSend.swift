@@ -133,6 +133,8 @@ public final class BatchSendModel {
     public let plan: BatchSendPlan
     public var remindersOn: Bool
     public let reminderDays: Int
+    /// The undo window in seconds, or nil when it isn't known.
+    public let undoSeconds: Int?
     public private(set) var isClosed = false
     public private(set) var sending: Task<Void, Never>?
 
@@ -140,12 +142,14 @@ public final class BatchSendModel {
     @ObservationIgnored private let formatDate: @MainActor (Date) -> String
     @ObservationIgnored private let onConfirm: @MainActor (BatchSendPlan, Bool) -> Task<Void, Never>?
 
-    public init(plan: BatchSendPlan, remindersOn: Bool, reminderDays: Int, accountNames: [AccountID: String] = [:],
+    public init(plan: BatchSendPlan, remindersOn: Bool, reminderDays: Int, undoSeconds: Int? = nil,
+                accountNames: [AccountID: String] = [:],
                 formatDate: @escaping @MainActor (Date) -> String = { $0.formatted(date: .abbreviated, time: .shortened) },
                 confirm: @escaping @MainActor (BatchSendPlan, Bool) -> Task<Void, Never>?) {
         self.plan = plan
         self.remindersOn = remindersOn
         self.reminderDays = reminderDays
+        self.undoSeconds = undoSeconds
         self.accountNames = accountNames
         self.formatDate = formatDate
         self.onConfirm = confirm
@@ -167,25 +171,37 @@ public final class BatchSendModel {
         count == 1 ? String(localized: "Send 1 Draft") : String(localized: "Send \(count) Drafts")
     }
 
+    /// Who the drafts go to, which accounts send them when more than one does, and how many won't be sent, so the
+    /// skipped count shows even when the list scrolls.
     public var summary: String {
         guard count > 0 else { return String(localized: "They stay in Drafts. Open one to fix it.") }
-        let who = ComposeManager.recipientSummary(plan.recipients)
+        var parts = [String(localized: "To \(ComposeManager.recipientSummary(plan.recipients)).")]
         let accounts = plan.accounts
-        guard accounts.count > 1 else { return String(localized: "To \(who).") }
-        return String(localized: "To \(who), from \(accounts.count) accounts.")
+        if accounts.count > 1 {
+            let names = accounts.compactMap { accountNames[$0] }
+            parts.append(names.count == accounts.count ? String(localized: "From \(names.formatted(.list(type: .and))).")
+                                                       : String(localized: "From \(accounts.count) accounts."))
+        }
+        if !plan.skipped.isEmpty { parts.append(String(localized: "\(plan.skipped.count) won't be sent.")) }
+        return parts.joined(separator: " ")
     }
 
     public var undoNote: String {
-        String(localized: "You can undo the whole batch for a few seconds after sending.")
+        guard let undoSeconds else { return String(localized: "You can undo the whole batch for a few seconds after sending.") }
+        switch undoSeconds {
+        case ...0: return String(localized: "They go right away, with no undo.")
+        case 1: return String(localized: "You can undo the whole batch for 1 second after sending.")
+        default: return String(localized: "You can undo the whole batch for \(undoSeconds) seconds after sending.")
+        }
     }
 
     public var reminderTitle: String { String(localized: "Remind me if no reply") }
 
     public var reminderDetail: String {
-        let note = String(localized: "For these drafts only. Your reminder setting stays as it is.")
+        let note = String(localized: "Only for these drafts. Your reminder setting won't change.")
         guard remindersOn else { return note }
         let after = reminderDays == 1 ? String(localized: "after 1 day") : String(localized: "after \(reminderDays) days")
-        return String(localized: "Conversations come back \(after) if no one replies. \(note)")
+        return String(localized: "You'll get a reminder \(after) if no one replies. \(note)")
     }
 
     public var lines: [Line] {
@@ -201,11 +217,7 @@ public final class BatchSendModel {
     }
 
     public var skippedTitle: String? {
-        switch plan.skipped.count {
-        case 0: nil
-        case 1: String(localized: "1 stays in Drafts")
-        default: String(localized: "\(plan.skipped.count) stay in Drafts")
-        }
+        plan.skipped.isEmpty ? nil : String(localized: "Staying in Drafts (\(plan.skipped.count))")
     }
 
     public var skippedLines: [Line] {
@@ -218,7 +230,7 @@ public final class BatchSendModel {
     public func text(for reason: BatchSendSkipReason) -> String {
         switch reason {
         case .noDraft: String(localized: "No draft here any more")
-        case .scheduled(let date): String(localized: "Scheduled for \(formatDate(date)): keeps its schedule")
+        case .scheduled(let date): String(localized: "Stays scheduled for \(formatDate(date))")
         case .alreadySending: String(localized: "Already sending")
         case .needsReview: String(localized: "An agent wrote it: review it first")
         case .changedElsewhere: String(localized: "Changed on another device: open it to pick a version")

@@ -155,12 +155,16 @@ extension ComposeManager {
         for message in sending where message.draft == draft { removeSending(message.id) }
     }
 
+    /// "Sending 3 drafts…" while only checked drafts sent together are on their way, matching their Undo toast.
     func updateSendingLine() {
-        let count = sending.filter(\.state.isOnItsWay).count
+        let onItsWay = sending.filter(\.state.isOnItsWay)
+        let count = onItsWay.count
+        let batched = Set(batches.values.flatMap { $0.items.map(\.id) })
+        let drafts = onItsWay.allSatisfy { batched.contains($0.id) }
         let line: String? = switch count {
         case 0: nil
-        case 1: String(localized: "Sending 1 message…")
-        default: String(localized: "Sending \(count) messages…")
+        case 1: drafts ? String(localized: "Sending 1 draft…") : String(localized: "Sending 1 message…")
+        default: drafts ? String(localized: "Sending \(count) drafts…") : String(localized: "Sending \(count) messages…")
         }
         if environment.status.sendingLine != line { environment.status.sendingLine = line }
     }
