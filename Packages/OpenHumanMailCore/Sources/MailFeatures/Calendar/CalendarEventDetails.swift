@@ -10,6 +10,7 @@ public struct CalendarEventDetails: Sendable, Hashable {
         public let isOptional: Bool
         public let isMe: Bool
         public let response: CalendarResponse?
+        public var isOrganizer = false
 
         public var id: String { email.lowercased() }
 
@@ -58,7 +59,11 @@ public struct CalendarEventDetails: Sendable, Hashable {
     public let organizerText: String?
     public let organizedByMe: Bool
     public let canOpenEditor: Bool
+    // The guest list is not complete: the organizer hid it, or Google returned only part of it
+    public let guestListNote: String?
 
+    // For a meeting on several connected calendars, `event.copies` holds every copy: the guest list comes from the copy
+    // that has the fullest one, and each connected account on it is the user, with that copy's own answer
     @MainActor
     public init(event: CalendarEvent, timeZone: TimeZone, calendarName: String, calendarKey: String,
                 myAddresses: Set<String> = [], myResponse: CalendarResponse? = nil) {
@@ -76,14 +81,39 @@ public struct CalendarEventDetails: Sendable, Hashable {
         joinLink = event.meetLink.flatMap { ["http", "https"].contains($0.scheme?.lowercased() ?? "") ? $0 : nil }
         var mine = Set(myAddresses.map { $0.lowercased() })
         if let alias = event.respondsAs { mine.insert(alias.lowercased()) }
-        let people = event.extras.guests.isEmpty ? event.attendees.map { CalendarGuest($0) } : event.extras.guests
+        let source = event.isMerged ? event.fullestGuestList : event
+        var connected: [String: CalendarEvent] = [:]
+        for copy in event.copies where event.isMerged {
+            if let account = copy.account?.lowercased(), !account.isEmpty, connected[account] == nil { connected[account] = copy }
+        }
+        let organizerEmail = (source.organizer ?? event.organizer)?.email.lowercased()
+        let people = source.extras.guests.isEmpty ? source.attendees.map { CalendarGuest($0) } : source.extras.guests
         let shownGuests = people.map { person in
-            let isMe = (person.isOrganizer == false || (event.organizerIsMe == true && person.isOrganizer == true))
-                && mine.contains(person.email.lowercased())
+            let address = person.email.lowercased()
+            let organizes = person.isOrganizer == true || (organizerEmail != nil && address == organizerEmail)
+            if let copy = connected[address] {
+                let own = copy.copyKey == event.copyKey
+                let answer = copy.organizerIsMe == true ? person.response
+                    : (own ? (myResponse ?? copy.myResponse) : copy.myResponse) ?? person.response
+                return Guest(email: person.email, name: person.name, isOptional: person.isOptional, isMe: true,
+                             response: answer, isOrganizer: organizes)
+            }
+            let isMe = (person.isOrganizer == false || (source.organizerIsMe == true && person.isOrganizer == true))
+                && mine.contains(address)
             let answer = isMe ? (myResponse ?? person.response ?? event.myResponse) : person.response
-            return Guest(email: person.email, name: person.name, isOptional: person.isOptional, isMe: isMe, response: answer)
+            return Guest(email: person.email, name: person.name, isOptional: person.isOptional, isMe: isMe, response: answer,
+                         isOrganizer: organizes)
         }
         guests = shownGuests
+        if source.organizerIsMe == true || people.isEmpty {
+            guestListNote = nil
+        } else if source.extras.permissions?.canSeeGuestList == false {
+            guestListNote = String(localized: "The organizer hid the guest list.")
+        } else if source.guestsOmitted {
+            guestListNote = String(localized: "Google shows only part of the guest list.")
+        } else {
+            guestListNote = nil
+        }
         guestSummary = Self.summary(shownGuests)
         let parsed = CalendarDescription.parse(event.notes)
         notes = parsed.isEmpty ? nil : parsed

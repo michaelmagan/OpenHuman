@@ -66,6 +66,14 @@ public final class CalendarWindowModel {
     @ObservationIgnored var undoerStorage: CalendarWindowUndoer?
     @ObservationIgnored var removalContext: CalendarRemovalContext?
     @ObservationIgnored var pendingRemovals: Set<CalendarRemovalKey> = []
+    // Why: Google passes a change to the other copies of a meeting a little after it answers, so a write on a meeting
+    // drawn for several calendars reads them all once more after this delay
+    @ObservationIgnored public var copySettleDelay: Duration = .seconds(5)
+    @ObservationIgnored var settling: Set<UUID> = []
+    @ObservationIgnored var settleTask: Task<Void, Never>?
+    // Overlays that hide the invited copies of a meeting the user deletes, kept until the delayed re-read shows them gone
+    @ObservationIgnored var linkedOverlays: [UUID: [UUID]] = [:]
+    @ObservationIgnored var settleOverlays: [UUID] = []
 
     public let eventStore: CalendarEventStore
 
@@ -116,7 +124,10 @@ public final class CalendarWindowModel {
     public func openEditor(for event: CalendarEvent, calendarKey: String) async {
         await open(around: event.start)
         let key = calendarKey.lowercased()
-        let shown = shownEvents.first { $0.id == event.id && ($0.account ?? "").lowercased() == key }
+        func isCopy(_ candidate: CalendarEvent) -> Bool {
+            candidate.id == event.id && (candidate.account ?? "").lowercased() == key
+        }
+        let shown = shownEvents.first { isCopy($0) || $0.copies.contains(where: isCopy) }
         var target = shown ?? event
         if shown == nil, target.account == nil, !key.isEmpty { target.account = key }
         openEvent(target)
@@ -334,7 +345,7 @@ public final class CalendarWindowModel {
     }
 
     static func untagged(_ event: CalendarEvent) -> CalendarEvent {
-        var clean = event
+        var clean = event.single
         clean.account = nil
         return clean
     }
@@ -365,6 +376,7 @@ public final class CalendarWindowModel {
                 if let index = out.firstIndex(where: { $0.copyKey == id }) { out[index].myResponse = response }
             }
         }
+        out = CalendarCopyGroups.group(out, accountOrder: sources.filter(\.isVisible).map(\.key))
         if let card, card.pendingMove != nil, let index = out.firstIndex(where: { $0.copyKey == card.event.copyKey }) {
             out[index] = out[index].with(start: card.form?.start ?? card.start, end: card.form?.end ?? card.end)
         }
@@ -507,7 +519,7 @@ public final class CalendarWindowModel {
     }
 
     func firstFreeSlot() -> DateInterval? {
-        let busy = shownEvents.filter { !CalendarTimeGrid.belongsInAllDayRow($0) && $0.myResponse != .declined }
+        let busy = shownEvents.filter { !CalendarTimeGrid.belongsInAllDayRow($0) && $0.drawnAttendance != .declined }
         let current = now()
         for day in period.days {
             guard let open = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: day),
@@ -607,8 +619,10 @@ extension CalendarEvent {
                                   attendees: attendees, calendarName: calendarName, meetLink: meetLink,
                                   organizerIsMe: organizerIsMe, account: account, location: location, notes: notes,
                                   myResponse: myResponse, recurringEventID: recurringEventID,
-                                  originalStartTime: originalStartTime, extras: extras)
+                                  originalStartTime: originalStartTime, extras: extras, uid: uid,
+                                  organizer: organizer, guestsOmitted: guestsOmitted)
         moved.respondsAs = respondsAs
+        moved.copies = copies
         return moved
     }
 }

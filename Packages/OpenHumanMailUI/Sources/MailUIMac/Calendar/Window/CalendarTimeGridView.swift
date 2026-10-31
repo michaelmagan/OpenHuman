@@ -488,8 +488,7 @@ struct CalendarEventBlockView: View {
 
     var body: some View {
         let event = block.event
-        let state = CalendarPalette.state(isSelected: isSelected, isDeclined: block.isDeclined,
-                                          needsAnswer: event.canRespond && event.myResponse == .needsAction,
+        let state = CalendarPalette.state(isSelected: isSelected, isDeclined: block.isDeclined, needsAnswer: block.isInvited,
                                           isTentative: block.isTentative, isPast: block.isPast)
         let colors = CalendarPalette.block(block.colorIndex, state: state, tokens: theme.tokens)
         let content = CalendarPalette.content(height: Double(height))
@@ -506,6 +505,7 @@ struct CalendarEventBlockView: View {
             .padding(.leading, theme.space1 + 2)
             .padding(.top, content == .oneLine ? 1 : 3)
             Spacer(minLength: 0)
+            if event.isMerged, height > 20 { otherCalendars(event) }
             if let link = event.meetLink, height > 20 {
                 Button { openURL(link) } label: { Image(systemName: "video").font(.system(size: 10)) }
                     .buttonStyle(.plain).foregroundStyle(colors.text.color)
@@ -533,9 +533,10 @@ struct CalendarEventBlockView: View {
         .shadow(color: .black.opacity(isSelected ? 0.22 : 0), radius: isSelected ? 3 : 0, y: isSelected ? 1 : 0)
         .contentShape(Rectangle())
         .help(event.title + "\n" + model.timeText(event) + (event.location.map { "\n" + $0 } ?? "")
-              + (event.account.map { "\n" + $0 } ?? ""))
+              + accountsHelp(event))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(event.title), \(model.timeText(event))")
+        .accessibilityLabel(event.isMerged ? String(localized: "\(event.title), \(model.timeText(event)), on \(event.copies.count) of your calendars")
+                                           : "\(event.title), \(model.timeText(event))")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier("calendar.window.event")
     }
@@ -573,9 +574,30 @@ struct CalendarEventBlockView: View {
                 Text(place).themeFont(theme.typeCaption).fontWeight(.regular).foregroundStyle(ink.color).lineLimit(1)
             }
             if content == .withAccount, let account = event.account {
-                Text(verbatim: account).themeFont(theme.typeCaption).fontWeight(.regular).foregroundStyle(ink.color)
+                Text(verbatim: event.isMerged ? "\(account) +\(event.copies.count - 1)" : account)
+                    .themeFont(theme.typeCaption).fontWeight(.regular).foregroundStyle(ink.color)
                     .lineLimit(1).truncationMode(.middle)
             }
         }
+    }
+
+    // A dot in each other calendar's colour says the same meeting is on that calendar too
+    private func otherCalendars(_ event: CalendarEvent) -> some View {
+        HStack(spacing: 1) {
+            ForEach(event.copies.dropFirst(), id: \.copyKey) { copy in
+                Image(systemName: "circle.fill").font(.system(size: 6))
+                    .foregroundStyle(CalendarPalette.ink(model.colorIndex(for: copy), tokens: theme.tokens).color)
+            }
+        }
+        .padding(.top, 4).padding(.trailing, theme.space1)
+        .accessibilityHidden(true)
+        .accessibilityIdentifier("calendar.window.event.otherCalendars")
+    }
+
+    private func accountsHelp(_ event: CalendarEvent) -> String {
+        guard event.isMerged else { return event.account.map { "\n" + $0 } ?? "" }
+        var lines = event.copies.compactMap(\.account).map { "\n" + $0 }
+        if event.copiesDisagreeOnTime { lines.append("\n" + String(localized: "Your calendars show different times.")) }
+        return lines.joined()
     }
 }

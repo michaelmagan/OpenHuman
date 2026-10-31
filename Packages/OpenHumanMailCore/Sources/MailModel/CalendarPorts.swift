@@ -21,13 +21,24 @@ public struct CalendarEvent: Identifiable, Sendable, Hashable {
     public var extras: CalendarEventExtras
     // The guest address Mail answers as when the calendar marks no entry as its own (an invitation sent to an alias)
     public var respondsAs: String?
+    // The iCalendar UID that every copy of one meeting shares, on each calendar and account it reaches
+    public var uid: String?
+    public var organizer: EmailAddress?
+    // The calendar returned only part of the guest list
+    public var guestsOmitted: Bool
+    // Set only on a meeting drawn once for several connected accounts: every copy, the shown one first
+    public var copies: [CalendarEvent] = []
 
     public init(id: String, title: String, start: Date, end: Date, isAllDay: Bool = false, timeZone: String? = nil,
                 attendees: [EmailAddress] = [], calendarName: String? = nil, meetLink: URL? = nil,
                 organizerIsMe: Bool? = nil, account: String? = nil, location: String? = nil, notes: String? = nil,
                 myResponse: CalendarResponse? = nil, recurringEventID: String? = nil,
-                originalStartTime: CalendarOriginalStart? = nil, extras: CalendarEventExtras = CalendarEventExtras()) {
+                originalStartTime: CalendarOriginalStart? = nil, extras: CalendarEventExtras = CalendarEventExtras(),
+                uid: String? = nil, organizer: EmailAddress? = nil, guestsOmitted: Bool = false) {
         self.originalStartTime = originalStartTime
+        self.uid = uid
+        self.organizer = organizer
+        self.guestsOmitted = guestsOmitted
         self.extras = extras
         self.location = location
         self.notes = notes
@@ -49,6 +60,15 @@ public struct CalendarEvent: Identifiable, Sendable, Hashable {
     public func overlaps(from: Date, to: Date) -> Bool { end > from && start < to }
 
     public var copyKey: String { "\((account ?? "").lowercased())|\(id)" }
+
+    public var isMerged: Bool { copies.count > 1 }
+
+    // The same event without the copies of other accounts, as one calendar holds it
+    public var single: CalendarEvent {
+        var plain = self
+        plain.copies = []
+        return plain
+    }
 
     public var isMovableByMe: Bool {
         guard !id.isEmpty, !isAllDay else { return false }

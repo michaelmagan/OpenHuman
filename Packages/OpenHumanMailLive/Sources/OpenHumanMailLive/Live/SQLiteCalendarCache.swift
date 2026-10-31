@@ -7,8 +7,10 @@ actor SQLiteCalendarCache: CalendarCachePersisting {
     enum StoreError: Error { case open(Int32) }
 
     static let fileName = "calendar-cache.sqlite"
-    // Why: an older file is emptied once and re-read from Google, since it lacks the new row fields
-    static let schemaVersion: Int32 = 3
+    // Why: an older file is emptied once and re-read from Google, since it lacks the new row fields (4: the meeting's
+    // UID and organizer, which join the copies of one meeting on several accounts; the re-read also replaces who
+    // organizes each copy as decoded before Google's omitted `organizer.self` was read as false)
+    static let schemaVersion: Int32 = 4
 
     private var db: OpaquePointer?
 
@@ -247,6 +249,9 @@ private struct StoredEvent: Codable {
     var declinedByMe: Bool
     var allDayDates: CalendarAllDayDates?
     var extras: StoredExtras?
+    var uid: String?
+    var organizer: EmailAddress?
+    var guestsOmitted: Bool?
 
     init(_ record: CalendarEventRecord) {
         let event = record.event
@@ -267,6 +272,9 @@ private struct StoredEvent: Codable {
         declinedByMe = record.declinedByMe
         allDayDates = record.allDayDates
         extras = StoredExtras(event.extras)
+        uid = event.uid
+        organizer = event.organizer
+        guestsOmitted = event.guestsOmitted ? true : nil
     }
 
     func record(id: String, etag: String?, updated: Date?, start: Date, end: Date) -> CalendarEventRecord {
@@ -275,7 +283,8 @@ private struct StoredEvent: Codable {
                                   organizerIsMe: organizerIsMe, location: location, notes: notes,
                                   myResponse: myResponse.flatMap(CalendarResponse.init(rawValue:)),
                                   recurringEventID: eventSeries, originalStartTime: originalStartTime,
-                                  extras: extras?.value ?? CalendarEventExtras())
+                                  extras: extras?.value ?? CalendarEventExtras(), uid: uid, organizer: organizer,
+                                  guestsOmitted: guestsOmitted == true)
         var record = CalendarEventRecord(event: event, etag: etag, updated: updated, recurringEventID: recurringEventID,
                                          isBusy: isBusy, declinedByMe: declinedByMe)
         record.allDayDates = allDayDates ?? record.allDayDates

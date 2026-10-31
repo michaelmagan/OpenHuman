@@ -97,6 +97,46 @@ extension CalendarEvent {
     public static var responseNotShown: String { String(localized: "Your response is not shown for this event.") }
 }
 
+// How an event is drawn, worst first: a meeting on several connected calendars takes the best answer of its copies, so it
+// is declined only when every copy is
+public enum CalendarAttendance: Int, Sendable, Hashable, Comparable {
+    case declined, invited, maybe, going
+
+    public static func < (lhs: CalendarAttendance, rhs: CalendarAttendance) -> Bool { lhs.rawValue < rhs.rawValue }
+}
+
+extension CalendarEvent {
+    public var attendance: CalendarAttendance {
+        if myResponse == .declined { return .declined }
+        if canRespond, myResponse == .needsAction { return .invited }
+        if myResponse == .tentative { return .maybe }
+        return .going
+    }
+
+    public var drawnAttendance: CalendarAttendance { copies.map(\.attendance).max() ?? attendance }
+
+    // Why: a move or a cancellation reaches the other calendars a little later, so the copies can briefly disagree
+    public var copiesDisagreeOnTime: Bool {
+        guard let shown = copies.first else { return false }
+        return copies.dropFirst().contains { $0.start != shown.start || $0.end != shown.end || $0.isAllDay != shown.isAllDay }
+    }
+
+    // The copy with the fullest guest list: an invited account may see only part of it, so the organizer's copy wins a tie
+    public var fullestGuestList: CalendarEvent {
+        func count(_ copy: CalendarEvent) -> Int { copy.extras.guests.isEmpty ? copy.attendees.count : copy.extras.guests.count }
+        var best = copies.first ?? self
+        for copy in copies.dropFirst() {
+            let more = count(copy) > count(best)
+            let tie = count(copy) == count(best)
+            if more || (tie && best.guestsOmitted && !copy.guestsOmitted)
+                || (tie && best.guestsOmitted == copy.guestsOmitted && copy.organizerIsMe == true && best.organizerIsMe != true) {
+                best = copy
+            }
+        }
+        return best
+    }
+}
+
 public enum CalendarViewKind: String, Sendable, Hashable, Codable, CaseIterable {
     case day, threeDays, week, month
 
