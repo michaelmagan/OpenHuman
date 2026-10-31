@@ -81,16 +81,19 @@ public struct CalendarEventRecord: Sendable, Hashable {
     }
 
     public func materialized(in zone: TimeZone) -> CalendarEventRecord {
+        var moved = self
+        // Older payloads can carry the known parent only on the record.
+        moved.event.recurringEventID = event.recurringEventID ?? recurringEventID
         guard event.isAllDay, event.timeZone == nil, let dates = allDayDates,
               let start = CalendarAllDayDates.midnight(dates.start, in: zone),
               let end = CalendarAllDayDates.midnight(dates.end, in: zone),
-              start != event.start || end != event.end else { return self }
-        var moved = self
+              start != event.start || end != event.end else { return moved }
         moved.event = CalendarEvent(id: event.id, title: event.title, start: start, end: end, isAllDay: true,
                                     timeZone: nil, attendees: event.attendees, calendarName: event.calendarName,
                                     meetLink: event.meetLink, organizerIsMe: event.organizerIsMe, account: event.account,
                                     location: event.location, notes: event.notes, myResponse: event.myResponse,
-                                    recurringEventID: event.recurringEventID, extras: event.extras)
+                                    recurringEventID: moved.event.recurringEventID, originalStartTime: event.originalStartTime,
+                                    extras: event.extras)
         moved.event.respondsAs = event.respondsAs
         return moved
     }
@@ -108,12 +111,27 @@ public struct CalendarEventWindow: Sendable, Hashable {
     }
 }
 
+public struct CalendarEventCancellation: Sendable, Hashable {
+    public let id: String
+    public let parentID: String?
+    public let originalStartTime: CalendarOriginalStart?
+
+    public init(id: String, parentID: String?, originalStartTime: CalendarOriginalStart?) {
+        self.id = id
+        self.parentID = parentID
+        self.originalStartTime = originalStartTime
+    }
+}
+
 public struct CalendarEventDelta: Sendable, Hashable {
     public var changed: [CalendarEventRecord]
     public var removed: [String]
     public var syncToken: String?
+    public var cancellations: [CalendarEventCancellation]
 
-    public init(changed: [CalendarEventRecord] = [], removed: [String] = [], syncToken: String? = nil) {
+    public init(changed: [CalendarEventRecord] = [], removed: [String] = [], syncToken: String? = nil,
+                cancellations: [CalendarEventCancellation] = []) {
+        self.cancellations = cancellations
         self.changed = changed
         self.removed = removed
         self.syncToken = syncToken

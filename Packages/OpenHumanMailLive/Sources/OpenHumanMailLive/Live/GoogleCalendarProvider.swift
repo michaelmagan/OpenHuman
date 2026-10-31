@@ -93,7 +93,10 @@ final class GoogleCalendarProvider: CalendarProviding {
             onFetch?(CalendarFetchRecord(kind: .events, from: now, to: now, duration: ContinuousClock.now - started,
                                          count: page.events.count + page.removed.count, failure: nil))
             return CalendarEventDelta(changed: page.events.map(Self.record), removed: page.removed,
-                                      syncToken: page.nextSyncToken)
+                                      syncToken: page.nextSyncToken, cancellations: page.cancellations.map {
+                CalendarEventCancellation(id: $0.id, parentID: $0.parentID,
+                                          originalStartTime: $0.originalStartTime.map(Self.original))
+            })
         } catch GoogleCalendarError.gone {
             reportFailure(from: now, to: now, started: started, error: GoogleCalendarError.gone)
             throw CalendarSyncError.tokenExpired
@@ -148,9 +151,13 @@ final class GoogleCalendarProvider: CalendarProviding {
             let moved = try await client.moveEvent(id: event.id, start: start, end: end,
                                                    timeZone: event.timeZone ?? TimeZone.current.identifier,
                                                    sendUpdates: Self.sendUpdates(sendUpdates))
-            return moved.map(Self.event) ?? CalendarEvent(id: event.id, title: event.title, start: start, end: end,
-                                                          timeZone: event.timeZone, attendees: event.attendees,
-                                                          meetLink: event.meetLink, organizerIsMe: event.organizerIsMe)
+            var fallback = CalendarEvent(id: event.id, title: event.title, start: start, end: end,
+                isAllDay: event.isAllDay, timeZone: event.timeZone, attendees: event.attendees,
+                calendarName: event.calendarName, meetLink: event.meetLink, organizerIsMe: event.organizerIsMe,
+                account: event.account, location: event.location, notes: event.notes, myResponse: event.myResponse,
+                recurringEventID: event.recurringEventID, originalStartTime: event.originalStartTime, extras: event.extras)
+            fallback.respondsAs = event.respondsAs
+            return moved.map(Self.event) ?? fallback
         } catch GoogleCalendarError.unclear {
             throw CalendarError.unclear("Google may have moved the event. Check your calendar.")
         } catch {
@@ -158,14 +165,71 @@ final class GoogleCalendarProvider: CalendarProviding {
         }
     }
 
-    var abilities: CalendarAbilities { [.respond, .remove, .editFull, .removeMeet] }
+    var abilities: CalendarAbilities { [.respond, .remove, .editFull, .removeMeet, .removeInvite] }
+    var removalScopes: [CalendarRecurrenceScope] { CalendarRecurrenceScope.removalOptions }
+
+    func removeEvent(_ event: CalendarEvent, scope: CalendarRecurrenceScope,
+                     sendUpdates: CalendarSendUpdates) async throws -> CalendarRemovalResult {
+        if let refusal = info.createRefusal { throw CalendarError.refused(refusal) }
+        guard event.account == nil || event.account?.lowercased() == info.account?.lowercased(),
+              info.account?.lowercased() == client.calendarID.lowercased(), !event.id.isEmpty else {
+            throw CalendarError.refused("The event doesn't belong to this calendar.")
+        }
+        let wireScope: GoogleRemovalScope = switch scope {
+        case .thisEvent: .thisEvent
+        case .allEvents: .allEvents
+        case .thisAndFollowing: .thisAndFollowing
+        }
+        do {
+            // Which path runs follows the card; each path re-reads the event and refuses the other kind.
+            let answer: GoogleRemovalResult
+            if event.isInvitationCopy {
+                answer = try await client.removeInvitation(id: event.id, expectedParent: event.recurringEventID,
+                    expectedOriginal: event.originalStartTime.map(Self.googleOriginal), scope: wireScope)
+            } else {
+                answer = try await client.removeEvent(id: event.id, expectedParent: event.recurringEventID,
+                    expectedOriginal: event.originalStartTime.map(Self.googleOriginal), scope: wireScope,
+                    sendUpdates: Self.sendUpdates(sendUpdates))
+            }
+            return CalendarRemovalResult(selectedID: answer.selectedID, parentID: answer.parentID, scope: scope,
+                originalCutoff: answer.originalCutoff.map(Self.original), confirmedMasterVersion: answer.confirmedMasterVersion.map {
+                    CalendarConfirmedMasterVersion(etag: $0.etag, updated: $0.updated)
+                })
+        } catch GoogleCalendarRemovalError.refused(let why) {
+            throw CalendarError.refused(why)
+        } catch GoogleCalendarRemovalError.conflict {
+            throw CalendarError.refused("The event changed while preparing deletion. Refresh the calendar and try again.")
+        } catch GoogleCalendarError.badRequest(reason: "precondition_failed") {
+            throw CalendarError.refused("The event changed while preparing deletion. Refresh the calendar and try again.")
+        } catch GoogleCalendarRemovalError.uncertain {
+            throw CalendarError.unclear("The series was shortened, but some exceptions may remain. Refresh and check your calendar before trying again.")
+        } catch GoogleCalendarError.unclear {
+            throw CalendarError.unclear("Google may have changed the series. Refresh and check your calendar before trying again.")
+        } catch {
+            throw Self.calendarError(error, doing: "delete the event")
+        }
+    }
+
+    static func original(_ value: GoogleOriginalStart) -> CalendarOriginalStart {
+        switch value {
+        case .date(let date): .date(date)
+        case .timed(let instant, let zone): .timed(instant, timeZone: zone)
+        }
+    }
+
+    static func googleOriginal(_ value: CalendarOriginalStart) -> GoogleOriginalStart {
+        switch value {
+        case .date(let date): .date(date)
+        case .timed(let instant, let zone): .timed(instant, timeZone: zone)
+        }
+    }
 
     func removeEvent(_ event: CalendarEvent, sendUpdates: CalendarSendUpdates) async throws {
         if let refusal = info.createRefusal { throw CalendarError.refused(refusal) }
         guard !event.id.isEmpty, event.organizerIsMe == true || (event.organizerIsMe == nil && event.attendees.isEmpty) else {
             throw CalendarError.refused("Mail deletes only events you organize. Delete it in your calendar.")
         }
-        guard !event.isRecurring else {
+        guard !event.isRecurringForRemoval else {
             throw CalendarError.refused("Mail doesn't delete repeating events yet. Delete it in your calendar.")
         }
         do {
@@ -363,12 +427,15 @@ final class GoogleCalendarProvider: CalendarProviding {
     }
 
     static func applying(_ patch: CalendarEventPatch, to event: CalendarEvent) -> CalendarEvent {
-        CalendarEvent(id: event.id, title: patch.title ?? event.title, start: patch.time?.start ?? event.start,
+        var changed = CalendarEvent(id: event.id, title: patch.title ?? event.title, start: patch.time?.start ?? event.start,
                       end: patch.time?.end ?? event.end, isAllDay: patch.time?.isAllDay ?? event.isAllDay,
                       timeZone: patch.time?.timeZone ?? event.timeZone, attendees: event.attendees,
                       calendarName: event.calendarName, meetLink: event.meetLink, organizerIsMe: event.organizerIsMe,
                       account: event.account, location: patch.location ?? event.location, notes: patch.notes ?? event.notes,
-                      myResponse: event.myResponse, recurringEventID: event.recurringEventID, extras: event.extras)
+                      myResponse: event.myResponse, recurringEventID: event.recurringEventID,
+                      originalStartTime: event.originalStartTime, extras: event.extras)
+        changed.respondsAs = event.respondsAs
+        return changed
     }
 
     static func extras(_ event: GoogleCalendarEvent) -> CalendarEventExtras {
@@ -403,7 +470,8 @@ final class GoogleCalendarProvider: CalendarProviding {
                       calendarName: nil, meetLink: event.meetLink, organizerIsMe: event.organizerIsSelf,
                       location: event.location, notes: event.notes,
                       myResponse: event.selfResponse.flatMap(CalendarResponse.init(rawValue:)),
-                      recurringEventID: event.recurringEventID, extras: extras(event))
+                      recurringEventID: event.recurringEventID,
+                      originalStartTime: event.originalStartTime.map(Self.original), extras: extras(event))
     }
 
     static func record(_ synced: GoogleSyncedEvent) -> CalendarEventRecord {

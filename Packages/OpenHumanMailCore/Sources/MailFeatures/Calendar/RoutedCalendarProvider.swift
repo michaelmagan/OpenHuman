@@ -28,6 +28,23 @@ struct RoutedCalendarProvider: CalendarProviding {
     }
 
     var abilities: CalendarAbilities { connections.windowCalendarProvider()?.abilities ?? [] }
+    var removalScopes: [CalendarRecurrenceScope] { connections.windowCalendarProvider()?.removalScopes ?? [] }
+    var removalIdentity: ObjectIdentifier? {
+        connections.windowCalendarProvider()?.removalIdentity
+    }
+
+    func removalProvider(for event: CalendarEvent) throws -> any CalendarProviding {
+        let captured = try current()
+        guard event.account == nil || event.account?.lowercased() == captured.info.account?.lowercased() else {
+            throw CalendarError.refused("The selected calendar account changed. Open the event again.")
+        }
+        return try captured.removalProvider(for: event)
+    }
+
+    func removeEvent(_ event: CalendarEvent, scope: CalendarRecurrenceScope,
+                     sendUpdates: CalendarSendUpdates) async throws -> CalendarRemovalResult {
+        try await removalProvider(for: event).removeEvent(event, scope: scope, sendUpdates: sendUpdates)
+    }
 
     func respond(to event: CalendarEvent, with response: CalendarResponse,
                  sendUpdates: CalendarSendUpdates) async throws -> CalendarEvent {

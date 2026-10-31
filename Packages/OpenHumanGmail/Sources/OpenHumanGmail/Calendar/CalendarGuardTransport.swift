@@ -13,6 +13,8 @@ public final class CalendarGuardTransport: HTTPTransport {
     public static let removalRuleValue = "organizer"
     public static let editRuleHeader = "X-OpenHuman-Calendar-Edit"
     public static let editRuleValue = "form"
+    static let scopedRemovalHeader = "X-OpenHuman-Calendar-Removal"
+    private let removalAuthorizations = Mutex<[String: CalendarRemovalAuthorization]>([:])
     // Names the account's other address an answer is given as, when the guest list has no entry of the calendar's own
     public static let answerAsHeader = "X-OpenHuman-Answer-As"
     public let verifiesOwnedEventRemoval: Bool
@@ -34,6 +36,7 @@ public final class CalendarGuardTransport: HTTPTransport {
     }
 
     public func send(_ request: HTTPRequest) async throws -> HTTPResponse {
+        if request.headers[Self.scopedRemovalHeader] != nil { return try await sendScopedRemoval(request) }
         let summary = ReadOnlyTransport.redactingAddresses(ReadOnlyTransport.summary(of: request))
         if let reason = refusalReason(for: request) {
             guard verifiesOwnedEventRemoval, request.method == "DELETE",
@@ -51,9 +54,85 @@ public final class CalendarGuardTransport: HTTPTransport {
         forwarded.headers[Self.removalRuleHeader] = nil
         forwarded.headers[Self.editRuleHeader] = nil
         forwarded.headers[Self.answerAsHeader] = nil
+        forwarded.headers[Self.scopedRemovalHeader] = nil
         let response = try await wrapped.send(forwarded)
         learn(from: request, response: response)
         return response
+    }
+
+    func authorizeRemoval(_ authorization: CalendarRemovalAuthorization) -> String {
+        let nonce = UUID().uuidString
+        removalAuthorizations.withLock { $0[nonce] = authorization }
+        return nonce
+    }
+
+    func discardRemovalAuthorization(_ nonce: String) {
+        _ = removalAuthorizations.withLock { $0.removeValue(forKey: nonce) }
+    }
+
+    private func sendScopedRemoval(_ request: HTTPRequest) async throws -> HTTPResponse {
+        let summary = ReadOnlyTransport.redactingAddresses(ReadOnlyTransport.summary(of: request))
+        func refused() -> TransportError { .refusedByGuard(summary) }
+        guard verifiesOwnedEventRemoval, allowsWrites,
+              let nonce = request.headers[Self.scopedRemovalHeader],
+              let auth = removalAuthorizations.withLock({ $0.removeValue(forKey: nonce) }) else { throw refused() }
+        let segments = Self.segments(of: request.url)
+        let rest = Array(segments.dropFirst(Self.root.count))
+        guard segments.starts(with: Self.root), isEvent(rest), rest[3] == auth.target,
+              !segments.contains("."), !segments.contains(".."), !segments.contains(""),
+              request.url.scheme == "https", request.url.host(percentEncoded: true) == Self.host,
+              request.url.port == nil || request.url.port == 443, request.url.user == nil, request.url.password == nil,
+              ReadOnlyTransport.methodOverrideHeader(in: request.headers) == nil,
+              ReadOnlyTransport.methodOverrideQueryName(in: request.url) == nil,
+              request.method == auth.method, ["DELETE", "PATCH"].contains(auth.method),
+              request.body == auth.body, request.headers["If-Match"] == auth.etag,
+              Self.sendUpdatesValue(request.url) == auth.sendUpdates else { throw refused() }
+        // A guest's copy leaves silently; the organizer's recurring change always tells every guest.
+        if auth.asGuest {
+            guard auth.method == "DELETE", auth.body == nil, auth.sendUpdates == "none", !auth.allowAbsentCleanup else {
+                throw refused()
+            }
+        } else if !(auth.parent == nil && !auth.master) && auth.sendUpdates != "all" {
+            throw refused()
+        }
+        if auth.method == "PATCH" {
+            guard auth.master, let body = request.body,
+                  let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  Set(object.keys) == ["recurrence"], let rules = object["recurrence"] as? [String], !rules.isEmpty else {
+                throw refused()
+            }
+        }
+        var components = URLComponents(url: request.url, resolvingAgainstBaseURL: false)
+        components?.query = nil
+        guard let readURL = components?.url else { throw refused() }
+        var headers = request.headers
+        for name in [Self.scopedRemovalHeader, Self.removalRuleHeader, Self.editRuleHeader, Self.answerAsHeader,
+                     "If-Match", "Content-Type"] { headers[name] = nil }
+        let read = try await wrapped.send(HTTPRequest(method: "GET", url: readURL, headers: headers, body: nil))
+        if auth.allowAbsentCleanup && [404, 410].contains(read.status) {
+            return HTTPResponse(status: 204, headers: [:], body: Data())
+        }
+        guard (200..<300).contains(read.status),
+              let wire = try? JSONDecoder().decode(WireEvent.self, from: read.body), wire.id == auth.target else {
+            throw refused()
+        }
+        if auth.allowAbsentCleanup && wire.status == "cancelled", wire.recurringEventId == auth.parent,
+           wire.originalStartTime?.original == auth.original {
+            return HTTPResponse(status: 204, headers: [:], body: Data())
+        }
+        guard wire.etag == auth.etag else { throw GoogleCalendarRemovalError.conflict }
+        let ownership = auth.asGuest ? wire.isGuestCopy(on: calendarID)
+            : wire.removalOwned(by: calendarID, allowCreator: auth.parent == nil && !auth.master)
+        guard wire.status != "cancelled", wire.eventType == nil || wire.eventType == "default", ownership,
+              wire.recurringEventId == auth.parent,
+              wire.originalStartTime?.original == auth.original,
+              (wire.recurrence?.isEmpty == false) == auth.master,
+              wire.event(defaultZone: .gmt) != nil else { throw refused() }
+        var forwarded = request
+        for name in [Self.scopedRemovalHeader, Self.removalRuleHeader, Self.editRuleHeader, Self.answerAsHeader] {
+            forwarded.headers[name] = nil
+        }
+        return try await wrapped.send(forwarded)
     }
 
     public func refusalReason(for request: HTTPRequest) -> String? {

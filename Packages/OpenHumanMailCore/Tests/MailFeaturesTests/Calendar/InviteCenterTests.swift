@@ -25,13 +25,15 @@ private struct InviteFixture {
     let home: FakeCalendar
     let corpus: FakeCorpus
 
-    init(events: [CalendarEvent]? = [], calendarRefusal: String? = nil) {
+    init(events: [CalendarEvent]? = [], calendarRefusal: String? = nil,
+         abilities: CalendarAbilities = [.respond, .editDetails, .remove]) {
         corpus = .rich(threadCount: 12, now: fixedNow)
         let accounts = corpus.accounts
         home = FakeCalendar(info: CalendarProviderInfo(name: "Google Calendar", account: accounts[1].email))
         if let events {
             let made = FakeCalendar(events: events, info: CalendarProviderInfo(name: "Google Calendar", account: accounts[0].email,
-                                                                               createRefusal: calendarRefusal))
+                                                                               createRefusal: calendarRefusal),
+                                    abilities: abilities)
             calendar = made
             let connections = FakeCalendarConnections(providers: [accounts[0].email: made, accounts[1].email: home],
                                                       windowAccount: accounts[0].email)
@@ -100,6 +102,10 @@ private struct InviteFixture {
 
     func answered() -> [FakeCalendar.Call] {
         calendar?.calls.filter { if case .respond = $0 { true } else { false } } ?? []
+    }
+
+    func removed() -> [FakeCalendar.Call] {
+        calendar?.calls.filter { if case .scopedRemove = $0 { true } else { false } } ?? []
     }
 
     func lookedUp() -> Bool {
@@ -434,7 +440,7 @@ private struct InviteFixture {
         #expect(f.center.target(focused: message.id, in: thread, shown: [message.id]) == nil,
                 "Show original: the keys do not answer an invitation that is not on screen")
         f.center.toggleOriginal(message.id)
-        #expect(InviteActionHandler.ids == [.inviteYes, .inviteMaybe, .inviteNo, .inviteShowOriginal])
+        #expect(InviteActionHandler.ids == [.inviteYes, .inviteMaybe, .inviteNo, .inviteShowOriginal, .inviteRemove])
         for id in [ActionID.inviteYes, .inviteMaybe, .inviteNo] {
             let descriptor = try #require(ActionCatalog.descriptor(id))
             #expect(descriptor.scopes == [.reader] && descriptor.effect == .external && descriptor.defaultBindings.count == 1)
@@ -561,5 +567,150 @@ private struct InviteFixture {
         let shown = f.env.calendarEvents.events(key, from: card.invite.start, to: card.invite.end, includeDeclined: true)?
             .first { $0.id == "ev" }
         #expect(shown?.myResponse == .tentative && shown?.respondsAs == alias)
+    }
+}
+
+
+@MainActor
+@Suite(.serialized) struct InviteRemovalTests {
+    private let removes: CalendarAbilities = [.respond, .remove, .removeInvite]
+
+    private func single(_ card: InviteCard) {
+        #expect(!card.invite.repeats && card.invite.recurrenceID == nil, "the corpus invitation is a single event")
+    }
+
+    @Test func removingAsksFirstHoldsThenLeavesSilentlyWithoutAnAnswerOrMarkingDone() async throws {
+        let f = InviteFixture(abilities: removes)
+        let (thread, message) = try await f.invitation()
+        let card = try await f.card(thread, message)
+        single(card)
+        f.addInvitedEvent(card)
+        #expect(f.center.offersRemoval(message.id))
+        #expect(f.center.removalTarget(focused: nil, shown: [message.id]) == message.id)
+        f.center.askToRemove(message.id)
+        let question = try #require(f.center.removalQuestion)
+        #expect(question.message == message.id && question.scopes == [.thisEvent] && !question.isSeries)
+        #expect(question.buttonTitle(.thisEvent) == "Remove")
+        #expect(question.text.contains("stays on the organizer's calendar") && question.text.contains("Mail sends no reply"))
+        #expect(f.removed().isEmpty, "a question sends nothing")
+        let gate = TestGate()
+        f.center.sleep = { _ in await gate.wait() }
+        await f.center.confirmRemoval(.thisEvent, question: question.id)
+        #expect(f.center.removalQuestion == nil && f.center.removalStates[message.id] == .pending)
+        #expect(f.center.heldCount == 1 && f.removed().isEmpty, "nothing leaves inside the window")
+        #expect(f.env.undo?.nextUndo.map { String(localized: $0.title) } == "Removing \(card.title) from your calendar")
+        #expect(try await f.inInbox(thread), "removing from the calendar leaves the conversation alone")
+        await f.endWindows(gate)
+        #expect(f.removed() == [.scopedRemove(id: "ev", scope: .thisEvent, sendUpdates: .none)])
+        #expect(f.answered().isEmpty, "no answer goes to the organizer")
+        #expect(f.center.removalStates[message.id] == .removed && !f.center.offersRemoval(message.id))
+        #expect(f.calendar?.allEvents.contains { $0.id == "ev" } == false)
+        #expect(f.env.notices.toasts.contains { $0.message.contains("Removed \(card.title) from your calendar") })
+        await f.env.undo?.undoLast()
+        #expect(f.center.notes[message.id]?.contains("already removed") == true)
+        #expect(f.removed().count == 1 && f.calendar?.created.isEmpty == true)
+    }
+
+    @Test func undoInsideTheWindowKeepsItAndQuitThenSendsNothing() async throws {
+        let f = InviteFixture(abilities: removes)
+        let (thread, message) = try await f.invitation()
+        let card = try await f.card(thread, message)
+        f.addInvitedEvent(card)
+        f.center.sleep = holdUntilCancelled
+        f.center.askToRemove(message.id)
+        await f.center.confirmRemoval(.thisEvent, question: try #require(f.center.removalQuestion).id)
+        let held = f.center.heldTasks
+        await f.env.undo?.undoLast()
+        for task in held { await task.value }
+        #expect(f.center.removalStates[message.id] == nil && f.center.offersRemoval(message.id))
+        await f.center.prepareForQuit()
+        #expect(f.removed().isEmpty && !f.center.hasQuitWork && f.center.removalCount == 0)
+    }
+
+    @Test func aHeldRemovalIsSentOnQuit() async throws {
+        let f = InviteFixture(abilities: removes)
+        let (thread, message) = try await f.invitation()
+        let card = try await f.card(thread, message)
+        f.addInvitedEvent(card)
+        f.center.sleep = holdUntilCancelled
+        f.center.askToRemove(message.id)
+        await f.center.confirmRemoval(.thisEvent, question: try #require(f.center.removalQuestion).id)
+        #expect(f.center.hasQuitWork)
+        let held = f.center.heldTasks
+        await f.center.prepareForQuit()
+        for task in held { await task.value }
+        #expect(f.removed() == [.scopedRemove(id: "ev", scope: .thisEvent, sendUpdates: .none)])
+        #expect(!f.center.hasQuitWork && f.answered().isEmpty)
+    }
+
+    @Test func withoutTheAbilityTheCardAndTheKeyOfferNoRemoval() async throws {
+        let f = InviteFixture()
+        let (thread, message) = try await f.invitation()
+        let card = try await f.card(thread, message)
+        f.addInvitedEvent(card)
+        #expect(!f.center.offersRemoval(message.id))
+        #expect(f.center.removalTarget(focused: message.id, shown: [message.id]) == nil)
+        f.center.askToRemove(message.id)
+        #expect(f.center.removalQuestion == nil && f.removed().isEmpty)
+        let descriptor = try #require(ActionCatalog.descriptor(.inviteRemove))
+        #expect(descriptor.scopes == [.reader] && descriptor.shortcutHint == "⇧X" && descriptor.isDestructive)
+    }
+
+    @Test func aStaleOrUnofferedAnswerToTheQuestionDoesNothing() async throws {
+        let f = InviteFixture(abilities: removes)
+        let (thread, message) = try await f.invitation()
+        let card = try await f.card(thread, message)
+        f.addInvitedEvent(card)
+        f.center.sleep = holdUntilCancelled
+        f.center.askToRemove(message.id)
+        let first = try #require(f.center.removalQuestion)
+        await f.center.confirmRemoval(.allEvents, question: first.id)
+        #expect(f.center.heldCount == 0, "a single event offers no series scope")
+        f.center.cancelRemoval()
+        await f.center.confirmRemoval(.thisEvent, question: first.id)
+        #expect(f.center.heldCount == 0 && f.center.removalStates.isEmpty, "a canceled question can't be answered")
+    }
+
+    @Test func aHeldAnswerMustGoOutBeforeTheInvitationCanBeRemoved() async throws {
+        let f = InviteFixture(abilities: removes)
+        let (thread, message) = try await f.invitation()
+        let card = try await f.card(thread, message)
+        f.addInvitedEvent(card)
+        f.center.sleep = holdUntilCancelled
+        await f.center.respond(.accepted, to: message.id)
+        f.center.askToRemove(message.id)
+        #expect(f.center.removalQuestion == nil && f.center.notes[message.id]?.contains("still on its way") == true)
+        let held = f.center.heldTasks
+        await f.env.undo?.undoLast()
+        for task in held { await task.value }
+    }
+
+    @Test func anInvitationNotOnTheCalendarSaysSoAndKeepsTheCard() async throws {
+        let f = InviteFixture(abilities: removes)
+        let (thread, message) = try await f.invitation()
+        _ = try await f.card(thread, message)
+        let gate = TestGate()
+        f.center.sleep = { _ in await gate.wait() }
+        f.center.askToRemove(message.id)
+        await f.center.confirmRemoval(.thisEvent, question: try #require(f.center.removalQuestion).id)
+        await f.endWindows(gate)
+        #expect(f.removed().isEmpty && f.center.removalStates[message.id] == nil)
+        #expect(f.center.notes[message.id]?.contains("couldn't find it") == true)
+        #expect(f.env.notices.toasts.contains { $0.style == .error })
+    }
+
+    @Test func theScopesFollowTheInvitation() {
+        let start = fixedNow
+        func invite(recurrence: Date? = nil, repeats: String? = nil) -> CalendarInvite {
+            CalendarInvite(method: .request, uid: "uid", recurrenceID: recurrence, repeatFrequency: repeats, title: "Sync",
+                           start: start, end: start.addingTimeInterval(1800))
+        }
+        #expect(InviteCenter.removalScopes(for: invite()) == [.thisEvent])
+        #expect(InviteCenter.removalScopes(for: invite(repeats: "WEEKLY")) == [.allEvents])
+        #expect(InviteCenter.removalScopes(for: invite(recurrence: start, repeats: "WEEKLY")) == [.thisEvent, .allEvents])
+        let series = InviteRemovalQuestion(message: MessageKey(account: AccountID(1), rowID: 1, gmailMessageID: GmailMessageID("m")),
+                                           title: "Sync", scopes: [.allEvents])
+        #expect(series.isSeries && series.buttonTitle(.allEvents) == "Remove all events")
+        #expect(series.text.contains("Choose which events to remove"))
     }
 }

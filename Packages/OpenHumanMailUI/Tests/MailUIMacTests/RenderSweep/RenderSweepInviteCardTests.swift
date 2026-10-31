@@ -47,6 +47,35 @@ extension RenderSweepTests {
             try await sweepShoot(w.window, screen: "reader-invite-card-original", theme: theme)
         }
         do {
+            // Removing the invitation without answering: the control, the question, the held change and the result.
+            let calendar = FakeCalendar(info: CalendarProviderInfo(name: "Google Calendar", account: corpus.accounts[0].email),
+                                        abilities: [.respond, .remove, .removeInvite])
+            let env = AppEnvironment.fake(corpus: corpus, options: .init(remoteAck: .immediate), calendar: calendar,
+                                          calendarConnections: FakeCalendarConnections(providers: [corpus.accounts[0].email: calendar]))
+            let w = try await SweepWindow.make(env, theme: theme)
+            defer { w.close() }
+            let (thread, message) = try await InviteFixtures.invitation(env, corpus: corpus)
+            _ = try await w.open(thread)
+            try await until { w.reader.messageViews[message.id]?.inviteHost?.showsCard == true }
+            try await until { env.invites.offersRemoval(message.id) }
+            try await sweepShoot(w.window, screen: "reader-invite-card-remove", theme: theme)
+            let card = try #require(env.invites.card(for: message.id))
+            calendar.add(CalendarEvent(id: "ev", title: card.title, start: card.invite.start, end: card.invite.end,
+                                       attendees: [FakeCorpus.me], organizerIsMe: false, myResponse: .needsAction))
+            calendar.setICalUID(card.invite.uid, for: "ev")
+            env.invites.askToRemove(message.id)
+            try await sweepShoot(w.window, screen: "reader-invite-card-remove-question", theme: theme)
+            env.invites.holdWindow = .seconds(3600)
+            await env.invites.confirmRemoval(.thisEvent, question: try #require(env.invites.removalQuestion).id)
+            try await sweepShoot(w.window, screen: "reader-invite-card-removing", theme: theme)
+            await env.undo?.undoLast()
+            env.invites.holdWindow = .zero
+            env.invites.askToRemove(message.id)
+            await env.invites.confirmRemoval(.thisEvent, question: try #require(env.invites.removalQuestion).id)
+            try await until { env.invites.removalStates[message.id] == .removed }
+            try await sweepShoot(w.window, screen: "reader-invite-card-removed", theme: theme)
+        }
+        do {
             let env = SweepWindow.environment()
             let w = try await SweepWindow.make(env, theme: theme)
             defer { w.close() }

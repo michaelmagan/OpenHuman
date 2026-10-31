@@ -14,6 +14,19 @@ private func at(_ month: Int, _ day: Int, _ hour: Int = 0, _ minute: Int = 0, _ 
 }
 
 @Suite struct GoogleCalendarClientTests {
+    @Test func originalTimeIsImmutableEvenWhenTheDisplayedInstanceMovedAcrossDST() async throws {
+        let http = FakeHTTPTransport()
+        let response = FakeHTTPTransport.json(200, ["items": [["id": "moved", "recurringEventId": "weekly",
+            "start": ["dateTime": "2026-10-28T16:00:00Z", "timeZone": "America/Los_Angeles"],
+            "end": ["dateTime": "2026-10-28T17:00:00Z", "timeZone": "America/Los_Angeles"],
+            "originalStartTime": ["dateTime": "2026-11-01T09:00:00-08:00", "timeZone": "America/Los_Angeles"]]]])
+        http.on("GET", Self.eventsPath) { _ in response }
+        let event = try #require(try await client(http).listEvents(from: at(10, 1), to: at(12, 1)).first)
+        let original = ISO8601DateFormatter().date(from: "2026-11-01T17:00:00Z")!
+        #expect(event.originalStartTime == .timed(original, timeZone: "America/Los_Angeles"))
+        #expect(event.start != original && event.recurringEventID == "weekly")
+    }
+
     private static let me = "robin@example.com"
     private static let eventsPath = "/calendar/v3/calendars/robin@example.com/events"
 

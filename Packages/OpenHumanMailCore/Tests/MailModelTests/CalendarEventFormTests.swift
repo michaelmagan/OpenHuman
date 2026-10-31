@@ -28,6 +28,149 @@ private func form(_ event: CalendarEvent) -> CalendarEventForm {
 
 private let full: CalendarAbilities = [.respond, .editDetails, .remove, .editFull]
 
+@Suite struct CalendarRemovalIdentityTests {
+    @Test func dateAndTimedIdentityRoundTripAndAllDayMaterializationCannotChangeIt() throws {
+        let identities: [CalendarOriginalStart] = [.date("2026-11-01"), .timed(at(11, 1, 9), timeZone: la.identifier)]
+        for original in identities {
+            let bytes = try JSONEncoder().encode(original)
+            #expect(try JSONDecoder().decode(CalendarOriginalStart.self, from: bytes) == original)
+            let event = CalendarEvent(id: "instance", title: "Moved", start: at(11, 8), end: at(11, 9),
+                isAllDay: true, recurringEventID: "parent", originalStartTime: original)
+            let moved = CalendarEventRecord(event: event, readIn: la).materialized(in: TimeZone(identifier: "Asia/Tokyo")!)
+            #expect(moved.event.originalStartTime == original && moved.event.recurringEventID == "parent")
+        }
+        #expect(CalendarOriginalStart.date("2026-11-01").isAtOrAfter(.timed(at(11, 1), timeZone: nil)) == nil)
+        #expect(CalendarOriginalStart.date("2026-02-30").isAtOrAfter(.date("2026-11-01")) == nil)
+        #expect(CalendarOriginalStart.timed(at(11, 1), timeZone: "Unknown/Zone").isAtOrAfter(.timed(at(11, 1), timeZone: nil)) == nil)
+    }
+
+    @Test func deletionDetectsMastersWithoutBroadeningLegacyEditClassification() {
+        var extras = CalendarEventExtras()
+        extras.recurrence = ["RRULE:FREQ=WEEKLY"]
+        let master = CalendarEvent(id: "parent", title: "Weekly", start: at(10, 25, 9), end: at(10, 25, 10), extras: extras)
+        #expect(master.isRecurringForRemoval && !master.isRecurring)
+        #expect(CalendarRecurrenceScope.removalOptions.map(\.removalTitle) ==
+            ["This event", "All events in the series", "This and future events"])
+        let unknown = CalendarEvent(id: "old", title: "Weekly", start: at(11, 8, 9), end: at(11, 8, 10), recurringEventID: "parent")
+        let result = CalendarRemovalResult(selectedID: "chosen", parentID: "parent", scope: .thisAndFollowing,
+                                           originalCutoff: .date("2026-11-01"))
+        #expect(result.affects(unknown) == nil, "displayed time is never an occurrence identity")
+    }
+
+    @Test func conflictingCachedParentsStayUnknownInBothDirectionsExceptForTheSelectedID() {
+        for (eventParent, recordParent) in [("parent", "other"), ("other", "parent")] {
+            let event = CalendarEvent(id: "conflict", title: "Weekly", start: at(11, 8, 9), end: at(11, 8, 10),
+                recurringEventID: eventParent, originalStartTime: .timed(at(11, 8, 9), timeZone: la.identifier))
+            let record = CalendarEventRecord(event: event, recurringEventID: recordParent)
+            for scope in [CalendarRecurrenceScope.allEvents, .thisAndFollowing] {
+                let result = CalendarRemovalResult(selectedID: "chosen", parentID: "parent", scope: scope,
+                    originalCutoff: .timed(at(11, 1, 9), timeZone: la.identifier))
+                #expect(result.affects(record) == nil)
+                let selected = CalendarRemovalResult(selectedID: "conflict", parentID: "parent", scope: scope,
+                    originalCutoff: .timed(at(11, 1, 9), timeZone: la.identifier))
+                #expect(selected.affects(record) == true, "the authoritative selected ID is still an exact match")
+            }
+            #expect(record.materialized(in: la).event.recurringEventID == eventParent, "materialization must not resolve a conflict")
+        }
+    }
+
+    @Test func thisEventMembershipUsesOnlyTheSelectedIDEvenWhenParentFieldsConflict() {
+        for (eventParent, recordParent) in [("parent", "other"), ("other", "parent")] {
+            let event = CalendarEvent(id: "conflict", title: "Weekly", start: at(11, 8, 9), end: at(11, 8, 10),
+                recurringEventID: eventParent, originalStartTime: .timed(at(11, 8, 9), timeZone: la.identifier))
+            let record = CalendarEventRecord(event: event, recurringEventID: recordParent)
+            let removal = CalendarRemovalResult(selectedID: "chosen", parentID: "parent", scope: .thisEvent,
+                originalCutoff: .timed(at(11, 1, 9), timeZone: la.identifier))
+            #expect(removal.affects(event) == false && removal.affects(record) == false)
+            let selected = CalendarRemovalResult(selectedID: "conflict", parentID: "parent", scope: .thisEvent,
+                originalCutoff: removal.originalCutoff)
+            #expect(selected.affects(event) == true && selected.affects(record) == true)
+        }
+    }
+
+    @Test func distinctMastersAreNotAffectedButInstancesWithoutParentsRemainUnknown() {
+        let extras = CalendarEventExtras(recurrence: ["RRULE:FREQ=WEEKLY"])
+        let other = CalendarEvent(id: "other-parent", title: "Weekly", start: at(11, 8, 9), end: at(11, 8, 10), extras: extras)
+        let target = CalendarEvent(id: "parent", title: "Weekly", start: at(10, 25, 9), end: at(10, 25, 10), extras: extras)
+        for scope in [CalendarRecurrenceScope.allEvents, .thisAndFollowing] {
+            let removal = CalendarRemovalResult(selectedID: "chosen", parentID: "parent", scope: scope,
+                originalCutoff: .timed(at(11, 1, 9), timeZone: la.identifier))
+            #expect(removal.affects(other) == false && removal.affects(CalendarEventRecord(event: other)) == false)
+            #expect(removal.affects(target) == (scope == .allEvents ? true : nil))
+            for recurrence in [[], extras.recurrence] {
+                let missingParent = CalendarEvent(id: "parent_20261108", title: "Weekly", start: at(10, 25, 9), end: at(10, 25, 10),
+                    originalStartTime: .timed(at(11, 8, 9), timeZone: la.identifier), extras: CalendarEventExtras(recurrence: recurrence))
+                #expect(removal.affects(missingParent) == nil)
+                #expect(removal.affects(CalendarEventRecord(event: missingParent)) == nil,
+                    "neither ID syntax, matching title, rules nor displayed time supplies a missing instance parent")
+            }
+        }
+    }
+
+    @Test func recordOnlyParentsMaterializeForTimedAndAllDayEventsWithoutLosingAliasOrExtras() {
+        let extras = CalendarEventExtras(guests: [CalendarGuest(email: "alias@example.org", response: .tentative)], colorID: "5")
+        for allDay in [false, true] {
+            let original: CalendarOriginalStart = allDay ? .date("2026-11-01") : .timed(at(11, 1, 9), timeZone: la.identifier)
+            var event = CalendarEvent(id: "old", title: "Moved", start: at(11, 8, allDay ? 0 : 9), end: at(11, 9),
+                isAllDay: allDay, myResponse: .tentative, originalStartTime: original, extras: extras)
+            event.respondsAs = "alias@example.org"
+            let record = CalendarEventRecord(event: event, recurringEventID: "parent", readIn: la)
+            let presented = record.materialized(in: TimeZone(identifier: "Asia/Tokyo")!).event
+            #expect(presented.recurringEventID == "parent" && presented.isRecurring && presented.isRecurringForRemoval)
+            #expect(presented.originalStartTime == original && presented.extras == extras)
+            #expect(presented.respondsAs == "alias@example.org" && presented.myResponse == .tentative)
+            let removal = CalendarRemovalResult(selectedID: "chosen", parentID: "parent", scope: .thisAndFollowing,
+                originalCutoff: original)
+            #expect(removal.affects(record) == true)
+        }
+    }
+
+    @Test func aMovedChildsSeriesReferenceDropsOccurrenceIdentityAndKeepsRSVPAliasAndExtras() {
+        let extras = CalendarEventExtras(guests: [CalendarGuest(email: "alias@example.org", response: .accepted)], colorID: "5")
+        var child = CalendarEvent(id: "moved-child", title: "Weekly", start: at(11, 8, 9), end: at(11, 8, 10),
+            attendees: [sam], account: "robin@example.org", myResponse: .accepted, recurringEventID: "actual-parent",
+            originalStartTime: .timed(at(11, 1, 9), timeZone: la.identifier), extras: extras)
+        child.respondsAs = "alias@example.org"
+        let reference = child.seriesReference
+        #expect(reference.id == "actual-parent" && reference.recurringEventID == nil && reference.originalStartTime == nil)
+        #expect(reference.myResponse == .accepted && reference.respondsAs == "alias@example.org")
+        #expect(reference.extras == extras && reference.attendees == [sam] && reference.account == child.account)
+        #expect(reference.start == child.start, "a series reference does not establish a first occurrence")
+    }
+}
+
+private actor LegacyRemovalSpy: CalendarProviding {
+    nonisolated let info = CalendarProviderInfo(name: "Legacy", isSample: true)
+    private(set) var removed: [String] = []
+    func events(from: Date, to: Date) async throws -> [CalendarEvent] { [] }
+    func freeBusy(from: Date, to: Date) async throws -> CalendarFreeBusy { CalendarFreeBusy(busy: []) }
+    func createEvent(_ draft: CalendarEventDraft) async throws -> CalendarEvent { throw CalendarError.notConfigured }
+    func removeEvent(_ event: CalendarEvent, sendUpdates: CalendarSendUpdates) async throws { removed.append(event.id) }
+}
+
+@Suite struct CalendarRemovalContractTests {
+    @Test func aLegacyProviderNeverFallsThroughFromAnyRecurringScopeToItsUnscopedDelete() async throws {
+        let provider = LegacyRemovalSpy()
+        var extras = CalendarEventExtras()
+        extras.recurrence = ["RRULE:FREQ=WEEKLY"]
+        let master = CalendarEvent(id: "master", title: "Weekly", start: at(10, 25, 9), end: at(10, 25, 10), extras: extras)
+        for scope in CalendarRecurrenceScope.removalOptions {
+            for recurring in [event(recurring: true), master] {
+                await #expect(throws: CalendarError.self) {
+                    _ = try await provider.removeEvent(recurring, scope: scope, sendUpdates: .all)
+                }
+            }
+        }
+        await #expect(throws: CalendarError.self) {
+            _ = try await provider.removeEvent(event(), scope: .allEvents, sendUpdates: .none)
+        }
+        #expect(await provider.removed.isEmpty)
+        let result = try await provider.removeEvent(event(), scope: .thisEvent, sendUpdates: .none)
+        #expect(result.parentID == nil && result.scope == .thisEvent)
+        #expect(await provider.removed == ["ev1"])
+    }
+}
+
 
 @Suite struct CalendarFormPatchTests {
     @Test func anUntouchedFormMakesAnEmptyPatch() {
@@ -220,6 +363,18 @@ private let full: CalendarAbilities = [.respond, .editDetails, .remove, .editFul
         #expect(rights.access(.guestPermissions).reason != nil)
         #expect(rights.access(.calendar).reason != nil)
         #expect(rights.summary == nil, "the form must not say only the organizer can change what this guest may change")
+    }
+
+    @Test func aGuestIsOfferedRemovingTheirCopyOnlyWhereTheCalendarCanDoIt() {
+        let e = event(organizer: false, guests: [sam], response: .needsAction)
+        #expect(CalendarFieldRights.make(for: e, abilities: full.union(.removeInvite), refusal: nil).delete == .removeInvite)
+        let own = event(organizer: true, guests: [sam])
+        #expect(CalendarFieldRights.make(for: own, abilities: full.union(.removeInvite), refusal: nil).delete == .delete)
+        #expect(e.isInvitationCopy && !own.isInvitationCopy)
+        if case .unavailable = CalendarFieldRights.make(for: e, abilities: full.union(.removeInvite), refusal: "Read only").delete {
+        } else {
+            Issue.record("a refusal still locks removal")
+        }
     }
 
     @Test func aGuestCannotDeleteAndIsOfferedDecliningInstead() {

@@ -461,8 +461,8 @@ private final class CalendarHarness {
         let h = try CalendarHarness()
         try h.storeCalendarToken(readScopes)
         let provider = try #require(try await h.session().environment.calendar)
-        #expect(provider.abilities == [.respond, .remove, .editFull, .removeMeet],
-                "answers, removing an event the user organizes, the full edit form and removing a Meet link")
+        #expect(provider.abilities == [.respond, .remove, .editFull, .removeMeet, .removeInvite],
+                "answers, removing an event the user organizes or an invitation's copy, the full edit form and removing a Meet link")
         await #expect(throws: CalendarError.self) {
             _ = try await provider.respond(to: invite, with: .accepted, sendUpdates: .all)
         }
@@ -653,6 +653,63 @@ private final class CalendarHarness {
         #expect(why.contains("set number of times") && why.contains("Change this event or all events"))
     }
     #expect(h.http.requests.filter { $0.method != "GET" && $0.url.path().hasPrefix(events) }.isEmpty)
+}
+
+@MainActor
+@Test func recurringRemovalScopesReachTheWiredProviderWithoutChangingLegacyEditing() async throws {
+    let path = "/calendar/v3/calendars/robin@example.com/events"
+    let day = ISO8601DateFormatter().date(from: "2026-11-01T17:00:00Z")!
+    for scope in CalendarRecurrenceScope.removalOptions {
+        let h = try CalendarHarness()
+        try h.storeCalendarToken(writeScopes)
+        let instance = FakeHTTPTransport.json(200, ["id": "instance", "etag": "\"instance-v1\"", "organizer": ["self": true],
+            "start": ["dateTime": "2026-11-01T17:00:00Z", "timeZone": "America/Los_Angeles"],
+            "end": ["dateTime": "2026-11-01T18:00:00Z", "timeZone": "America/Los_Angeles"], "recurringEventId": "master",
+            "originalStartTime": ["dateTime": "2026-11-01T17:00:00Z", "timeZone": "America/Los_Angeles"]])
+        let master = FakeHTTPTransport.json(200, ["id": "master", "etag": "\"master-v1\"", "organizer": ["self": true],
+            "start": ["dateTime": "2026-10-25T16:00:00Z", "timeZone": "America/Los_Angeles"],
+            "end": ["dateTime": "2026-10-25T17:00:00Z", "timeZone": "America/Los_Angeles"], "recurrence": ["RRULE:FREQ=WEEKLY;COUNT=3"]])
+        h.http.on("GET", path) { _ in FakeHTTPTransport.json(200, ["items": []]) }
+        h.http.on("GET", path + "/instance") { _ in instance }
+        h.http.on("GET", path + "/master") { _ in master }
+        h.http.on("PATCH", path) { _ in master }
+        h.http.on("DELETE", path) { _ in HTTPResponse(status: 204, headers: [:], body: Data()) }
+        let provider = try #require(try await h.session().environment.calendar)
+        #expect(provider.removalScopes == [.thisEvent, .allEvents, .thisAndFollowing])
+        let event = CalendarEvent(id: "instance", title: "Weekly", start: day, end: day.addingTimeInterval(3600),
+                                  organizerIsMe: true, recurringEventID: "master")
+        let result = try await provider.removeEvent(event, scope: scope, sendUpdates: .none)
+        #expect(result.parentID == "master" && result.originalCutoff == .timed(day, timeZone: "America/Los_Angeles"))
+        let writes = h.http.requests.filter { ["PATCH", "DELETE", "POST"].contains($0.method) && $0.url.path().hasPrefix(path) }
+        #expect(writes.count == 1 && writes[0].method == (scope == .thisAndFollowing ? "PATCH" : "DELETE"))
+        #expect(writes[0].url.path().hasSuffix(scope == .thisEvent ? "/instance" : "/master"))
+        #expect(query(writes[0].url, "sendUpdates") == "all" && writes[0].headers["If-Match"] != nil)
+    }
+}
+
+@MainActor
+@Test func anInvitationLeavesTheWiredCalendarWithASilentGuestDelete() async throws {
+    let path = "/calendar/v3/calendars/robin@example.com/events"
+    let day = ISO8601DateFormatter().date(from: "2026-11-01T17:00:00Z")!
+    let h = try CalendarHarness()
+    try h.storeCalendarToken(writeScopes)
+    let invited = FakeHTTPTransport.json(200, ["id": "invited", "etag": "\"invited-v1\"",
+        "organizer": ["email": "sam@example.org"],
+        "attendees": [["email": "sam@example.org", "organizer": true], ["email": "robin@example.com", "self": true]],
+        "start": ["dateTime": "2026-11-01T17:00:00Z", "timeZone": "America/Los_Angeles"],
+        "end": ["dateTime": "2026-11-01T18:00:00Z", "timeZone": "America/Los_Angeles"]])
+    h.http.on("GET", path + "/invited") { _ in invited }
+    h.http.on("DELETE", path) { _ in HTTPResponse(status: 204, headers: [:], body: Data()) }
+    let provider = try #require(try await h.session().environment.calendar)
+    #expect(provider.abilities.contains(.removeInvite))
+    let event = CalendarEvent(id: "invited", title: "Supplier sync", start: day, end: day.addingTimeInterval(3600),
+                              attendees: [EmailAddress(email: "sam@example.org")], organizerIsMe: false,
+                              myResponse: .needsAction)
+    let result = try await provider.removeEvent(event, scope: .thisEvent, sendUpdates: .none)
+    #expect(result.selectedID == "invited" && result.parentID == nil)
+    let writes = h.http.requests.filter { ["PATCH", "DELETE", "POST"].contains($0.method) && $0.url.path().hasPrefix(path) }
+    #expect(writes.count == 1 && writes[0].method == "DELETE" && writes[0].url.path().hasSuffix("/invited"))
+    #expect(query(writes[0].url, "sendUpdates") == "none" && writes[0].headers["If-Match"] == "\"invited-v1\"")
 }
 
 @Suite struct GoogleCalendarFullEditMappingTests {

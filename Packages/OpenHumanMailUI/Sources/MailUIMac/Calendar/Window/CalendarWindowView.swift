@@ -70,31 +70,14 @@ public struct CalendarWindowView: View {
     }
 
     private func removeQuestion(_ question: CalendarRemoveQuestion) -> some View {
-        ZStack {
-            Color.black.opacity(0.12).ignoresSafeArea()
-                .onTapGesture { Task { await model.escape() } }
-            VStack(alignment: .leading, spacing: theme.space4) {
-                Text(question.text).themeFont(theme.typeBody).foregroundStyle(theme.textPrimary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: theme.space3) {
-                    Spacer(minLength: 0)
-                    Button("Cancel") { Task { await model.escape() } }
-                        .keyboardShortcut(.cancelAction)
-                        .accessibilityIdentifier("calendar.remove.cancel")
-                    Button("Delete", role: .destructive) { Task { await model.confirmRemove() } }
-                        .buttonStyle(.borderedProminent).tint(theme.textDanger.color)
-                        .accessibilityIdentifier("calendar.remove.confirm")
-                }
-            }
-            .padding(theme.space5)
-            .frame(width: 460)
-            .calendarDialogChrome()
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("calendar.removeQuestion")
-        }
+        CalendarRemovalQuestionView(model: model, question: question)
     }
 
     private func scopeQuestion(_ question: CalendarScopeQuestion) -> some View {
+        editScopeQuestion(question)
+    }
+
+    private func editScopeQuestion(_ question: CalendarScopeQuestion) -> some View {
         ZStack {
             Color.black.opacity(0.12).ignoresSafeArea()
                 .onTapGesture { Task { await model.escape() } }
@@ -126,6 +109,66 @@ public struct CalendarWindowView: View {
             .calendarDialogChrome()
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("calendar.scopeQuestion")
+        }
+    }
+}
+
+struct CalendarRemovalQuestionView: View {
+    @Bindable var model: CalendarWindowModel
+    let question: CalendarRemoveQuestion
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.12).ignoresSafeArea()
+                .onTapGesture { Task { await model.escape() } }
+            VStack(alignment: .leading, spacing: theme.space4) {
+                Text(question.text).themeFont(theme.typeBody).foregroundStyle(theme.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let note = question.note {
+                    Text(note).themeFont(theme.typeBody).foregroundStyle(theme.textDanger.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("calendar.remove.note")
+                }
+                if question.isRecurring {
+                    VStack(alignment: .leading, spacing: theme.space3) {
+                        ForEach(CalendarRecurrenceScope.removalOptions, id: \.self) { scope in
+                            Button(scope.removalTitle, role: .destructive) {
+                                Task { await model.confirmRemove(scope, questionID: question.id) }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!question.availableScopes.contains(scope))
+                            .accessibilityIdentifier(Self.identifier(scope))
+                        }
+                    }
+                }
+                HStack(spacing: theme.space3) {
+                    Spacer(minLength: 0)
+                    Button("Cancel") { Task { await model.escape() } }
+                        .keyboardShortcut(.cancelAction)
+                        .accessibilityIdentifier("calendar.remove.cancel")
+                    if !question.isRecurring {
+                        Button(question.confirmTitle, role: .destructive) {
+                            Task { await model.confirmRemove(.thisEvent, questionID: question.id) }
+                        }
+                            .buttonStyle(.borderedProminent).tint(theme.textDanger.color)
+                            .accessibilityIdentifier("calendar.remove.confirm")
+                    }
+                }
+            }
+            .padding(theme.space5)
+            .frame(maxWidth: 420)
+            .calendarDialogChrome()
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("calendar.removeQuestion")
+        }
+    }
+
+    static func identifier(_ scope: CalendarRecurrenceScope) -> String {
+        switch scope {
+        case .thisEvent: "calendar.scope.this"
+        case .allEvents: "calendar.scope.all"
+        case .thisAndFollowing: "calendar.scope.future"
         }
     }
 }

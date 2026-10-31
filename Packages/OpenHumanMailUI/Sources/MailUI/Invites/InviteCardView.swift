@@ -38,9 +38,19 @@ public struct InviteCardView: View {
         VStack(alignment: .leading, spacing: theme.space4) {
             if card.kind == .cancelled {
                 cancelledRow
+            } else if card.offersRSVP, let state = center.removalStates[message] {
+                removalStateRow(state)
+                if let note = center.notes[message] {
+                    Text(note).font(theme.typeMeta.swiftUIFont).foregroundStyle(theme.textSecondary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("invite.note")
+                }
             } else if card.offersRSVP {
                 let block = center.answerBlock(for: message)
                 rsvpRow(card, block: block)
+                if let question = center.removalQuestion, question.message == message {
+                    removalQuestion(question)
+                }
                 if let block {
                     Label(block, systemImage: "lock.fill")
                         .font(theme.typeCaption.swiftUIFont)
@@ -130,6 +140,9 @@ public struct InviteCardView: View {
                 .accessibilityLabel("More answers for the whole series")
                 .accessibilityIdentifier("invite.moreOptions")
             }
+            if block == nil, center.offersRemoval(message), center.removalQuestion?.message != message {
+                removeButton
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Answer the invitation")
@@ -171,6 +184,72 @@ public struct InviteCardView: View {
         let center = center
         let message = message
         Task { await center.respond(response, to: message, wholeSeries: wholeSeries) }
+    }
+
+    // Next to the answers, quieter than them: removing is the uncommon choice and is confirmed first.
+    private var removeButton: some View {
+        Button { center.askToRemove(message) } label: {
+            Label("Remove", systemImage: "calendar.badge.minus")
+                .font(theme.typeMeta.swiftUIFont)
+                .foregroundStyle(theme.textSecondary.color)
+        }
+        .buttonStyle(.borderless)
+        .fixedSize()
+        .help("Remove it from your calendar without answering (⇧X). Mail sends no reply.")
+        .accessibilityLabel("Remove from calendar")
+        .accessibilityHint("Asks first. Removes your copy of the event without answering. Shortcut ⇧X.")
+        .accessibilityIdentifier("invite.remove")
+    }
+
+    // A system group box sets the question apart from the card without drawing its own chrome.
+    private func removalQuestion(_ question: InviteRemovalQuestion) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: theme.space3) {
+                Text(question.text)
+                    .font(theme.typeMeta.swiftUIFont)
+                    .foregroundStyle(theme.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("invite.remove.text")
+                HStack(spacing: theme.space2) {
+                    ForEach(question.scopes, id: \.self) { scope in
+                        Button(role: .destructive) {
+                            let center = center
+                            Task { await center.confirmRemoval(scope, question: question.id) }
+                        } label: {
+                            Text(question.buttonTitle(scope)).font(theme.typeLabel.swiftUIFont)
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("invite.remove.\(scope.rawValue)")
+                    }
+                    Button("Cancel") { center.cancelRemoval() }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("invite.remove.cancel")
+                    Spacer(minLength: 0)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Remove from calendar")
+        .accessibilityIdentifier("invite.removeQuestion")
+    }
+
+    @ViewBuilder
+    private func removalStateRow(_ state: InviteRemovalState) -> some View {
+        switch state {
+        case .pending:
+            Label("Removing from your calendar… Undo (⌘Z) keeps it.", systemImage: "calendar.badge.minus")
+                .font(theme.typeMeta.swiftUIFont)
+                .foregroundStyle(theme.textSecondary.color)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("invite.removing")
+        case .removed:
+            Label("Removed from your calendar. It stays on the organizer's calendar.", systemImage: "calendar.badge.minus")
+                .font(theme.typeMeta.swiftUIFont)
+                .foregroundStyle(theme.textSecondary.color)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("invite.removed")
+        }
     }
 
     private var connectPrompt: some View {

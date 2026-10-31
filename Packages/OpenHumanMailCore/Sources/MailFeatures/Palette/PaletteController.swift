@@ -206,7 +206,7 @@ public final class PaletteController {
         .blockSender: "nosign", .blockDomain: "nosign", .goBlocked: "nosign",
         .copyConversationDebug: "doc.on.clipboard", .saveConversationDebug: "square.and.arrow.down",
         .inviteYes: "checkmark.circle", .inviteMaybe: "questionmark.circle", .inviteNo: "xmark.circle",
-        .inviteShowOriginal: "envelope.open",
+        .inviteShowOriginal: "envelope.open", .inviteRemove: "calendar.badge.minus",
         .toggleCheck: "checkmark.square", .extendSelectionDown: "checkmark.square", .extendSelectionUp: "checkmark.square",
         .checkFromHere: "checkmark.square", .checkAll: "checklist", .clearChecks: "square",
         .goInbox: "tray", .goStarred: "star", .goDrafts: "doc", .goSent: "paperplane", .goAllMail: "archivebox",
@@ -266,7 +266,7 @@ public final class PaletteController {
         .calendarClose: "xmark", .calendarShowToday: "calendar.circle", .calendarPreviousPeriod: "chevron.left",
         .calendarNextPeriod: "chevron.right", .calendarShowDay: "1.square", .calendarShowThreeDays: "3.square",
         .calendarShowWeek: "7.square", .calendarShowMonth: "calendar", .calendarNewEvent: "calendar.badge.plus",
-        .calendarRefresh: "arrow.clockwise",
+        .calendarRefresh: "arrow.clockwise", .calendarRemoveEvent: "trash",
     ]
 
     private func unavailableEntries(_ matcher: FuzzyMatcher, _ context: ActionContext) -> [PaletteEntry] {

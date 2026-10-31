@@ -12,6 +12,7 @@ extension ActionID {
     public static let calendarShowMonth = ActionID("calendar.showMonth")
     public static let calendarNewEvent = ActionID("calendar.newEvent")
     public static let calendarRefresh = ActionID("calendar.refresh")
+    public static let calendarRemoveEvent = ActionID("calendar.removeEvent")
 }
 
 extension ActionCatalog {
@@ -61,5 +62,11 @@ extension ActionCatalog {
                          appearsInMenu: false, module: .calendar),
         ActionDescriptor(.calendarRefresh, "Calendar: Refresh", category: .view, scopes: inCalendar,
                          keywords: ["calendar", "reload", "update", "sync"], appearsInMenu: false, module: .calendar),
+        // ⇧X matches the reader's invitation shortcut; ⌫ is the system Calendar's key. Neither is a menu equivalent.
+        ActionDescriptor(.calendarRemoveEvent, "Calendar: Delete the open event…", shortTitle: "Delete",
+                         category: .view, bindings: [.named(.delete), .key("X")], scopes: inCalendar,
+                         effect: .external, isDestructive: true,
+                         keywords: ["delete event", "remove event", "remove invitation", "remove from calendar", "trash"],
+                         appearsInMenu: false, module: .calendar),
     ]
 }

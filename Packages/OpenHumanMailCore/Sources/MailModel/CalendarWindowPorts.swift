@@ -42,6 +42,8 @@ public struct CalendarAbilities: OptionSet, Sendable, Hashable {
     public static let editFull = CalendarAbilities(rawValue: 1 << 3)
     public static let moveCalendar = CalendarAbilities(rawValue: 1 << 4)
     public static let removeMeet = CalendarAbilities(rawValue: 1 << 5)
+    /// Removes the user's copy of an event someone else organizes, without answering the invitation.
+    public static let removeInvite = CalendarAbilities(rawValue: 1 << 6)
 }
 
 extension CalendarProviding {
@@ -69,6 +71,9 @@ extension CalendarProviding {
 
 extension CalendarEvent {
     public var canRespond: Bool { !id.isEmpty && organizerIsMe != true && myResponse != nil }
+
+    /// An event someone else organizes that sits on the user's calendar; removing it removes only this copy.
+    public var isInvitationCopy: Bool { !id.isEmpty && organizerIsMe == false }
 
     public var isRecurring: Bool { recurringEventID?.isEmpty == false }
 

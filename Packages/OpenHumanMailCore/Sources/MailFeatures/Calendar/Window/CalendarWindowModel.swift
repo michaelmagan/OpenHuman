@@ -64,6 +64,8 @@ public final class CalendarWindowModel {
     @ObservationIgnored var held: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored var undoable: [UUID: @MainActor () async throws -> Void] = [:]
     @ObservationIgnored var undoerStorage: CalendarWindowUndoer?
+    @ObservationIgnored var removalContext: CalendarRemovalContext?
+    @ObservationIgnored var pendingRemovals: Set<CalendarRemovalKey> = []
 
     public let eventStore: CalendarEventStore
 
@@ -356,8 +358,9 @@ public final class CalendarWindowModel {
                     let old = out[index]
                     out[index] = old.with(start: start, end: end)
                 }
-            case .removed(let id):
-                out.removeAll { $0.copyKey == id }
+            case .removed(let key, let result):
+                // The same key the card used, so an untagged event of a single calendar hides as well.
+                out.removeAll { provider(for: $0).key.lowercased() == key.account && result.affects($0) == true }
             case .response(let id, let response):
                 if let index = out.firstIndex(where: { $0.copyKey == id }) { out[index].myResponse = response }
             }
@@ -603,7 +606,8 @@ extension CalendarEvent {
         var moved = CalendarEvent(id: id, title: title, start: start, end: end, isAllDay: isAllDay, timeZone: timeZone,
                                   attendees: attendees, calendarName: calendarName, meetLink: meetLink,
                                   organizerIsMe: organizerIsMe, account: account, location: location, notes: notes,
-                                  myResponse: myResponse, recurringEventID: recurringEventID, extras: extras)
+                                  myResponse: myResponse, recurringEventID: recurringEventID,
+                                  originalStartTime: originalStartTime, extras: extras)
         moved.respondsAs = respondsAs
         return moved
     }

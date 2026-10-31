@@ -9,6 +9,55 @@ import Testing
     private static let base = "https://www.googleapis.com/calendar/v3"
     private static let events = base + "/calendars/robin@example.com/events"
 
+    @Test func scopedRemovalAuthorizationIsOneUseAndBoundToTargetBodyNotificationsAndVersion() async throws {
+        let wire = ScriptedTransport { request in
+            if request.method == "GET" {
+                return jsonResponse(200, ["id": "master", "etag": "\"v1\"", "organizer": ["self": true],
+                    "recurrence": ["RRULE:FREQ=WEEKLY"],
+                    "start": ["dateTime": "2026-10-25T16:00:00Z", "timeZone": "America/Los_Angeles"],
+                    "end": ["dateTime": "2026-10-25T17:00:00Z", "timeZone": "America/Los_Angeles"]])
+            }
+            return HTTPResponse(status: 204, headers: [:], body: Data())
+        }
+        let calendar = CalendarGuardTransport(wrapping: wire, calendarID: Self.me,
+            grantedScopes: CalendarScopes.request.write, verifiesOwnedEventRemoval: true)
+        let body = insertBody(["recurrence": ["RRULE:FREQ=WEEKLY;UNTIL=20261101T165959Z"]])
+        func authorization() -> String {
+            calendar.authorizeRemoval(CalendarRemovalAuthorization(method: "PATCH", target: "master", etag: "\"v1\"",
+                parent: nil, original: nil, master: true, body: body, sendUpdates: "all", allowAbsentCleanup: false))
+        }
+        for change in ["target", "body", "updates", "etag", "invented-token"] {
+            let nonce = change == "invented-token" ? "not-registered" : authorization()
+            let target = change == "target" ? "other" : "master"
+            let updates = change == "updates" ? "none" : "all"
+            let call = request("PATCH", Self.events + "/\(target)?sendUpdates=\(updates)",
+                body: change == "body" ? insertBody(["summary": "Broader edit"]) : body,
+                headers: [CalendarGuardTransport.scopedRemovalHeader: nonce, "If-Match": change == "etag" ? "\"v2\"" : "\"v1\""])
+            await #expect(throws: TransportError.self) { _ = try await calendar.send(call) }
+        }
+        #expect(wire.requests.isEmpty, "an exact authorization is required before even the fresh read")
+        let authorized = request("PATCH", Self.events + "/master?sendUpdates=all", body: body,
+            headers: [CalendarGuardTransport.scopedRemovalHeader: authorization(), "If-Match": "\"v1\""])
+        _ = try await calendar.send(authorized)
+        #expect(wire.requests.map(\.method) == ["GET", "PATCH"])
+        #expect(wire.requests.allSatisfy { $0.headers[CalendarGuardTransport.scopedRemovalHeader] == nil })
+        #expect(wire.requests.last?.headers["If-Match"] == "\"v1\"")
+        await #expect(throws: TransportError.self) { _ = try await calendar.send(authorized) }
+        #expect(wire.requests.count == 2, "the authorization is consumed before dispatch and cannot be replayed")
+    }
+
+    @Test func aScopedMarkerCannotEnableRecurrenceThroughTheLegacyDeleteOrDetailEditMarker() async {
+        let wire = ScriptedTransport()
+        let calendar = CalendarGuardTransport(wrapping: wire, calendarID: Self.me,
+            grantedScopes: CalendarScopes.request.write, verifiesOwnedEventRemoval: true)
+        for marker in [CalendarGuardTransport.removalRuleHeader, CalendarGuardTransport.editRuleHeader] {
+            let call = request("DELETE", Self.events + "/instance?sendUpdates=all", headers: [
+                marker: "organizer", CalendarGuardTransport.scopedRemovalHeader: "not-registered", "If-Match": "\"v1\""])
+            await #expect(throws: TransportError.self) { _ = try await calendar.send(call) }
+        }
+        #expect(wire.requests.isEmpty)
+    }
+
     private func request(_ method: String, _ url: String, body: Data? = nil,
                          headers: [String: String] = [:]) -> HTTPRequest {
         HTTPRequest(method: method, url: URL(string: url)!, headers: headers, body: body)

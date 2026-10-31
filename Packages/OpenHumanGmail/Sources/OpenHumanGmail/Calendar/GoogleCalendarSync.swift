@@ -1,5 +1,17 @@
 import Foundation
 
+public struct GoogleCalendarCancellation: Sendable, Hashable {
+    public let id: String
+    public let parentID: String?
+    public let originalStartTime: GoogleOriginalStart?
+
+    public init(id: String, parentID: String?, originalStartTime: GoogleOriginalStart?) {
+        self.id = id
+        self.parentID = parentID
+        self.originalStartTime = originalStartTime
+    }
+}
+
 public struct GoogleSyncedEvent: Sendable, Hashable {
     public let event: GoogleCalendarEvent
     public let etag: String?
@@ -24,8 +36,11 @@ public struct GoogleEventSyncPage: Sendable, Hashable {
     public let removed: [String]
     public let nextSyncToken: String?
     public let isComplete: Bool
+    public let cancellations: [GoogleCalendarCancellation]
 
-    public init(events: [GoogleSyncedEvent], removed: [String] = [], nextSyncToken: String? = nil, isComplete: Bool = true) {
+    public init(events: [GoogleSyncedEvent], removed: [String] = [], nextSyncToken: String? = nil, isComplete: Bool = true,
+                cancellations: [GoogleCalendarCancellation] = []) {
+        self.cancellations = cancellations
         self.events = events
         self.removed = removed
         self.nextSyncToken = nextSyncToken

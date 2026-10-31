@@ -78,7 +78,7 @@ public struct GoogleCalendarClient: Sendable {
 
     public let calendarID: String
     private let tokens: any AccessTokenProvider
-    private let transport: CalendarGuardTransport
+    let transport: CalendarGuardTransport
     private let clock: any OHClock
     private let budget: CalendarRequestBudget
     private let timeZone: TimeZone
@@ -115,7 +115,7 @@ public struct GoogleCalendarClient: Sendable {
             let response = try await send("GET", url(["calendars", calendarID, "events"], query: query))
             let page: WireEventList = try decode(response.body, "events.list")
             for item in page.items ?? [] {
-                if let event = item.event(defaultZone: timeZone, selfAddress: calendarID) { events.append(event) } else { skipped += 1 }
+                if let event = item.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: calendarID) { events.append(event) } else { skipped += 1 }
             }
             guard let next = page.nextPageToken, !next.isEmpty, next != pageToken else { break }
             pageToken = next
@@ -166,6 +166,7 @@ public struct GoogleCalendarClient: Sendable {
     private func syncPages(_ base: [URLQueryItem], what: String) async throws -> GoogleEventSyncPage {
         var events: [GoogleSyncedEvent] = []
         var removed: [String] = []
+        var cancellations: [GoogleCalendarCancellation] = []
         var skipped = 0
         var pageToken: String?
         var token: String?
@@ -180,10 +181,14 @@ public struct GoogleCalendarClient: Sendable {
             for (index, item) in (page.items ?? []).enumerated() {
                 let info = index < metas.count && metas[index].id == item.id ? metas[index] : WireEventMeta()
                 if item.status == "cancelled" {
-                    if let id = item.id, !id.isEmpty { removed.append(id) } else { skipped += 1 }
+                    if let id = item.id, !id.isEmpty {
+                        removed.append(id)
+                        cancellations.append(GoogleCalendarCancellation(id: id, parentID: item.recurringEventId,
+                            originalStartTime: item.originalStartTime?.original))
+                    } else { skipped += 1 }
                     continue
                 }
-                guard let event = item.event(defaultZone: timeZone, selfAddress: calendarID) else {
+                guard let event = item.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: calendarID) else {
                     skipped += 1
                     continue
                 }
@@ -202,7 +207,7 @@ public struct GoogleCalendarClient: Sendable {
         Log(.gmail).notice("calendar events.list (\(what)): \(events.count) event(s), \(removed.count) removed, "
                            + "\(skipped) skipped\(complete ? "" : ", pages ran out")")
         return GoogleEventSyncPage(events: events, removed: removed, nextSyncToken: complete ? token : nil,
-                                   isComplete: complete)
+                                   isComplete: complete, cancellations: cancellations)
     }
 
 
@@ -223,7 +228,7 @@ public struct GoogleCalendarClient: Sendable {
         for item in identities.items ?? [] {
             if let id = item.id { byID[id] = item }
         }
-        let candidates = (page.items ?? []).compactMap { $0.event(defaultZone: timeZone, selfAddress: calendarID) }
+        let candidates = (page.items ?? []).compactMap { $0.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: calendarID) }
             .map { event in
                 let identity = byID[event.id]
                 let original = identity?.originalStartTime.flatMap { time in
@@ -256,7 +261,7 @@ public struct GoogleCalendarClient: Sendable {
                            + "sendUpdates \(sendUpdates.rawValue))")
         // Why: after a 2xx the event exists, so an unreadable answer is not reported as a failure
         let wire = (try? JSONDecoder().decode(WireEvent.self, from: response.body)) ?? WireEvent()
-        if let created = wire.event(defaultZone: zone) { return created }
+        if let created = wire.event(defaultZone: zone, calendarID: calendarID) { return created }
         Log(.gmail).notice("calendar event created; its answer could not be read in full")
         return GoogleCalendarEvent(id: wire.id ?? "", title: event.title, start: event.start, end: event.end,
                                    timeZone: zone.identifier,
@@ -344,7 +349,7 @@ public struct GoogleCalendarClient: Sendable {
                                       body: try json(body), isWrite: true)
         Log(.gmail).notice("calendar event moved (sendUpdates \(sendUpdates.rawValue))")
         let wire = try? JSONDecoder().decode(WireEvent.self, from: response.body)
-        return wire?.event(defaultZone: zone)
+        return wire?.event(defaultZone: zone, calendarID: calendarID)
     }
 
     // `alias` is the account's other address the invitation was sent to; it answers only when no entry is the calendar's own
@@ -383,7 +388,7 @@ public struct GoogleCalendarClient: Sendable {
         Log(.gmail).notice("calendar invitation answered (sendUpdates \(sendUpdates.rawValue)"
                            + (answerAs == nil ? ")" : ", as an alias)"))
         let wire = try? JSONDecoder().decode(WireEvent.self, from: answer.body)
-        return wire?.event(defaultZone: timeZone, selfAddress: answerAs ?? calendarID)
+        return wire?.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: answerAs ?? calendarID)
     }
 
     public func patchEvent(id: String, patch: GoogleEventPatch, sendUpdates: GoogleSendUpdates) async throws -> GoogleCalendarEvent? {
@@ -406,13 +411,13 @@ public struct GoogleCalendarClient: Sendable {
                                       extraHeaders: [CalendarGuardTransport.editRuleHeader: CalendarGuardTransport.editRuleValue])
         Log(.gmail).notice("calendar event patched (fields \(body.count), sendUpdates \(sendUpdates.rawValue))")
         let wire = try? JSONDecoder().decode(WireEvent.self, from: response.body)
-        return wire?.event(defaultZone: timeZone, selfAddress: calendarID)
+        return wire?.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: calendarID)
     }
 
     public func readEvent(id: String) async throws -> GoogleCalendarEvent? {
         let read = try await send("GET", url(["calendars", calendarID, "events", id]))
         let wire = try? JSONDecoder().decode(WireEvent.self, from: read.body)
-        return wire?.event(defaultZone: timeZone, selfAddress: calendarID)
+        return wire?.event(defaultZone: timeZone, calendarID: calendarID, selfAddress: calendarID)
     }
 
     public func seriesRecurrence(id: String) async throws -> [String] {
@@ -489,17 +494,17 @@ public struct GoogleCalendarClient: Sendable {
         return components.url ?? url
     }
 
-    private func json(_ object: [String: Any]) throws -> Data {
+    func json(_ object: [String: Any]) throws -> Data {
         do { return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) } catch {
             throw GoogleCalendarError.decoding("request body")
         }
     }
 
-    private func decode<T: Decodable>(_ body: Data, _ what: String) throws -> T {
+    func decode<T: Decodable>(_ body: Data, _ what: String) throws -> T {
         do { return try JSONDecoder().decode(T.self, from: body) } catch { throw GoogleCalendarError.decoding(what) }
     }
 
-    private func send(_ method: String, _ url: URL, body: Data? = nil, isWrite: Bool = false,
+    func send(_ method: String, _ url: URL, body: Data? = nil, isWrite: Bool = false,
                       extraHeaders: [String: String] = [:]) async throws -> HTTPResponse {
         var forceRefresh = false
         while true {
@@ -518,6 +523,8 @@ public struct GoogleCalendarClient: Sendable {
             let response: HTTPResponse
             do {
                 response = try await transport.send(HTTPRequest(method: method, url: url, headers: headers, body: body))
+            } catch let error as GoogleCalendarRemovalError {
+                throw error
             } catch let error as TransportError {
                 switch error {
                 case .refusedByGuard(let summary): throw GoogleCalendarError.refusedByGuard(summary)
@@ -536,7 +543,7 @@ public struct GoogleCalendarClient: Sendable {
                 throw GoogleCalendarError.transport(.other(String(describing: type(of: error))))
             }
             if (200..<300).contains(response.status) { return response }
-            if response.status == 401, !forceRefresh {
+            if response.status == 401, !forceRefresh, extraHeaders[CalendarGuardTransport.scopedRemovalHeader] == nil {
                 forceRefresh = true
                 continue
             }
@@ -569,6 +576,7 @@ public struct GoogleCalendarClient: Sendable {
             return .forbidden(reason: reason ?? "forbidden")
         case 404: return .notFound
         case 410: return .gone
+        case 412: return .badRequest(reason: "precondition_failed")
         case 429: return .rateLimited
         case 500...599: return .server(status: response.status)
         default: return .badRequest(reason: reason ?? "http_\(response.status)")

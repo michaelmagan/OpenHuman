@@ -426,7 +426,16 @@ private enum RepoSources {
     let guards: Set<String> = ["OpenHumanGmail/DenyListTransport.swift", "OpenHumanGmail/ReadOnlyTransport.swift",
                                "OpenHumanGmail/GmailEndpoints.swift", "OpenHumanGmail/CalendarGuardTransport.swift"]
     let callers = AppSources.files(everything, matching: #""DELETE""#).subtracting(guards)
-    #expect(callers == ["OpenHumanGmail/GmailClient.swift", "OpenHumanGmail/GoogleCalendarClient.swift"])
+    // Reviewed: the scoped removal sends each write with a one-use authorization the calendar guard re-checks.
+    #expect(callers == ["OpenHumanGmail/GmailClient.swift", "OpenHumanGmail/GoogleCalendarClient.swift",
+                        "OpenHumanGmail/GoogleCalendarScopedRemoval.swift"])
+    let scopedRemoval = try #require(everything["OpenHumanGmail/GoogleCalendarScopedRemoval.swift"])
+    let scopedDeletes = codeLines(scopedRemoval, containing: "\"DELETE\"")
+    #expect(scopedDeletes.count == 6 && scopedDeletes.allSatisfy { $0.contains("performRemoval(") })
+    #expect(codeLines(scopedRemoval, containing: "isWrite: true").count == 1)
+    #expect(codeLines(scopedRemoval, containing: "extraHeaders:") == [
+        "extraHeaders: [CalendarGuardTransport.scopedRemovalHeader: nonce, \"If-Match\": etag])",
+    ])
     let deletes = codeLines(try #require(everything["OpenHumanGmail/GmailClient.swift"]), containing: "\"DELETE\"")
     #expect(deletes.count == 1 && deletes.allSatisfy { $0.contains(".deleteDraft") && $0.contains("drafts/") })
     let calendarDeletes = codeLines(try #require(everything["OpenHumanGmail/GoogleCalendarClient.swift"]),

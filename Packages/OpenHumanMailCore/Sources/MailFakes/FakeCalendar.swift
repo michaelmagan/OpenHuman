@@ -15,6 +15,7 @@ public final class FakeCalendar: CalendarProviding, Sendable {
         case respond(id: String, response: CalendarResponse, sendUpdates: CalendarSendUpdates)
         case update(id: String, changes: CalendarEventChanges, sendUpdates: CalendarSendUpdates)
         case remove(id: String, sendUpdates: CalendarSendUpdates)
+        case scopedRemove(id: String, scope: CalendarRecurrenceScope, sendUpdates: CalendarSendUpdates)
         case patch(id: String, patch: CalendarEventPatch, scope: CalendarRecurrenceScope, sendUpdates: CalendarSendUpdates)
     }
 
@@ -22,6 +23,7 @@ public final class FakeCalendar: CalendarProviding, Sendable {
         case normal
         case unclear(created: Bool)
     }
+    public enum RemovalOutcome: Sendable, Hashable { case normal, unclear(applied: Bool) }
 
     private struct State {
         var events: [CalendarEvent]
@@ -30,11 +32,13 @@ public final class FakeCalendar: CalendarProviding, Sendable {
         var deleted: [String] = []
         var failure: String?
         var createOutcome = CreateOutcome.normal
+        var removalOutcome = RemovalOutcome.normal
         var freeBusyErrors: [String] = []
         var nextID = 1
         var version = 0
         var versions: [String: Int] = [:]
         var changes: [(version: Int, id: String)] = []
+        var cancellations: [String: CalendarEventCancellation] = [:]
         var tokensExpired = false
         var supportsTokens = true
         var declined: Set<String> = []
@@ -51,12 +55,15 @@ public final class FakeCalendar: CalendarProviding, Sendable {
     private let state: Mutex<State>
     public let info: CalendarProviderInfo
     public let abilities: CalendarAbilities
+    public let removalScopes: [CalendarRecurrenceScope]
 
     public init(events: [CalendarEvent] = [], info: CalendarProviderInfo = CalendarProviderInfo(name: "Sample calendar",
                                                                                                 isSample: true),
-                abilities: CalendarAbilities = [.respond, .editDetails, .remove]) {
+                abilities: CalendarAbilities = [.respond, .editDetails, .remove],
+                removalScopes: [CalendarRecurrenceScope] = CalendarRecurrenceScope.removalOptions) {
         self.info = info
         self.abilities = abilities
+        self.removalScopes = removalScopes
         state = Mutex(State(events: events))
     }
 
@@ -121,11 +128,13 @@ public final class FakeCalendar: CalendarProviding, Sendable {
                 throw CalendarError.failed("The calendar didn't find the event.")
             }
             let old = s.events[index]
-            let moved = CalendarEvent(id: old.id, title: old.title, start: start, end: end, isAllDay: old.isAllDay,
+            var moved = CalendarEvent(id: old.id, title: old.title, start: start, end: end, isAllDay: old.isAllDay,
                                       timeZone: old.timeZone, attendees: old.attendees, calendarName: old.calendarName,
-                                      meetLink: old.meetLink, organizerIsMe: old.organizerIsMe, location: old.location,
+                                      meetLink: old.meetLink, organizerIsMe: old.organizerIsMe, account: old.account, location: old.location,
                                       notes: old.notes, myResponse: old.myResponse,
-                                      recurringEventID: old.recurringEventID)
+                                      recurringEventID: old.recurringEventID, originalStartTime: old.originalStartTime,
+                                      extras: old.extras)
+            moved.respondsAs = old.respondsAs
             s.events[index] = moved
             s.touch(moved.id)
             return moved
@@ -166,12 +175,14 @@ public final class FakeCalendar: CalendarProviding, Sendable {
                 throw CalendarError.failed("The calendar didn't find the event.")
             }
             let old = s.events[index]
-            let changed = CalendarEvent(id: old.id, title: changes.title ?? old.title, start: old.start, end: old.end,
+            var changed = CalendarEvent(id: old.id, title: changes.title ?? old.title, start: old.start, end: old.end,
                                         isAllDay: old.isAllDay, timeZone: old.timeZone,
                                         attendees: changes.attendees ?? old.attendees, calendarName: old.calendarName,
-                                        meetLink: old.meetLink, organizerIsMe: old.organizerIsMe,
+                                        meetLink: old.meetLink, organizerIsMe: old.organizerIsMe, account: old.account,
                                         location: changes.location ?? old.location, notes: changes.notes ?? old.notes,
-                                        myResponse: old.myResponse, recurringEventID: old.recurringEventID)
+                                        myResponse: old.myResponse, recurringEventID: old.recurringEventID,
+                                        originalStartTime: old.originalStartTime, extras: old.extras)
+            changed.respondsAs = old.respondsAs
             s.events[index] = changed
             s.touch(changed.id)
             return changed
@@ -200,13 +211,15 @@ public final class FakeCalendar: CalendarProviding, Sendable {
             case .remove?: nil
             case nil: old.meetLink
             }
-            let changed = CalendarEvent(id: old.id, title: patch.title ?? old.title, start: patch.time?.start ?? old.start,
+            var changed = CalendarEvent(id: old.id, title: patch.title ?? old.title, start: patch.time?.start ?? old.start,
                                         end: patch.time?.end ?? old.end, isAllDay: patch.time?.isAllDay ?? old.isAllDay,
                                         timeZone: patch.time?.timeZone ?? old.timeZone,
                                         attendees: patch.guests?.map(\.address) ?? old.attendees,
-                                        calendarName: old.calendarName, meetLink: meet, organizerIsMe: old.organizerIsMe,
+                                        calendarName: old.calendarName, meetLink: meet, organizerIsMe: old.organizerIsMe, account: old.account,
                                         location: patch.location ?? old.location, notes: patch.notes ?? old.notes,
-                                        myResponse: old.myResponse, recurringEventID: old.recurringEventID, extras: extras)
+                                        myResponse: old.myResponse, recurringEventID: old.recurringEventID,
+                                        originalStartTime: old.originalStartTime, extras: extras)
+            changed.respondsAs = old.respondsAs
             s.events[index] = changed
             s.touch(changed.id)
             return changed
@@ -218,6 +231,68 @@ public final class FakeCalendar: CalendarProviding, Sendable {
             s.calls.append(.remove(id: event.id, sendUpdates: sendUpdates))
             if let failure = s.failure { throw CalendarError.failed(failure) }
             s.events.removeAll { $0.id == event.id }
+            s.touch(event.id)
+        }
+    }
+
+    public func removeEvent(_ event: CalendarEvent, scope: CalendarRecurrenceScope,
+                            sendUpdates: CalendarSendUpdates) async throws -> CalendarRemovalResult {
+        try state.withLock { s in
+            s.calls.append(.scopedRemove(id: event.id, scope: scope, sendUpdates: sendUpdates))
+            if let failure = s.failure { throw CalendarError.failed(failure) }
+            guard info.createRefusal == nil,
+                  let selected = s.events.first(where: { $0.id == event.id
+                      && ($0.account == nil || $0.account?.lowercased() == event.account?.lowercased()) }) else {
+                throw CalendarError.refused("This event can't be removed.")
+            }
+            // Like Google: a guest's copy leaves silently, and only the organizer can end a series early.
+            let asGuest = selected.organizerIsMe == false
+            guard asGuest ? abilities.contains(.removeInvite) && event.isInvitationCopy && sendUpdates == .none
+                          : abilities.contains(.remove) && !event.isInvitationCopy else {
+                throw CalendarError.refused("This event can't be removed.")
+            }
+            let parent = selected.recurringEventID ?? (selected.isRecurringForRemoval ? selected.id : nil)
+            guard parent == nil || removalScopes.contains(scope), !(asGuest && scope == .thisAndFollowing) else {
+                throw CalendarError.refused("This calendar doesn't support that deletion scope.")
+            }
+            if case .unclear(applied: false) = s.removalOutcome {
+                throw CalendarError.unclear("The calendar may have changed. Refresh before trying again.")
+            }
+            if selected.recurringEventID == nil && selected.isRecurringForRemoval && scope != .allEvents {
+                throw CalendarError.refused("Open an occurrence before choosing this scope.")
+            }
+            if parent == nil && scope != .thisEvent { throw CalendarError.refused("This event is not a series.") }
+            // The fake's explicitly supplied occurrences are its independent recurrence oracle.
+            // It does not call the production prefix planner or CalendarRemovalResult.affects.
+            let members = s.events.filter {
+                $0.account == selected.account && ($0.recurringEventID == parent || $0.id == parent)
+            }
+            var removed: Set<String> = []
+            switch scope {
+            case .thisEvent: removed = [selected.id]
+            case .allEvents: removed = Set(members.map(\.id))
+            case .thisAndFollowing:
+                guard let cutoff = selected.originalStartTime else {
+                    throw CalendarError.refused("The original recurrence position is missing.")
+                }
+                for member in members {
+                    guard let position = member.originalStartTime, let following = position.isAtOrAfter(cutoff) else {
+                        throw CalendarError.refused("An occurrence has no comparable original recurrence position.")
+                    }
+                    if following { removed.insert(member.id) }
+                }
+            }
+            for old in s.events where old.account == selected.account && removed.contains(old.id) {
+                s.cancellations[old.id] = CalendarEventCancellation(id: old.id, parentID: old.recurringEventID,
+                                                                   originalStartTime: old.originalStartTime)
+            }
+            s.events.removeAll { $0.account == selected.account && removed.contains($0.id) }
+            for id in removed.sorted() { s.touch(id) }
+            if case .unclear(applied: true) = s.removalOutcome {
+                throw CalendarError.unclear("The calendar may have changed. Refresh before trying again.")
+            }
+            return CalendarRemovalResult(selectedID: selected.id, parentID: parent, scope: scope,
+                                         originalCutoff: selected.originalStartTime)
         }
     }
 
@@ -240,7 +315,7 @@ public final class FakeCalendar: CalendarProviding, Sendable {
             s.calls.filter {
                 switch $0 {
                 case .events, .freeBusy, .window, .changes: true
-                case .create, .delete, .move, .respond, .update, .remove, .patch: false
+                case .create, .delete, .move, .respond, .update, .remove, .scopedRemove, .patch: false
                 }
             }.count
         }
@@ -248,6 +323,10 @@ public final class FakeCalendar: CalendarProviding, Sendable {
     public var failure: String? {
         get { state.withLock { $0.failure } }
         set { state.withLock { $0.failure = newValue } }
+    }
+    public var removalOutcome: RemovalOutcome {
+        get { state.withLock { $0.removalOutcome } }
+        set { state.withLock { $0.removalOutcome = newValue } }
     }
     public var createOutcome: CreateOutcome {
         get { state.withLock { $0.createOutcome } }
@@ -335,7 +414,8 @@ public final class FakeCalendar: CalendarProviding, Sendable {
                     removed.append(change.id)
                 }
             }
-            return CalendarEventDelta(changed: changed, removed: removed, syncToken: "fake-\(s.version)")
+            return CalendarEventDelta(changed: changed, removed: removed, syncToken: "fake-\(s.version)",
+                                      cancellations: removed.compactMap { s.cancellations[$0] })
         }
     }
 
@@ -414,7 +494,9 @@ public final class FakeCalendar: CalendarProviding, Sendable {
                 if offset == 0 { extras.recurrence = ["RRULE:FREQ=DAILY;INTERVAL=2;COUNT=4"] }
                 events.append(CalendarEvent(id: "sample-\(offset)-c", title: "Interview", start: at(day, 15, 30),
                                             end: at(day, 16, 30), timeZone: timeZone.identifier, organizerIsMe: true,
-                                            recurringEventID: "sample-interviews", extras: extras))
+                                            recurringEventID: "sample-interviews",
+                                            originalStartTime: .timed(at(day, 15, 30), timeZone: timeZone.identifier),
+                                            extras: extras))
             }
             if offset == 1 {
                 events.append(CalendarEvent(id: "sample-1-d", title: "Dinner", start: at(day, 19), end: at(day, 20, 30),

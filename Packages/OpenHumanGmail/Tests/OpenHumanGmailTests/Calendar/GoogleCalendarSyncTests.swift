@@ -13,6 +13,20 @@ private func at(_ month: Int, _ day: Int, _ hour: Int = 0, _ minute: Int = 0) ->
 }
 
 @Suite struct GoogleCalendarSyncTests {
+    @Test func syncKeepsDateIdentityAndCancellationPositionsWithoutInventingDisplayTimes() async throws {
+        let http = FakeHTTPTransport()
+        let response = FakeHTTPTransport.json(200, ["items": [
+            ["id": "offsite", "recurringEventId": "days", "start": ["date": "2026-11-03"], "end": ["date": "2026-11-04"],
+             "originalStartTime": ["date": "2026-11-01"]],
+            ["id": "cancelled", "status": "cancelled", "recurringEventId": "days", "originalStartTime": ["date": "2026-11-02"]]],
+            "nextSyncToken": "next"])
+        http.on("GET", Self.eventsPath) { _ in response }
+        let page = try await client(http).listEventChanges(syncToken: "before")
+        #expect(page.events.first?.event.originalStartTime == .date("2026-11-01"))
+        #expect(page.removed == ["cancelled"])
+        #expect(page.cancellations == [GoogleCalendarCancellation(id: "cancelled", parentID: "days", originalStartTime: .date("2026-11-02"))])
+    }
+
     private static let me = "robin@example.com"
     private static let eventsPath = "/calendar/v3/calendars/robin@example.com/events"
 

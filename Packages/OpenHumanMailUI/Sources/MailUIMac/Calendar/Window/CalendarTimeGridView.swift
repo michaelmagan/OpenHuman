@@ -156,6 +156,7 @@ struct CalendarTimeGridView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .calendarEventContextMenu(model, bar.event)
                         .onHover { inside in hover("allDay.\(bar.id)", inside) }
                         .calendarPopoverAnchor(!bar.event.id.isEmpty && model.card?.event.copyKey == bar.event.copyKey)
                         .offset(x: CGFloat(bar.firstDay) * columnWidth + 2, y: CGFloat(bar.lane) * Self.laneHeight + 1)
@@ -401,6 +402,7 @@ struct CalendarTimeGridView: View {
             .onHover { inside in hover(block.id, inside) }
             .calendarPopoverAnchor(!block.event.id.isEmpty && model.card?.event.copyKey == block.event.copyKey)
             .onTapGesture { model.openEvent(block.event) }
+            .calendarEventContextMenu(model, block.event)
             .gesture(moveGesture(block, grid: grid, columnWidth: columnWidth, enabled: movable))
             .offset(x: x, y: y)
             .transaction { transaction in if drag != nil { transaction.animation = nil } }
