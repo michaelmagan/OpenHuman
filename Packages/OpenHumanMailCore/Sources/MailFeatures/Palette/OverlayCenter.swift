@@ -26,6 +26,7 @@ public final class OverlayCenter: ActionPresenting {
         case label(LabelPickerModel)
         case zero(GetMeToZeroModel)
         case ask(AskModel)
+        case batchSend(BatchSendModel)
     }
 
     private var stored: Overlay = .none
@@ -139,6 +140,7 @@ public final class OverlayCenter: ActionPresenting {
         case .time(let model): model.close()
         case .label(let model): model.close()
         case .zero(let model): model.close()
+        case .batchSend(let model): model.close()
         case .shortcuts, .ask, .none: break
         }
         overlay = .none
@@ -227,6 +229,11 @@ public final class OverlayCenter: ActionPresenting {
             if case .at(let date, let kind) = choice { schedule(date, kind == .ifNoReply ? .ifNoReply : .always) }
         }
         model.onlyIfNoReply = condition == .ifNoReply
+    }
+
+    public func presentBatchSend(_ model: BatchSendModel) {
+        if isShowing { dismiss() }
+        overlay = .batchSend(model)
     }
 
     public func presentDraftReminder(thread: ThreadKey?, current: ComposeSession.PendingReminder?,

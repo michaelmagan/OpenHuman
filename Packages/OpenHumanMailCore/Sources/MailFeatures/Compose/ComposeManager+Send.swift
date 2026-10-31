@@ -581,6 +581,7 @@ extension ComposeManager {
             held[id] = nil
             _ = try? await commands?.sendNow(heldSend.token)
         }
+        await releaseHeldBatches()
         for id in Array(pendingDiscards.keys) { await finishDiscard(id) }
         for session in sessions where session.canPersist && (session.draftKey != nil || session.hasUserEdits) {
             if await session.save(), let key = session.draftKey { try? await commands?.flushDraft(key) }
@@ -589,23 +590,26 @@ extension ComposeManager {
         await sendDoneUpdate?.value
     }
 
-    public var heldSendCount: Int { held.count }
+    public var heldSendCount: Int { held.count + heldBatchSendCount }
 
     public var hasQuitWork: Bool {
-        !held.isEmpty || !pendingDiscards.isEmpty || sessions.contains { $0.canPersist && $0.hasUserEdits }
+        !held.isEmpty || heldBatchSendCount > 0 || !pendingDiscards.isEmpty
+            || sessions.contains { $0.canPersist && $0.hasUserEdits }
     }
 
-    private func push(_ title: LocalizedStringResource, _ action: ComposeUndoAction, expiresAt: Date? = nil,
-                      threads: [ThreadKey] = [], view: UUID? = nil) {
+    @discardableResult
+    func push(_ title: LocalizedStringResource, _ action: ComposeUndoAction, expiresAt: Date? = nil,
+              threads: [ThreadKey] = [], view: UUID? = nil) -> UndoCoordinator.Entry.ID? {
         let secondary = view.map { viewChoice($0) }
         guard let undo = environment.undo, let payload = try? JSONEncoder().encode(action) else {
             environment.notices.post(String(localized: title), style: .info, secondary: secondary)
-            return
+            return nil
         }
         let entry = UndoCoordinator.Entry(title: title, token: UndoToken(payload: payload), expiresAt: expiresAt,
                                           threads: threads, undoer: undoer, secondary: secondary)
         if let view { sendingUndoEntries[view] = entry.id }
         undo.push(entry)
+        return entry.id
     }
 }
 
@@ -614,6 +618,7 @@ enum ComposeUndoAction: Codable, Sendable {
     case schedule(session: UUID, draft: String)
     case reschedule(draft: String, to: Date, condition: SendLaterCondition)
     case discard(session: UUID)
+    case sendBatch(batch: UUID)
 }
 
 @MainActor
@@ -638,6 +643,7 @@ final class ComposeUndoer: MailUndoing {
         case .reschedule(let draft, let date, let condition):
             try await manager.restoreSchedule(draft: DraftKey(draft), at: date, condition: condition)
         case .discard(let session): try await manager.undoDiscard(session: session)
+        case .sendBatch(let batch): try await manager.undoBatch(batch)
         }
     }
 }

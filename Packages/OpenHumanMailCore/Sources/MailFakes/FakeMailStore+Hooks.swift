@@ -143,6 +143,11 @@ extension FakeMailStore {
         mutate { s in for id in s.held.keys.sorted() { _ = s.completeHeld(id, now: now, byOtherInstall: false) } }
     }
 
+    /// The draft's held send fails when it completes: the draft stays, marked failed with `error`.
+    public func failDelivery(of draft: DraftKey, error: String = "server_503") {
+        mutate { $0.failingDeliveries[draft] = error }
+    }
+
     public var heldSendCount: Int { state.withLock { $0.held.count } }
 
     public var sentMessages: [FakeSentMessage] { state.withLock { $0.sent } }

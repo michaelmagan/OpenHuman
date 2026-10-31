@@ -125,6 +125,7 @@ extension ActionID {
     public static let closeComposer = ActionID("compose.close")
 
     public static let openDraft = ActionID("draft.open")
+    public static let sendDrafts = ActionID("draft.sendChecked")
     public static let rescheduleSend = ActionID("scheduledSend.reschedule")
     public static let cancelScheduledSend = ActionID("scheduledSend.cancel")
 

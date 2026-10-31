@@ -124,12 +124,16 @@ extension ComposeManager {
     static let sendingLimit = 20
 
     func addSending(_ session: ComposeSession, draft: DraftKey, state: SendingMessage.State) {
-        var list = sending.filter { $0.id != session.id }
-        list.append(SendingMessage(
+        addSending(SendingMessage(
             id: session.id, draft: draft, account: session.account.id, thread: session.thread, mode: session.mode,
             from: session.from.address, to: session.to.tokens, cc: session.cc.tokens, bcc: session.bcc.tokens,
             subject: session.subject, text: session.plainText, attachmentNames: session.attachments.map(\.filename),
             date: timing.now(), state: state))
+    }
+
+    func addSending(_ message: SendingMessage) {
+        var list = sending.filter { $0.id != message.id }
+        list.append(message)
         while list.count > Self.sendingLimit {
             if let done = list.firstIndex(where: { !$0.state.isOnItsWay }) { list.remove(at: done) } else { list.removeFirst() }
         }

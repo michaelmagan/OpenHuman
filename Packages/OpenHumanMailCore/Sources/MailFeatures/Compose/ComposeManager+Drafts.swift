@@ -52,7 +52,7 @@ extension ComposeManager {
 
 @MainActor
 final class DraftRowActionHandler: ActionHandler {
-    static let coreIDs: [ActionID] = [.openDraft]
+    static let coreIDs: [ActionID] = [.openDraft, .sendDrafts]
     static let sendLaterIDs: [ActionID] = [.rescheduleSend, .cancelScheduledSend]
 
     private weak var environment: AppEnvironment?
@@ -68,7 +68,9 @@ final class DraftRowActionHandler: ActionHandler {
     }
 
     func perform(_ request: ActionRequest) -> ActionPerformance {
-        guard let manager, let thread = request.context.focusedThread else { return .notHandled }
+        guard let manager else { return .notHandled }
+        if request.id == .sendDrafts { return manager.batchSendAction(threads: request.context.selection) }
+        guard let thread = request.context.focusedThread else { return .notHandled }
         switch request.id {
         case .openDraft:
             return manager.openDraftAction(in: thread, scheduledFirst: request.context.location == .system(.scheduled))

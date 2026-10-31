@@ -75,6 +75,9 @@ public enum ActionCatalog {
     static let drafts: [ActionDescriptor] = [
         ActionDescriptor(.openDraft, "Open draft", category: .thread, scopes: listAndReader, target: .focusedThread,
                          keywords: ["resume draft", "continue draft", "edit draft", "drafts"]),
+        ActionDescriptor(.sendDrafts, "Send drafts…", category: .thread, bindings: [.named(.enter, .command)],
+                         scopes: [.list], effect: .external, target: .threads,
+                         keywords: ["batch send", "send all drafts", "send selected drafts", "send checked", "outbox"]),
         ActionDescriptor(.rescheduleSend, "Reschedule send…", category: .thread, scopes: listAndReader,
                          effect: .external, target: .focusedThread,
                          keywords: ["send later", "change send time", "scheduled", "move send"], module: .sendLater),

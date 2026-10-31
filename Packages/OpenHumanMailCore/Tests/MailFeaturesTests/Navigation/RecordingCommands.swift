@@ -10,6 +10,7 @@ final class RecordingCommands: MailCommanding {
     private let scheduleHold = Mutex<Checkpoint?>(nil)
     private let createHold = Mutex<Checkpoint?>(nil)
     private let discardFailure = Mutex<MailPortError?>(nil)
+    private let sendFailures = Mutex<[DraftKey: MailPortError]>([:])
     private let applied = Mutex<[MailCommand]>([])
 
     init(_ store: FakeMailStore) { self.store = store }
@@ -21,6 +22,7 @@ final class RecordingCommands: MailCommanding {
     func holdSchedules(at checkpoint: Checkpoint) { scheduleHold.withLock { $0 = checkpoint } }
     func holdCreates(at checkpoint: Checkpoint) { createHold.withLock { $0 = checkpoint } }
     func failDiscards(with error: MailPortError) { discardFailure.withLock { $0 = error } }
+    func failSend(of key: DraftKey, with error: MailPortError) { sendFailures.withLock { $0[key] = error } }
 
     func apply(_ command: MailCommand) async throws -> UndoToken {
         record("apply")
@@ -49,7 +51,9 @@ final class RecordingCommands: MailCommanding {
         record("resolveDraftConflict"); try await store.resolveDraftConflict(key, resolution)
     }
     func send(_ key: DraftKey, undoWindow: Duration) async throws -> SendToken {
-        record("send"); return try await store.send(key, undoWindow: undoWindow)
+        record("send")
+        if let failure = sendFailures.withLock({ $0.removeValue(forKey: key) }) { throw failure }
+        return try await store.send(key, undoWindow: undoWindow)
     }
     func cancelSend(_ token: SendToken) async throws -> Bool { record("cancelSend"); return try await store.cancelSend(token) }
     func sendNow(_ token: SendToken) async throws -> Bool { record("sendNow"); return try await store.sendNow(token) }
