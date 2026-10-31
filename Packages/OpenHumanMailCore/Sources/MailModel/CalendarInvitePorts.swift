@@ -104,7 +104,7 @@ extension CalendarEvent {
                                       timeZone: timeZone, attendees: attendees, calendarName: calendarName,
                                       meetLink: meetLink, organizerIsMe: organizerIsMe, account: account,
                                       location: location, notes: notes, myResponse: myResponse, recurringEventID: nil,
-                                      extras: extras)
+                                      originalStartTime: nil, extras: extras)
         reference.respondsAs = respondsAs
         return reference
     }

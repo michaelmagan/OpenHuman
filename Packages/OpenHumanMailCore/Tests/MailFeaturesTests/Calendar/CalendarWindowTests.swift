@@ -40,12 +40,14 @@ private struct CalendarWindowFixture {
     var homeEmail: String { corpus.accounts[1].email.lowercased() }
 
     init(work: [CalendarEvent] = [], home: [CalendarEvent] = [],
-         workAbilities: CalendarAbilities = [.respond, .editDetails, .remove], cache: InMemoryCalendarCache? = nil) {
+         workAbilities: CalendarAbilities = [.respond, .editDetails, .remove],
+         homeAbilities: CalendarAbilities = [.respond, .editDetails, .remove], cache: InMemoryCalendarCache? = nil) {
         corpus = .rich(threadCount: 12, now: fixedNow)
         let accounts = corpus.accounts
         self.work = FakeCalendar(events: work, info: CalendarProviderInfo(name: "Google Calendar", account: accounts[0].email),
                                  abilities: workAbilities)
-        self.home = FakeCalendar(events: home, info: CalendarProviderInfo(name: "Google Calendar", account: accounts[1].email))
+        self.home = FakeCalendar(events: home, info: CalendarProviderInfo(name: "Google Calendar", account: accounts[1].email),
+                                 abilities: homeAbilities)
         let connections = FakeCalendarConnections(providers: [accounts[0].email: self.work, accounts[1].email: self.home])
         env = AppEnvironment.fake(corpus: corpus, options: .init(remoteAck: .immediate),
                                   featureFlags: FeatureFlags(), calendar: self.work, calendarConnections: connections,
@@ -95,6 +97,7 @@ private struct CalendarWindowFixture {
             await f.env.undo?.undoLast()
             model.openEvent(workCopy)
             await model.removeCardEvent()
+            await model.confirmRemove()
             #expect(model.shownEvents.map(\.copyKey) == [homeCopy.copyKey])
             await f.env.undo?.undoLast()
             #expect(Set(model.shownEvents.map(\.copyKey)) == [workCopy.copyKey, homeCopy.copyKey])
@@ -114,6 +117,335 @@ private struct CalendarWindowFixture {
         let grid = CalendarTimeGrid(days: [la(10, 13)], events: [work, home], timeZone: losAngeles,
                                     now: la(10, 12, 11))
         #expect(grid.allDay.count == 2 && Set(grid.allDay.map(\.id)).count == 2)
+    }
+}
+
+@MainActor
+@Suite struct CalendarRecurringRemovalModelTests {
+    private var occurrences: [CalendarEvent] {
+        [("first", la(10, 25, 9)), ("middle", la(11, 1, 9)), ("last", la(11, 8, 9))].map { id, date in
+            CalendarEvent(id: id, title: "Weekly planning", start: date, end: date.addingTimeInterval(1800),
+                timeZone: losAngeles.identifier, organizerIsMe: true, recurringEventID: "weekly",
+                originalStartTime: .timed(date, timeZone: losAngeles.identifier))
+        }
+    }
+
+    @Test func allThreeScopesUseOneQuestionAndHaveHardCodedSurvivorsWithNoRecreationUndo() async throws {
+        let cases: [(CalendarRecurrenceScope, [String])] = [(.thisEvent, ["first", "last"]),
+            (.allEvents, []), (.thisAndFollowing, ["first"])]
+        for (scope, expected) in cases {
+            let f = CalendarWindowFixture(work: occurrences, home: [occurrences[1]])
+            let model = f.window(clock: WindowClock(la(11, 1, 8)))
+            let gate = TestGate()
+            model.sleep = { _ in await gate.wait() }
+            await model.open()
+            let chosen = try #require(model.events.first { $0.id == "middle" && $0.account == f.workEmail })
+            model.openEvent(chosen)
+            model.askToRemoveCardEvent()
+            let question = try #require(model.removeQuestion)
+            #expect(question.isRecurring && model.scopeQuestion == nil)
+            #expect(question.availableScopes == [.thisEvent, .allEvents, .thisAndFollowing])
+            #expect(question.text.contains("before your calendar changes") && !question.canRecreate)
+            await model.confirmRemove(scope, questionID: question.id)
+            await model.confirmRemove(scope, questionID: question.id)
+            #expect(model.heldCount == 1, "a duplicate question answer cannot schedule another write")
+            #expect(model.shownEvents.contains { $0.id == "middle" && $0.account == f.homeEmail })
+            #expect(!model.shownEvents.contains { $0.id == "middle" && $0.account == f.workEmail })
+            let task = try #require(model.held.values.first)
+            gate.release()
+            await task.value
+            #expect(f.work.allEvents.map(\.id).sorted() == expected)
+            #expect(f.home.allEvents.map(\.id) == ["middle"])
+            #expect(f.work.calls.filter { if case .scopedRemove = $0 { true } else { false } }
+                == [.scopedRemove(id: "middle", scope: scope, sendUpdates: .all)])
+            #expect(model.undoableCount == 0 && f.work.created.isEmpty)
+            await f.env.undo?.undoLast()
+            #expect(f.work.created.isEmpty && f.work.allEvents.map(\.id).sorted() == expected)
+        }
+    }
+
+    @Test func heldUndoForEveryScopeSendsZeroWritesAndRestoresTheSourceOverlay() async throws {
+        for scope in CalendarRecurrenceScope.removalOptions {
+            let f = CalendarWindowFixture(work: occurrences, home: [occurrences[1]])
+            let model = f.window(clock: WindowClock(la(11, 1, 8)))
+            let gate = TestGate()
+            model.sleep = { _ in await gate.wait() }
+            await model.open()
+            model.openEvent(try #require(model.events.first { $0.account == f.workEmail }))
+            model.askToRemoveCardEvent()
+            await model.confirmRemove(scope, questionID: try #require(model.removeQuestion).id)
+            let task = try #require(model.held.values.first)
+            await f.env.undo?.undoLast()
+            gate.release()
+            await task.value
+            #expect(model.heldCount == 0 && model.pendingRemovals.isEmpty)
+            #expect(f.work.allEvents.map(\.id) == ["first", "middle", "last"])
+            #expect(model.shownEvents.filter { $0.id == "middle" }.count == 2)
+            #expect(!f.work.calls.contains { if case .scopedRemove = $0 { true } else { false } })
+        }
+    }
+
+    @Test func aFreshRecurringResultForAGuestlessCardMissingIdentityNeverOffersRecreationUndo() async throws {
+        let f = CalendarWindowFixture(work: occurrences)
+        let model = f.window(clock: WindowClock(la(11, 1, 8)))
+        let gate = TestGate()
+        model.sleep = { _ in await gate.wait() }
+        await model.open()
+        let known = try #require(model.events.first { $0.id == "middle" })
+        let oldCard = CalendarEvent(id: known.id, title: known.title, start: known.start, end: known.end,
+            timeZone: known.timeZone, organizerIsMe: true, account: known.account)
+        model.openEvent(oldCard)
+        #expect(model.card?.event.recurringEventID == nil && model.card?.event.originalStartTime == nil)
+        model.askToRemoveCardEvent()
+        let question = try #require(model.removeQuestion)
+        #expect(!question.isRecurring && question.canRecreate, "the displayed card has only old singleton metadata")
+        await model.confirmRemove(.thisEvent, questionID: question.id)
+        let task = try #require(model.held.values.first)
+        #expect(f.work.allEvents.map(\.id) == ["first", "middle", "last"])
+        gate.release()
+        await task.value
+        #expect(f.work.calls.contains(.scopedRemove(id: "middle", scope: .thisEvent, sendUpdates: .none)))
+        #expect(f.work.allEvents.map(\.id) == ["first", "last"], "the fake resolves the actual recurring instance at dispatch")
+        #expect(model.undoableCount == 0 && f.work.created.isEmpty)
+        await f.env.undo?.undoLast()
+        #expect(f.work.created.isEmpty && f.work.allEvents.map(\.id) == ["first", "last"])
+    }
+
+    @Test func escapeStaleQuestionReplacedCardCrossAccountAndReplacedProviderCannotDispatch() async throws {
+        let f = CalendarWindowFixture(work: occurrences, home: [occurrences[1]])
+        let model = f.window(clock: WindowClock(la(11, 1, 8)))
+        await model.open()
+        let work = try #require(model.events.first { $0.account == f.workEmail })
+        let home = try #require(model.events.first { $0.account == f.homeEmail })
+        model.openEvent(work)
+        model.askToRemoveCardEvent()
+        let escaped = try #require(model.removeQuestion).id
+        await model.escape()
+        await model.confirmRemove(.allEvents, questionID: escaped)
+        #expect(model.heldCount == 0 && model.card != nil)
+        model.askToRemoveCardEvent()
+        let old = try #require(model.removeQuestion).id
+        model.askToRemoveCardEvent()
+        await model.confirmRemove(.allEvents, questionID: old)
+        #expect(model.heldCount == 0 && model.removeQuestion != nil)
+        let replaced = try #require(model.removeQuestion).id
+        model.openEvent(work)
+        await model.confirmRemove(.allEvents, questionID: replaced)
+        #expect(model.heldCount == 0, "even the same event opened in a new card invalidates the old question")
+        model.askToRemoveCardEvent()
+        let crossAccount = try #require(model.removeQuestion).id
+        model.openEvent(home)
+        await model.confirmRemove(.allEvents, questionID: crossAccount)
+        #expect(model.heldCount == 0)
+        model.openEvent(work)
+        model.askToRemoveCardEvent()
+        let providerQuestion = try #require(model.removeQuestion).id
+        model.providers[f.workEmail] = FakeCalendar(events: occurrences, info: f.work.info)
+        await model.confirmRemove(.allEvents, questionID: providerQuestion)
+        #expect(model.heldCount == 0 && model.removeQuestion?.note?.contains("changed") == true)
+        #expect(f.work.allEvents.count == 3 && f.home.allEvents.count == 1)
+    }
+
+    @Test func failureAppearsOnTheCardAndUncertainRemovalDoesNotAnnounceSuccess() async throws {
+        for uncertain in [false, true] {
+            let f = CalendarWindowFixture(work: occurrences)
+            let model = f.window(clock: WindowClock(la(11, 1, 8)))
+            let gate = TestGate()
+            model.sleep = { _ in await gate.wait() }
+            await model.open()
+            model.openEvent(try #require(model.events.first))
+            model.askToRemoveCardEvent()
+            await model.confirmRemove(.thisAndFollowing, questionID: try #require(model.removeQuestion).id)
+            if uncertain { f.work.removalOutcome = .unclear(applied: true) } else { f.work.failure = "Synthetic refusal" }
+            let task = try #require(model.held.values.first)
+            gate.release()
+            await task.value
+            #expect(model.card?.note != nil && model.undoableCount == 0)
+            #expect(!f.env.notices.toasts.contains { $0.message.hasPrefix("Deleted ") })
+            #expect(f.env.notices.toasts.contains { $0.message.hasPrefix("Couldn't delete") })
+            #expect(f.work.created.isEmpty)
+            #expect(f.work.allEvents.map(\.id) == (uncertain ? ["first"] : ["first", "middle", "last"]))
+        }
+    }
+
+    @Test func anAccountSwitchInvalidatesTheQuestionAndAHeldRequestKeepsItsCapturedProvider() async throws {
+        let f = CalendarWindowFixture(work: occurrences, home: [occurrences[1]])
+        f.env.router.start()
+        await eventually { f.env.router.accounts.count >= 2 }
+        let model = f.window(clock: WindowClock(la(11, 1, 8)))
+        await model.open()
+        let work = try #require(model.events.first { $0.account == f.workEmail })
+        model.openEvent(work)
+        model.askToRemoveCardEvent()
+        let stale = try #require(model.removeQuestion).id
+        let account = try #require(f.env.router.accounts.first { $0.id != f.env.router.activeAccountID })
+        f.env.router.switchAccount(to: account.id)
+        await model.confirmRemove(.allEvents, questionID: stale)
+        #expect(model.heldCount == 0 && f.work.allEvents.count == 3)
+        model.openEvent(work)
+        model.askToRemoveCardEvent()
+        let gate = TestGate()
+        model.sleep = { _ in await gate.wait() }
+        await model.confirmRemove(.thisAndFollowing, questionID: try #require(model.removeQuestion).id)
+        let task = try #require(model.held.values.first)
+        let replacement = FakeCalendar(events: occurrences, info: f.work.info)
+        model.providers[f.workEmail] = replacement
+        gate.release()
+        await task.value
+        #expect(f.work.allEvents.map(\.id) == ["first"])
+        #expect(replacement.allEvents.map(\.id) == ["first", "middle", "last"])
+        #expect(f.home.allEvents.map(\.id) == ["middle"])
+    }
+}
+
+@MainActor
+@Suite struct CalendarInvitationRemovalModelTests {
+    private let removes: CalendarAbilities = [.respond, .remove, .removeInvite]
+
+    private func invitation(_ id: String = "inv") -> CalendarEvent {
+        event(id, la(10, 13, 9), la(10, 13, 10), attendees: [sam, FakeCorpus.me], organizerIsMe: false,
+              response: .needsAction)
+    }
+
+    private var series: [CalendarEvent] {
+        [("first", la(10, 25, 9)), ("middle", la(11, 1, 9)), ("last", la(11, 8, 9))].map { id, date in
+            CalendarEvent(id: id, title: "Supplier sync", start: date, end: date.addingTimeInterval(1800),
+                timeZone: losAngeles.identifier, attendees: [sam, FakeCorpus.me], organizerIsMe: false,
+                myResponse: .needsAction, recurringEventID: "weekly",
+                originalStartTime: .timed(date, timeZone: losAngeles.identifier))
+        }
+    }
+
+    private func scopedRemovals(_ calendar: FakeCalendar) -> [FakeCalendar.Call] {
+        calendar.calls.filter { if case .scopedRemove = $0 { true } else { false } }
+    }
+
+    @Test func anInvitationLeavesSilentlyAfterTheHoldWithoutAnAnswerOrARecreation() async throws {
+        let f = CalendarWindowFixture(work: [invitation()], workAbilities: removes)
+        let model = f.window()
+        let gate = TestGate()
+        model.sleep = { _ in await gate.wait() }
+        await model.open()
+        model.openEvent(try #require(model.events.first))
+        let card = try #require(model.card)
+        #expect(card.canRemove && card.removesInvite)
+        model.askToRemoveCardEvent()
+        let question = try #require(model.removeQuestion)
+        #expect(question.isInvite && !question.isRecurring && !question.canRecreate && question.confirmTitle == "Remove")
+        #expect(question.text.contains("stays on the organizer's calendar") && question.text.contains("Mail sends no reply"))
+        #expect(question.text.contains("Google may show the organizer that you declined"))
+        await model.confirmRemove()
+        #expect(model.card == nil && model.heldCount == 1 && model.shownEvents.isEmpty)
+        #expect(scopedRemovals(f.work).isEmpty, "nothing leaves during the hold")
+        let task = try #require(model.held.values.first)
+        gate.release()
+        await task.value
+        #expect(scopedRemovals(f.work) == [.scopedRemove(id: "inv", scope: .thisEvent, sendUpdates: .none)])
+        #expect(!f.work.calls.contains { if case .respond = $0 { true } else { false } }, "removing never answers")
+        #expect(f.work.allEvents.isEmpty && f.work.created.isEmpty && model.undoableCount == 0)
+        await f.env.undo?.undoLast()
+        #expect(f.work.created.isEmpty, "Undo after the hold can't recreate someone else's event")
+    }
+
+    @Test func undoDuringTheHoldKeepsTheInvitationAndSendsNothing() async throws {
+        let f = CalendarWindowFixture(work: [invitation()], workAbilities: removes)
+        let model = f.window()
+        let gate = TestGate()
+        model.sleep = { _ in await gate.wait() }
+        await model.open()
+        model.openEvent(try #require(model.events.first))
+        model.askToRemoveCardEvent()
+        await model.confirmRemove()
+        let task = try #require(model.held.values.first)
+        await f.env.undo?.undoLast()
+        gate.release()
+        await task.value
+        #expect(model.heldCount == 0 && model.pendingRemovals.isEmpty)
+        #expect(model.shownEvents.map(\.id) == ["inv"] && f.work.allEvents.map(\.id) == ["inv"])
+        #expect(scopedRemovals(f.work).isEmpty)
+    }
+
+    @Test func aRepeatingInvitationOffersThisAndAllButOnlyTheOrganizerCanEndItEarly() async throws {
+        for (scope, survivors) in [(CalendarRecurrenceScope.thisEvent, ["first", "last"]), (.allEvents, [])] {
+            let f = CalendarWindowFixture(work: series, workAbilities: removes)
+            let model = f.window(clock: WindowClock(la(11, 1, 8)))
+            let gate = TestGate()
+            model.sleep = { _ in await gate.wait() }
+            await model.open()
+            model.openEvent(try #require(model.events.first { $0.id == "middle" }))
+            model.askToRemoveCardEvent()
+            let question = try #require(model.removeQuestion)
+            #expect(question.isInvite && question.isRecurring)
+            #expect(question.availableScopes == [.thisEvent, .allEvents])
+            #expect(question.note == CalendarRemoveQuestion.organizerOnlyFuture)
+            await model.confirmRemove(.thisAndFollowing, questionID: question.id)
+            #expect(model.heldCount == 0 && model.removeQuestion != nil, "the future scope is shown but can't be chosen")
+            await model.confirmRemove(scope, questionID: question.id)
+            let task = try #require(model.held.values.first)
+            gate.release()
+            await task.value
+            #expect(scopedRemovals(f.work) == [.scopedRemove(id: "middle", scope: scope, sendUpdates: .none)])
+            #expect(f.work.allEvents.map(\.id).sorted() == survivors)
+            #expect(model.undoableCount == 0 && f.work.created.isEmpty)
+        }
+    }
+
+    @Test func withoutTheAbilityAnInvitationOffersNoRemovalAnywhere() async throws {
+        let f = CalendarWindowFixture(work: [invitation(), event("own", la(10, 13, 11), la(10, 13, 12))])
+        let model = f.window()
+        await model.open()
+        let theirs = try #require(model.events.first { $0.id == "inv" })
+        let own = try #require(model.events.first { $0.id == "own" })
+        #expect(model.removalTitle(for: theirs) == nil && model.removalTitle(for: own) == "Delete…")
+        model.openEvent(theirs)
+        #expect(model.card?.canRemove == false && model.card?.removesInvite == false)
+        model.askToRemoveCardEvent()
+        #expect(model.removeQuestion == nil && model.heldCount == 0)
+
+        let google = CalendarWindowFixture(work: [invitation()], workAbilities: removes)
+        let window = google.window()
+        await window.open()
+        let invite = try #require(window.events.first)
+        #expect(window.removalTitle(for: invite) == "Remove from Calendar…" && window.canRespond(to: invite))
+        window.askToRemove(invite)
+        #expect(window.card?.event.copyKey == invite.copyKey && window.removeQuestion?.isInvite == true)
+    }
+
+    @Test func theSameInvitationOnBothAccountsLeavesOnlyTheChosenCopy() async throws {
+        let f = CalendarWindowFixture(work: [invitation("shared")], home: [invitation("shared")],
+                                      workAbilities: removes, homeAbilities: removes)
+        let model = f.window()
+        let gate = TestGate()
+        model.sleep = { _ in await gate.wait() }
+        await model.open()
+        let home = try #require(model.events.first { $0.account == f.homeEmail })
+        let work = try #require(model.events.first { $0.account == f.workEmail })
+        model.askToRemove(home)
+        await model.confirmRemove()
+        #expect(model.shownEvents.map(\.copyKey) == [work.copyKey], "only the chosen account's copy is hidden")
+        let task = try #require(model.held.values.first)
+        gate.release()
+        await task.value
+        #expect(scopedRemovals(f.home) == [.scopedRemove(id: "shared", scope: .thisEvent, sendUpdates: .none)])
+        #expect(scopedRemovals(f.work).isEmpty && f.work.allEvents.map(\.id) == ["shared"])
+        #expect(model.events.contains { $0.copyKey == work.copyKey } && !model.events.contains { $0.copyKey == home.copyKey })
+    }
+
+    @Test func theDeleteKeyAsksAboutTheOpenEventAndNeverSendsWithoutAnAnswer() async throws {
+        let f = CalendarWindowFixture(work: [invitation()], workAbilities: removes)
+        let router = f.env.router
+        router.start()
+        await eventually { router.active != nil }
+        let model = f.window()
+        await model.open()
+        #expect(router.actionContext().scope == .calendar)
+        #expect(await f.run(.calendarRemoveEvent) == false)
+        #expect(model.removeQuestion == nil, "no open event, nothing to ask about")
+        model.openEvent(try #require(model.events.first))
+        #expect(await f.run(.calendarRemoveEvent))
+        #expect(model.removeQuestion?.isInvite == true && model.heldCount == 0 && scopedRemovals(f.work).isEmpty)
+        #expect(ActionCatalog.descriptor(.calendarRemoveEvent)?.shortcutHint == "⌫")
+        #expect(ActionCatalog.descriptor(.calendarRemoveEvent)?.scopes == [.calendar])
     }
 }
 
@@ -772,10 +1104,11 @@ private final class DidWriteReloadCalendar: CalendarProviding, Sendable {
         await model.open()
         model.openEvent(try #require(model.events.first))
         await model.removeCardEvent()
+        await model.confirmRemove()
         #expect(model.card == nil && model.shownEvents.isEmpty && model.heldCount == 1)
         await f.env.undo?.undoLast()
         #expect(model.shownEvents.map(\.id) == ["own"])
-        #expect(!f.work.calls.contains { if case .remove = $0 { true } else { false } }, "nothing was removed")
+        #expect(!f.work.calls.contains { if case .scopedRemove = $0 { true } else { false } }, "nothing was removed")
 
         let google = CalendarWindowFixture(work: [own], workAbilities: [.respond])
         let limited = google.window()
@@ -805,7 +1138,7 @@ private final class DidWriteReloadCalendar: CalendarProviding, Sendable {
         model.askToRemoveCardEvent()
         await model.confirmRemove()
         #expect(model.removeQuestion == nil && model.card == nil && model.heldCount == 1 && model.shownEvents.isEmpty)
-        #expect(!f.work.calls.contains { if case .remove = $0 { true } else { false } }, "still inside the Undo window")
+        #expect(!f.work.calls.contains { if case .scopedRemove = $0 { true } else { false } }, "still inside the Undo window")
         await f.env.undo?.undoLast()
         #expect(model.shownEvents.map(\.id) == ["own"])
     }
@@ -823,7 +1156,7 @@ private final class DidWriteReloadCalendar: CalendarProviding, Sendable {
         #expect(model.removeQuestion?.text.contains("email the guests") == true)
         await model.confirmRemove()
         gate.release()
-        await eventually { f.work.calls.contains(.remove(id: "meet", sendUpdates: .all)) }
+        await eventually { f.work.calls.contains(.scopedRemove(id: "meet", scope: .thisEvent, sendUpdates: .all)) }
         await eventually { model.heldCount == 0 }
         #expect(model.undoableCount == 0, "the guests were emailed: nothing to undo")
         #expect(f.work.created.isEmpty)
@@ -840,7 +1173,7 @@ private final class DidWriteReloadCalendar: CalendarProviding, Sendable {
         model.askToRemoveCardEvent()
         await model.confirmRemove()
         gate.release()
-        await eventually { f.work.calls.contains(.remove(id: "own", sendUpdates: .none)) }
+        await eventually { f.work.calls.contains(.scopedRemove(id: "own", scope: .thisEvent, sendUpdates: .none)) }
         await eventually { model.undoableCount == 1 }
         await f.env.undo?.undoLast()
         let made = try #require(f.work.created.first)
@@ -1101,6 +1434,7 @@ private final class StoreChanges {
         model.sleep = { _ in await again.wait() }
         model.openEvent(try #require(model.events.first { $0.id == "own" }))
         await model.removeCardEvent()
+        await model.confirmRemove()
         #expect(store.record(f.workKey, id: "own") != nil && model.shownEvents.map(\.id) == ["inv"])
         again.release()
         await eventually { store.record(f.workKey, id: "own") == nil }
@@ -1380,6 +1714,6 @@ private final class StoreChanges {
         await model.declineInsteadOfDelete()
         gate.release()
         await eventually { f.work.calls.contains(.respond(id: "theirs", response: .declined, sendUpdates: .all)) }
-        #expect(!f.work.calls.contains { if case .remove = $0 { true } else { false } }, "Mail never deletes what others organize")
+        #expect(!f.work.calls.contains { if case .scopedRemove = $0 { true } else { false } }, "Mail never deletes what others organize")
     }
 }

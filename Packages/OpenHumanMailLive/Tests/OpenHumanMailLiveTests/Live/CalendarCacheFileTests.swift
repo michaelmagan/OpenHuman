@@ -15,6 +15,33 @@ import Testing
     static let key = CalendarCacheKey(account: "robin@example.com", calendar: "robin@example.com")
     static let start = Date(timeIntervalSince1970: 1_791_000_000)
 
+    @Test func originalPositionsRoundTripAndOlderPayloadsRemainReadable() async throws {
+        let directory = TemporaryDirectory("calendar-original-positions", isDirectory: true)
+        let url = directory.url.appendingPathComponent(SQLiteCalendarCache.fileName)
+        let cache = try SQLiteCalendarCache(url: url)
+        let identities: [CalendarOriginalStart] = [.date("2026-11-01"),
+            .timed(ISO8601DateFormatter().date(from: "2026-11-01T17:00:00Z")!, timeZone: "America/Los_Angeles")]
+        let records = identities.enumerated().map { index, identity in
+            CalendarEventRecord(event: CalendarEvent(id: "identity-\(index)", title: "Moved occurrence", start: Self.start,
+                end: Self.start.addingTimeInterval(1800), recurringEventID: "parent", originalStartTime: identity),
+                recurringEventID: "parent")
+        }
+        let range = CalendarCoveredRange(start: Self.start, end: Self.start.addingTimeInterval(86400), fetchedAt: Self.start)
+        await cache.apply(.save(Self.key, upserted: records, removed: [], ranges: [range], syncToken: "before"))
+        let back = try #require(await SQLiteCalendarCache(url: url).load().first)
+        #expect(back.records.sorted { $0.event.id < $1.event.id }.map(\.event.originalStartTime) == identities.map(Optional.some))
+        var handle: OpaquePointer?
+        #expect(sqlite3_open(url.path, &handle) == SQLITE_OK)
+        defer { sqlite3_close(handle) }
+        #expect(sqlite3_exec(handle, "UPDATE calendar_events SET payload = json_remove(payload, '$.originalStartTime')", nil, nil, nil) == SQLITE_OK)
+        let older = try #require(await SQLiteCalendarCache(url: url).load().first)
+        #expect(older.records.count == 2 && older.records.allSatisfy { $0.event.originalStartTime == nil })
+        #expect(older.records.allSatisfy { $0.event.recurringEventID == "parent" })
+        #expect(SQLiteCalendarCache.schemaVersion == 3, "optional identity adds no schema migration")
+        await cache.apply(.save(Self.key, upserted: [], removed: ["identity-0", "identity-1"], ranges: [range], syncToken: nil))
+        #expect(try await SQLiteCalendarCache(url: url).load().first?.records.isEmpty == true)
+    }
+
     static func record(_ id: String, offset: TimeInterval = 0, etag: String? = "v1") -> CalendarEventRecord {
         CalendarEventRecord(event: CalendarEvent(id: id, title: "Event \(id)", start: start.addingTimeInterval(offset),
                                                  end: start.addingTimeInterval(offset + 1_800), timeZone: "America/New_York",
@@ -22,6 +49,36 @@ import Testing
                                                  meetLink: URL(string: "https://meet.google.com/abc-defg"),
                                                  organizerIsMe: true),
                             etag: etag, updated: start.addingTimeInterval(-60), recurringEventID: "series")
+    }
+
+    @Test func anOlderPayloadWithOnlyARecordParentMaterializesAsARecurringEvent() async throws {
+        let directory = TemporaryDirectory("calendar-record-parent", isDirectory: true)
+        let url = directory.url.appendingPathComponent(SQLiteCalendarCache.fileName)
+        let cache = try SQLiteCalendarCache(url: url)
+        var record = Self.record("old-instance")
+        record.event.myResponse = .tentative
+        record.event.extras = CalendarEventExtras(guests: [CalendarGuest(email: "alex@example.com", response: .tentative)], colorID: "5")
+        let range = CalendarCoveredRange(start: Self.start, end: Self.start.addingTimeInterval(86400), fetchedAt: Self.start)
+        await cache.apply(.save(Self.key, upserted: [record], removed: [], ranges: [range], syncToken: "old"))
+        var handle: OpaquePointer?
+        #expect(sqlite3_open(url.path, &handle) == SQLITE_OK)
+        defer { sqlite3_close(handle) }
+        #expect(sqlite3_exec(handle, "UPDATE calendar_events SET payload = json_remove(payload, '$.eventSeries', '$.originalStartTime')",
+                            nil, nil, nil) == SQLITE_OK)
+        let loaded = try #require(await SQLiteCalendarCache(url: url).load().first?.records.first)
+        #expect(loaded.event.recurringEventID == nil && loaded.recurringEventID == "series")
+        let presented = loaded.materialized(in: TimeZone(identifier: "America/Los_Angeles")!).event
+        #expect(presented.recurringEventID == "series" && presented.isRecurringForRemoval && presented.isRecurring)
+        #expect(presented.originalStartTime == nil, "missing occurrence identity is never guessed")
+        var expectedExtras = record.event.extras
+        expectedExtras.guests = expectedExtras.guests.map { guest in
+            var unknown = guest
+            unknown.isOrganizer = nil
+            return unknown
+        }
+        #expect(presented.myResponse == .tentative && presented.extras == expectedExtras,
+                "guest roles need a live read; other details survive the cache")
+        #expect(presented.attendees == record.event.attendees && presented.meetLink == record.event.meetLink)
     }
 
     @Test func eventsSpansAndTheTokenRoundTripAndSurviveARelaunch() async throws {

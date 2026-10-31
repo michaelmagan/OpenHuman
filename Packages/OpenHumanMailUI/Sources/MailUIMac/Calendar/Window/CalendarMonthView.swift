@@ -69,6 +69,7 @@ struct CalendarMonthView: View {
             ForEach(cell.events, id: \.copyKey) { event in
                 Button { model.openEvent(event) } label: { chip(event) }
                     .buttonStyle(.plain)
+                    .calendarEventContextMenu(model, event)
                     .calendarPopoverAnchor(!event.id.isEmpty && model.card?.event.copyKey == event.copyKey)
             }
             if cell.more > 0 {

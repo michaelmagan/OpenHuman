@@ -14,13 +14,16 @@ public struct GoogleCalendarEvent: Sendable, Hashable {
     public let location: String?
     public let notes: String?
     public let recurringEventID: String?
+    public let originalStartTime: GoogleOriginalStart?
     public let selfResponse: String?
     public var extras = GoogleEventExtras()
 
     public init(id: String, title: String?, start: Date, end: Date, isAllDay: Bool = false, timeZone: String? = nil,
                 attendees: [GoogleCalendarAttendee] = [], meetLink: URL? = nil, conferenceStatus: String? = nil,
                 organizerIsSelf: Bool? = nil, location: String? = nil, notes: String? = nil,
-                recurringEventID: String? = nil, selfResponse: String? = nil) {
+                recurringEventID: String? = nil, selfResponse: String? = nil,
+                originalStartTime: GoogleOriginalStart? = nil) {
+        self.originalStartTime = originalStartTime
         self.organizerIsSelf = organizerIsSelf
         self.location = location
         self.notes = notes
@@ -207,6 +210,16 @@ struct WireEvent: Decodable {
         var dateTime: String?
         var date: String?
         var timeZone: String?
+
+        var original: GoogleOriginalStart? {
+            if let timeZone, TimeZone(identifier: timeZone) == nil { return nil }
+            if let date, dateTime == nil,
+               GoogleRemovalPrefix.parse(date, pattern: "yyyy-MM-dd", zone: .gmt) != nil { return .date(date) }
+            if let dateTime, date == nil, let value = RFC3339.date(dateTime) {
+                return .timed(value, timeZone: timeZone)
+            }
+            return nil
+        }
     }
     struct Attendee: Decodable {
         var email: String?
@@ -215,6 +228,7 @@ struct WireEvent: Decodable {
         var `self`: Bool?
         var optional: Bool?
         var organizer: Bool?
+        var resource: Bool?
     }
     struct Reminders: Decodable {
         struct Override: Decodable {
@@ -249,6 +263,7 @@ struct WireEvent: Decodable {
     var status: String?
     var summary: String?
     var organizer: Organizer?
+    var creator: Organizer?
     var start: Time?
     var end: Time?
     var attendees: [Attendee]?
@@ -256,6 +271,9 @@ struct WireEvent: Decodable {
     var location: String?
     var description: String?
     var recurringEventId: String?
+    var originalStartTime: Time?
+    var etag: String?
+    var eventType: String?
     var guestsCanModify: Bool?
     var guestsCanInviteOthers: Bool?
     var guestsCanSeeOtherGuests: Bool?
@@ -264,6 +282,20 @@ struct WireEvent: Decodable {
     var transparency: String?
     var visibility: String?
     var colorId: String?
+
+    func removalOwned(by calendarID: String, allowCreator: Bool) -> Bool {
+        let owner = organizer ?? (allowCreator ? creator : nil)
+        return owner?.`self` == true || owner?.email?.lowercased() == calendarID.lowercased()
+    }
+
+    /// Another calendar organizes this event, so deleting it here removes only this calendar's copy.
+    func isGuestCopy(on calendarID: String) -> Bool {
+        guard let organizer, organizer.`self` != true,
+              let email = organizer.email?.trimmingCharacters(in: .whitespaces).lowercased(), !email.isEmpty else {
+            return false
+        }
+        return email != calendarID.lowercased()
+    }
 
     func event(defaultZone: TimeZone, selfAddress: String? = nil) -> GoogleCalendarEvent? {
         guard let id, !id.isEmpty, status != "cancelled", let start, let end else { return nil }
@@ -327,7 +359,8 @@ struct WireEvent: Decodable {
                                    meetLink: meetLink, conferenceStatus: conferenceData?.createRequest?.status?.statusCode,
                                    organizerIsSelf: organizer?.`self`, location: Self.text(location),
                                    notes: Self.text(description), recurringEventID: Self.text(recurringEventId),
-                                   selfResponse: own.map { $0.responseStatus ?? "needsAction" })
+                                   selfResponse: own.map { $0.responseStatus ?? "needsAction" },
+                                   originalStartTime: originalStartTime?.original)
         made.extras = extras
         return made
     }

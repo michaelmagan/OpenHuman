@@ -4,7 +4,7 @@ import MailModel
 
 @MainActor
 final class InviteActionHandler: ActionHandler {
-    static let ids: [ActionID] = [.inviteYes, .inviteMaybe, .inviteNo, .inviteShowOriginal]
+    static let ids: [ActionID] = [.inviteYes, .inviteMaybe, .inviteNo, .inviteShowOriginal, .inviteRemove]
 
     private weak var environment: AppEnvironment?
 
@@ -19,6 +19,9 @@ final class InviteActionHandler: ActionHandler {
             let focused = context.focusedMessage ?? shown.last
             return shown.contains { center.card(for: $0) != nil && ($0 == focused || shown.count == 1) } ? .enabled : .hidden
         }
+        if id == .inviteRemove {
+            return center.removalTarget(focused: context.focusedMessage, shown: shown) == nil ? .hidden : .enabled
+        }
         return center.target(focused: context.focusedMessage, in: reader.thread, shown: shown) == nil ? .hidden : .enabled
     }
 
@@ -30,6 +33,13 @@ final class InviteActionHandler: ActionHandler {
             guard let key = focused.flatMap({ center.card(for: $0) != nil ? $0 : nil })
                 ?? shown.reversed().first(where: { center.card(for: $0) != nil }) else { return .notHandled }
             center.toggleOriginal(key)
+            return .done
+        }
+        if request.id == .inviteRemove {
+            guard let key = center.removalTarget(focused: request.context.focusedMessage, shown: shown) else {
+                return .notHandled
+            }
+            center.askToRemove(key)
             return .done
         }
         guard let key = center.target(focused: request.context.focusedMessage, in: reader.thread, shown: shown) else {

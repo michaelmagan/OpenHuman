@@ -17,6 +17,7 @@ public struct CalendarEvent: Identifiable, Sendable, Hashable {
     public var notes: String?
     public var myResponse: CalendarResponse?
     public var recurringEventID: String?
+    public let originalStartTime: CalendarOriginalStart?
     public var extras: CalendarEventExtras
     // The guest address Mail answers as when the calendar marks no entry as its own (an invitation sent to an alias)
     public var respondsAs: String?
@@ -25,7 +26,8 @@ public struct CalendarEvent: Identifiable, Sendable, Hashable {
                 attendees: [EmailAddress] = [], calendarName: String? = nil, meetLink: URL? = nil,
                 organizerIsMe: Bool? = nil, account: String? = nil, location: String? = nil, notes: String? = nil,
                 myResponse: CalendarResponse? = nil, recurringEventID: String? = nil,
-                extras: CalendarEventExtras = CalendarEventExtras()) {
+                originalStartTime: CalendarOriginalStart? = nil, extras: CalendarEventExtras = CalendarEventExtras()) {
+        self.originalStartTime = originalStartTime
         self.extras = extras
         self.location = location
         self.notes = notes
@@ -164,6 +166,11 @@ public protocol CalendarProviding: Sendable {
     func updateEvent(_ event: CalendarEvent, with changes: CalendarEventChanges, sendUpdates: CalendarSendUpdates)
         async throws -> CalendarEvent
     func removeEvent(_ event: CalendarEvent, sendUpdates: CalendarSendUpdates) async throws
+    var removalScopes: [CalendarRecurrenceScope] { get }
+    var removalIdentity: ObjectIdentifier? { get }
+    func removalProvider(for event: CalendarEvent) throws -> any CalendarProviding
+    func removeEvent(_ event: CalendarEvent, scope: CalendarRecurrenceScope,
+                     sendUpdates: CalendarSendUpdates) async throws -> CalendarRemovalResult
     func patchEvent(_ event: CalendarEvent, with patch: CalendarEventPatch, scope: CalendarRecurrenceScope,
                     sendUpdates: CalendarSendUpdates) async throws -> CalendarEvent
 }

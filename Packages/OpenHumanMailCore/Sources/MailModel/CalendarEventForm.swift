@@ -437,6 +437,8 @@ public enum CalendarFieldAccess: Sendable, Hashable {
 
 public enum CalendarDeleteRight: Sendable, Hashable {
     case delete
+    /// Someone else organizes the event: only the user's own copy leaves their calendar, and no answer is sent.
+    case removeInvite
     case declineInstead(String)
     case unavailable(String)
 }
@@ -531,6 +533,8 @@ public struct CalendarFieldRights: Sendable, Hashable {
         let delete: CalendarDeleteRight
         if organizes, abilities.contains(.remove) {
             delete = .delete
+        } else if !organizes, event.isInvitationCopy, abilities.contains(.removeInvite) {
+            delete = .removeInvite
         } else if !organizes, event.canRespond, abilities.contains(.respond) {
             delete = .declineInstead(String(localized: "Someone else organizes this event. Mail can't delete it: say No to leave it."))
         } else {

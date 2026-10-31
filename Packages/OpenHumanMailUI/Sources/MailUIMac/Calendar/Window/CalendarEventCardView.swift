@@ -126,7 +126,8 @@ struct CalendarEventCardView: View {
     private func removal(_ card: CalendarEventCard, _ mode: CalendarCardMode) -> CalendarDeleteRight? {
         guard card.pendingMove == nil, !card.event.id.isEmpty else { return nil }
         if card.form != nil { return card.rights.delete }
-        return card.canRemove ? .delete : nil
+        guard card.canRemove else { return nil }
+        return card.removesInvite ? .removeInvite : .delete
     }
 
     @ViewBuilder
@@ -135,6 +136,10 @@ struct CalendarEventCardView: View {
         case .delete:
             Button("Delete…", role: .destructive) { model.askToRemoveCardEvent() }
                 .accessibilityIdentifier("calendar.card.delete")
+        case .removeInvite:
+            Button("Remove from Calendar…", role: .destructive) { model.askToRemoveCardEvent() }
+                .help("Removes your copy without answering. It stays on the organizer's calendar.")
+                .accessibilityIdentifier("calendar.card.removeInvite")
         case .declineInstead(let why):
             Button("Decline") { Task { await model.declineInsteadOfDelete() } }
                 .help(why).accessibilityIdentifier("calendar.card.decline")

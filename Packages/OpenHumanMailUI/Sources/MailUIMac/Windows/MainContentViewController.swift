@@ -355,7 +355,9 @@ public final class MainContentViewController: NSViewController {
 
     func editSearchQuery(with event: NSEvent) -> Bool {
         let search = router.environment.overlays.search
-        guard router.mode == .list, search.isOpen, search.shownQuery != nil, !router.environment.overlays.isShowing,
+        // The calendar covers the search field and answers ⌫ itself.
+        guard router.environment.calendarWindowIfStarted?.isOpen != true,
+              router.mode == .list, search.isOpen, search.shownQuery != nil, !router.environment.overlays.isShowing,
               let window = view.window, let field = searchField(in: window),
               (field.window ?? window).makeFirstResponder(field),
               let editor = field.currentEditor() as? NSTextView else { return false }

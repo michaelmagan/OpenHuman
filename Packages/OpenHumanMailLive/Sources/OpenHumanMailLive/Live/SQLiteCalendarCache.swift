@@ -238,6 +238,7 @@ private struct StoredEvent: Codable {
     var meetLink: String?
     var organizerIsMe: Bool?
     var recurringEventID: String?
+    var originalStartTime: CalendarOriginalStart?
     var location: String?
     var notes: String?
     var myResponse: String?
@@ -257,6 +258,7 @@ private struct StoredEvent: Codable {
         meetLink = event.meetLink?.absoluteString
         organizerIsMe = event.organizerIsMe
         recurringEventID = record.recurringEventID
+        originalStartTime = event.originalStartTime
         location = event.location
         notes = event.notes
         myResponse = event.myResponse?.rawValue
@@ -272,7 +274,8 @@ private struct StoredEvent: Codable {
                                   attendees: attendees, calendarName: calendarName, meetLink: meetLink.flatMap(URL.init(string:)),
                                   organizerIsMe: organizerIsMe, location: location, notes: notes,
                                   myResponse: myResponse.flatMap(CalendarResponse.init(rawValue:)),
-                                  recurringEventID: eventSeries, extras: extras?.value ?? CalendarEventExtras())
+                                  recurringEventID: eventSeries, originalStartTime: originalStartTime,
+                                  extras: extras?.value ?? CalendarEventExtras())
         var record = CalendarEventRecord(event: event, etag: etag, updated: updated, recurringEventID: recurringEventID,
                                          isBusy: isBusy, declinedByMe: declinedByMe)
         record.allDayDates = allDayDates ?? record.allDayDates

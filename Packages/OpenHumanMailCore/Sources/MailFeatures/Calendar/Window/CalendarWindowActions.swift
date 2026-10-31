@@ -7,7 +7,7 @@ enum CalendarWindowActions {
     static let ids: Set<ActionID> = [.calendarOpen, .calendarBackToMail, .calendarCycleView, .calendarClose,
                                      .calendarShowToday, .calendarPreviousPeriod, .calendarNextPeriod, .calendarShowDay,
                                      .calendarShowThreeDays, .calendarShowWeek, .calendarShowMonth, .calendarNewEvent,
-                                     .calendarRefresh]
+                                     .calendarRefresh, .calendarRemoveEvent]
 
     static func availability(of id: ActionID, in context: ActionContext, environment: AppEnvironment) -> ActionAvailability {
         guard ids.contains(id), environment.calendarWindow != nil else { return .hidden }
@@ -15,6 +15,10 @@ enum CalendarWindowActions {
         switch id {
         case .calendarOpen:
             return isOpen ? .hidden : .enabled
+        case .calendarRemoveEvent:
+            guard isOpen, let card = environment.calendarWindowIfStarted?.card, card.canRemove,
+                  card.pendingMove == nil else { return .hidden }
+            return .enabled
         case .calendarShowDay, .calendarShowThreeDays, .calendarShowWeek, .calendarShowMonth, .calendarNewEvent:
             return .enabled
         default:
@@ -70,6 +74,10 @@ enum CalendarWindowActions {
             })
         case .calendarRefresh:
             return .started(Task { await window.refresh() })
+        case .calendarRemoveEvent:
+            guard window.isOpen, window.card?.canRemove == true, window.removeQuestion == nil else { return .notHandled }
+            window.askToRemoveCardEvent()
+            return .done
         default:
             return .notHandled
         }

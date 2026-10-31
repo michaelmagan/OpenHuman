@@ -45,12 +45,37 @@ public final class CalendarEventStore {
         var retryAt: Date?
         var lastError: String?
         var provisional: Set<String> = []
+        var preservesRemovalSurvivors = false
+        var removedVersions: [String: RemovedVersions] = [:]
+    }
+
+    struct RemovedVersions {
+        var etags: Set<String> = []
+        var updated: Date?
+
+        mutating func include(_ record: CalendarEventRecord) {
+            if let etag = record.etag, !etag.isEmpty { etags.insert(etag) }
+            if let date = record.updated, date.timeIntervalSinceReferenceDate.isFinite { updated = max(updated ?? date, date) }
+        }
+
+        func permits(_ record: CalendarEventRecord) -> Bool {
+            if let etag = record.etag, etags.contains(etag) { return false }
+            if let updated { return record.updated.map { $0 > updated } ?? false }
+            return record.etag.map { !$0.isEmpty && !etags.contains($0) } ?? false
+        }
+    }
+
+    struct RemovalBarrier {
+        let result: CalendarRemovalResult
+        var pendingRanges: [DateInterval]
+        var reconciledRanges: [CalendarCoveredRange] = []
     }
 
     private var slices: [Key: Slice] = [:]
     private var flights: [Key: (id: UUID, task: Task<Void, Never>, writes: Int)] = [:]
     private var generations: [Key: Int] = [:]
     private var localWrites: [Key: Int] = [:]
+    private var confirmedRemovals: [Key: [RemovalBarrier]] = [:]
     public private(set) var ownAddresses: [String: Set<String>] = [:]
     private var observers: [UUID: @MainActor (CalendarEventStoreChange) -> Void] = [:]
     private let persistence: (any CalendarCachePersisting)?
@@ -255,7 +280,8 @@ public final class CalendarEventStore {
         await fly(key) { store in
             let current = store.slices[key]
             let fullDue = current?.lastFullRead.map { now.timeIntervalSince($0) >= Self.fullReadAfter || $0 > now } ?? true
-            if let token = current?.syncToken, current?.tokensUnsupported != true, !fullDue {
+            if let token = current?.syncToken, current?.tokensUnsupported != true, !fullDue,
+               store.covers(key, from: visible.start, to: visible.end) {
                 await store.readChanges(key, provider: provider, token: token, window: window, now: now)
             } else {
                 await store.readWindow(key, provider: provider, from: window.start, to: window.end, now: now)
@@ -357,6 +383,147 @@ public final class CalendarEventStore {
         notify(change)
     }
 
+    public func applyRemoval(_ key: Key, result: CalendarRemovalResult) {
+        noteRemoteWrite(key)
+        generations[key, default: 0] += 1
+        var slice = slices[key] ?? Slice()
+        var pendingRanges = slice.ranges.map { DateInterval(start: $0.start, end: $0.end) }
+        for record in slice.records.values where result.affects(record) != false && record.event.end > record.event.start {
+            pendingRanges.append(DateInterval(start: record.event.start, end: record.event.end))
+        }
+        confirmedRemovals[key, default: []].append(RemovalBarrier(result: result, pendingRanges: pendingRanges))
+        slice.preservesRemovalSurvivors = true
+        var change = CalendarEventStoreChange(key: key)
+        for (id, record) in slice.records {
+            switch result.affects(record) {
+            case true?:
+                slice.removedVersions[id, default: RemovedVersions()].include(record)
+                slice.records[id] = nil
+                slice.provisional.remove(id)
+                change.removed.insert(id)
+            case nil:
+                // Old rows cannot use displayed start as a substitute for their immutable original position.
+                slice.ranges.removeAll { record.event.overlaps(from: $0.start, to: $0.end) }
+                change.coverageChanged = true
+            case false?: break
+            }
+        }
+        // A delta can't refill invalidated coverage, and the token may predate the mutation.
+        slice.syncToken = nil
+        slice.lastFullRead = nil
+        if change.coverageChanged {
+            slice.lastRefresh = nil
+            slice.retryAt = nil
+        }
+        slices[key] = slice
+        save(key, slice: slice, upserted: [], removed: Array(change.removed))
+        notify(change)
+    }
+
+    public func invalidateRemoval(_ key: Key) {
+        noteRemoteWrite(key)
+        generations[key, default: 0] += 1
+        guard var slice = slices[key] else { return }
+        slice.ranges = []
+        slice.syncToken = nil
+        slice.lastFullRead = nil
+        slice.lastRefresh = nil
+        slice.retryAt = nil
+        slices[key] = slice
+        save(key, slice: slice, upserted: [], removed: [])
+        var change = CalendarEventStoreChange(key: key)
+        change.coverageChanged = true
+        notify(change)
+    }
+
+    private func wasRemoved(_ key: Key, _ record: CalendarEventRecord, slice: inout Slice) -> Bool {
+        // After reconciliation, reject observed deleted versions while allowing a verified new version of the same ID.
+        // An already fenced etag stays stale even if it arrives with a misleading newer timestamp.
+        if slice.removedVersions[record.event.id].map({ !$0.permits(record) }) == true { return true }
+        if confirmedRemovals[key, default: []].contains(where: { barrier in
+            barrier.result.affects(record) == true && !permitsRemovalVersion(record, barrier: barrier, slice: slice)
+        }) {
+            slice.removedVersions[record.event.id, default: RemovedVersions()].include(record)
+            return true
+        }
+        return false
+    }
+
+    private func permitsRemovalVersion(_ record: CalendarEventRecord, barrier: RemovalBarrier, slice: Slice) -> Bool {
+        guard slice.removedVersions[record.event.id]?.permits(record) ?? true else { return false }
+        switch barrier.result.affects(record) {
+        case false?: return true
+        case nil: return false
+        case true?:
+            if Self.covers(barrier.reconciledRanges, from: record.event.start, to: record.event.end) { return true }
+        }
+        let result = barrier.result
+        guard result.scope == .thisAndFollowing, let parent = result.parentID, !parent.isEmpty,
+              let version = result.confirmedMasterVersion,
+              !version.etag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              version.updated.timeIntervalSinceReferenceDate.isFinite,
+              record.event.id != parent, record.event.extras.recurrence.isEmpty,
+              record.event.recurringEventID == nil || record.recurringEventID == nil
+                || record.event.recurringEventID == record.recurringEventID,
+              (record.event.recurringEventID ?? record.recurringEventID) == parent,
+              let cutoff = result.originalCutoff, let original = record.event.originalStartTime,
+              original.isAtOrAfter(cutoff) == true,
+              let etag = record.etag, !etag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let updated = record.updated, updated.timeIntervalSinceReferenceDate.isFinite,
+              updated > version.updated else { return false }
+        // A strictly later Google server updated time represents a change after the confirmed trim, before a clean range read.
+        // Equal/missing times remain conservative; this assumes server modification semantics, not etag ordering
+        // or a guarantee about timestamp granularity, instance stamping, or atomic exception cleanup.
+        return true
+    }
+
+    private func canRetainRemovalSurvivor(_ key: Key, _ record: CalendarEventRecord, slice: inout Slice) -> Bool {
+        // A different etag alone cannot turn an unclassified old row into an allowed survivor.
+        let allowed = slice.removedVersions[record.event.id]?.permits(record) == true
+            && confirmedRemovals[key, default: []].allSatisfy { barrier in
+                permitsRemovalVersion(record, barrier: barrier, slice: slice)
+            }
+        if !allowed { slice.removedVersions[record.event.id, default: RemovedVersions()].include(record) }
+        return allowed
+    }
+
+    private func invalidateUnresolved(_ key: Key, slice: inout Slice) {
+        for record in slice.records.values where confirmedRemovals[key, default: []].contains(where: {
+            $0.result.affects(record) == nil
+        }) {
+            slice.ranges.removeAll { record.event.overlaps(from: $0.start, to: $0.end) }
+            slice.syncToken = nil
+            slice.lastRefresh = nil
+        }
+    }
+
+    private func reconcileRemovals(_ key: Key, answer: CalendarEventWindow, from: Date, to: Date, now: Date, slice: Slice) {
+        guard answer.isComplete, to > from,
+              answer.records.allSatisfy({ !$0.event.id.isEmpty }),
+              Set(answer.records.map(\.event.id)).count == answer.records.count else { return }
+        confirmedRemovals[key] = confirmedRemovals[key]?.compactMap { barrier in
+            // Evaluate the unfiltered response: dropping stale rows is not evidence of a clean reconciliation.
+            guard answer.records.allSatisfy({ record in
+                permitsRemovalVersion(record, barrier: barrier, slice: slice)
+            }),
+                  !slice.records.values.contains(where: {
+                      $0.event.overlaps(from: from, to: to) && barrier.result.affects($0) == nil
+                  }) else { return barrier }
+            var pending = barrier
+            pending.pendingRanges = barrier.pendingRanges.flatMap { range -> [DateInterval] in
+                guard range.start < to, range.end > from else { return [range] }
+                var remainder: [DateInterval] = []
+                if range.start < from { remainder.append(DateInterval(start: range.start, end: from)) }
+                if range.end > to { remainder.append(DateInterval(start: to, end: range.end)) }
+                return remainder
+            }
+            pending.reconciledRanges = Self.inserting(CalendarCoveredRange(start: from, end: to, fetchedAt: now),
+                into: barrier.reconciledRanges)
+            return pending.pendingRanges.isEmpty ? nil : pending
+        }
+        if confirmedRemovals[key]?.isEmpty == true { confirmedRemovals[key] = nil }
+    }
+
     public func flush() async {
         await persistTail?.value
     }
@@ -419,14 +586,40 @@ public final class CalendarEventStore {
         do {
             let answer = try await provider.eventWindow(from: window.start, to: window.end)
             guard generations[key] == generation else { return }
+            if !answer.isComplete, old.preservesRemovalSurvivors {
+                // A truncated expiry read is not evidence that the saved prefix disappeared.
+                slices[key]?.syncToken = nil
+                slices[key]?.lastFullRead = nil
+                applyWindow(key, answer, from: window.start, to: window.end, now: now)
+                succeeded(key, now: now)
+                return
+            }
             var fresh = Slice()
+            fresh.preservesRemovalSurvivors = old.preservesRemovalSurvivors
+            fresh.removedVersions = old.removedVersions
             fresh.provisional = old.provisional.filter { old.records[$0] != nil }
             for id in fresh.provisional { fresh.records[id] = old.records[id] }
+            if old.preservesRemovalSurvivors {
+                // This window says nothing about saved survivors or pending reconciliation in another month.
+                fresh.ranges = old.ranges
+                for (id, record) in old.records where !record.event.overlaps(from: window.start, to: window.end) {
+                    fresh.records[id] = record
+                }
+            }
             var change = CalendarEventStoreChange(key: key)
             change.coverageChanged = true
             for record in answer.records {
                 let id = record.event.id
                 guard !id.isEmpty else { continue }
+                if wasRemoved(key, record, slice: &fresh) {
+                    if let current = old.records[id], canRetainRemovalSurvivor(key, current, slice: &fresh) {
+                        fresh.records[id] = current
+                    } else {
+                        fresh.records[id] = nil
+                        fresh.provisional.remove(id)
+                    }
+                    continue
+                }
                 fresh.records[id] = record
                 if let before = old.records[id] {
                     if !before.isSameVersion(as: record) { change.updated.insert(id) }
@@ -435,18 +628,26 @@ public final class CalendarEventStore {
                 }
             }
             change.removed = Set(old.records.keys).subtracting(fresh.records.keys)
-            fresh.ranges = [CalendarCoveredRange(start: window.start, end: window.end, fetchedAt: now)]
+            fresh.ranges = Self.inserting(CalendarCoveredRange(start: window.start, end: window.end, fetchedAt: now), into: fresh.ranges)
             fresh.syncToken = answer.syncToken
             fresh.lastRefresh = now
             fresh.lastFullRead = now
+            invalidateUnresolved(key, slice: &fresh)
+            if old.preservesRemovalSurvivors { change.removed.formUnion(Self.trim(&fresh, now: now)) }
+            reconcileRemovals(key, answer: answer, from: window.start, to: window.end, now: now, slice: fresh)
             slices[key] = fresh
             enqueue(.replace(CalendarCacheEntry(key: key, records: persistable(fresh), ranges: fresh.ranges,
                                                 syncToken: fresh.syncToken)))
             notify(change)
         } catch {
             guard generations[key] == generation else { return }
-            drop(key)
-            enqueue(.forgetCalendar(key))
+            // An expired-token refresh failure keeps confirmed removals and the saved survivors.
+            if slices[key]?.preservesRemovalSurvivors == true {
+                slices[key]?.syncToken = nil
+            } else {
+                drop(key)
+                enqueue(.forgetCalendar(key))
+            }
             failed(key, error, now: now)
         }
     }
@@ -465,6 +666,14 @@ public final class CalendarEventStore {
         }
         var upserted: [CalendarEventRecord] = []
         for record in answer.records {
+            if wasRemoved(key, record, slice: &slice) {
+                let id = record.event.id
+                if let current = slice.records[id], canRetainRemovalSurvivor(key, current, slice: &slice) { continue }
+                if slice.records.removeValue(forKey: id) != nil { change.removed.insert(id) }
+                slice.provisional.remove(id)
+                removed.append(id)
+                continue
+            }
             let before = change
             Self.upsert(record, into: &slice, change: &change)
             if change.removed.count > before.removed.count { removed.append(record.event.id) }
@@ -476,7 +685,9 @@ public final class CalendarEventStore {
         if !slice.tokensUnsupported, answer.isComplete, let token = answer.syncToken { slice.syncToken = token }
         slice.lastRefresh = now
         if answer.isComplete { slice.lastFullRead = now }
+        invalidateUnresolved(key, slice: &slice)
         removed += Self.trim(&slice, now: now)
+        reconcileRemovals(key, answer: answer, from: from, to: to, now: now, slice: slice)
         slices[key] = slice
         save(key, slice: slice, upserted: upserted, removed: removed)
         notify(change)
@@ -489,6 +700,13 @@ public final class CalendarEventStore {
         var removed: [String] = []
         for record in delta.changed {
             let id = record.event.id
+            if wasRemoved(key, record, slice: &slice) {
+                if let current = slice.records[id], canRetainRemovalSurvivor(key, current, slice: &slice) { continue }
+                if slice.records.removeValue(forKey: id) != nil { change.removed.insert(id) }
+                slice.provisional.remove(id)
+                removed.append(id)
+                continue
+            }
             guard slice.records[id] != nil || Self.overlapsAny(slice.ranges, record.event) else { continue }
             let before = change
             Self.upsert(record, into: &slice, change: &change)
@@ -505,6 +723,7 @@ public final class CalendarEventStore {
         slice.syncToken = delta.syncToken
         slice.ranges = slice.ranges.map { CalendarCoveredRange(start: $0.start, end: $0.end, fetchedAt: now) }
         slice.lastRefresh = now
+        invalidateUnresolved(key, slice: &slice)
         slices[key] = slice
         save(key, slice: slice, upserted: upserted, removed: removed)
         notify(change)
@@ -542,6 +761,7 @@ public final class CalendarEventStore {
 
     private func drop(_ key: Key) {
         generations[key, default: 0] += 1
+        confirmedRemovals[key] = nil
         guard let slice = slices.removeValue(forKey: key) else { return }
         var change = CalendarEventStoreChange(key: key)
         change.removed = Set(slice.records.keys)
@@ -559,7 +779,10 @@ public final class CalendarEventStore {
     }
 
     private func save(_ key: Key, slice: Slice, upserted: [CalendarEventRecord], removed: [String]) {
-        let kept = upserted.filter { !slice.provisional.contains($0.event.id) && slice.records[$0.event.id] != nil }
+        let kept = upserted.compactMap { record -> CalendarEventRecord? in
+            guard !slice.provisional.contains(record.event.id) else { return nil }
+            return slice.records[record.event.id]
+        }
         enqueue(.save(key, upserted: kept, removed: removed, ranges: slice.ranges, syncToken: slice.syncToken))
     }
 
@@ -587,7 +810,18 @@ public final class CalendarEventStore {
         guard !id.isEmpty else { return }
         if let old = slice.records[id] {
             let same = local ? old == record : old.isSameVersion(as: record)
-            if same && !slice.provisional.contains(id) { return }
+            if same && !slice.provisional.contains(id) {
+                if !local {
+                    var enriched = old
+                    enriched.event = old.event.fillingRemovalIdentity(from: record.event)
+                    if enriched.event != old.event {
+                        enriched.recurringEventID = enriched.recurringEventID ?? record.recurringEventID
+                        slice.records[id] = enriched
+                        change.updated.insert(id)
+                    }
+                }
+                return
+            }
             change.updated.insert(id)
         } else {
             change.inserted.insert(id)

@@ -1,8 +1,10 @@
 import Foundation
 import MailActions
 import MailModel
+import OpenHumanCore
 
 public struct CalendarEventCard: Sendable, Hashable {
+    public let identity = UUID()
     public let event: CalendarEvent
     public let calendarKey: String
     public var title: String
@@ -24,6 +26,8 @@ public struct CalendarEventCard: Sendable, Hashable {
     public var defaultZone: String = ""
     public var pendingGuest = "" { didSet { if pendingGuest != oldValue { pendingGuestNote = nil } } }
     public var pendingGuestNote: String?
+    /// Removing takes only the user's copy of someone else's event off their calendar; no answer goes out.
+    public var removesInvite = false
 
     public var formPatch: CalendarEventPatch {
         form?.patch(from: event, defaultZone: defaultZone) ?? CalendarEventPatch()
@@ -77,15 +81,59 @@ public struct CalendarScopeQuestion: Sendable, Hashable {
 }
 
 public struct CalendarRemoveQuestion: Sendable, Hashable {
+    public let id = UUID()
     public let eventID: String
     public let title: String
     public let emailsPeople: Bool
+    public var isRecurring = false
+    public var canRecreate = false
+    public var isInvite = false
+    public var availableScopes: [CalendarRecurrenceScope] = [.thisEvent]
+    public var note: String?
+
+    public var confirmTitle: String { isInvite ? String(localized: "Remove") : String(localized: "Delete") }
 
     public var text: String {
-        emailsPeople
+        if isInvite {
+            return isRecurring ? Self.inviteSeriesText(title) : Self.inviteText(title)
+        }
+        if isRecurring {
+            return String(localized: "Delete \(title)? Choose which events to remove. Google will notify guests. You can undo for a few seconds before your calendar changes.")
+        }
+        if !emailsPeople && !canRecreate {
+            return String(localized: "Delete \(title)? You can undo for a few seconds before your calendar changes.")
+        }
+        return emailsPeople
             ? String(localized: "Delete \(title)? Google will email the guests that it is canceled. You can undo for a few seconds; after that the emails are sent and Undo cannot take them back.")
             : String(localized: "Delete \(title)? You can undo for a few seconds, and Undo brings it back as a new event.")
     }
+
+    // Google records a removed invitation as declined on the organizer's guest list; Mail sends no reply itself.
+    public static func inviteText(_ title: String) -> String {
+        String(localized: "Remove \(title) from your calendar? It stays on the organizer's calendar. Mail sends no reply, but Google may show the organizer that you declined. You can undo for a few seconds before your calendar changes.")
+    }
+
+    public static func inviteSeriesText(_ title: String) -> String {
+        String(localized: "Remove \(title) from your calendar? Choose which events to remove. They stay on the organizer's calendar. Mail sends no reply, but Google may show the organizer that you declined. You can undo for a few seconds before your calendar changes.")
+    }
+
+    public static var organizerOnlyFuture: String {
+        String(localized: "Only the organizer can end this series early.")
+    }
+}
+
+struct CalendarRemovalKey: Sendable, Hashable {
+    let source: CalendarCacheKey
+    let account: String
+    let eventID: String
+}
+
+struct CalendarRemovalContext: Sendable {
+    let questionID: UUID
+    let cardID: UUID
+    let activeAccount: AccountID?
+    let key: CalendarRemovalKey
+    let target: any CalendarProviding
 }
 
 public enum CalendarEditScope: Sendable, Hashable { case thisEvent, allEvents }
@@ -93,7 +141,7 @@ public enum CalendarEditScope: Sendable, Hashable { case thisEvent, allEvents }
 extension CalendarWindowModel {
     enum Overlay: Sendable, Hashable {
         case times(id: String, start: Date, end: Date)
-        case removed(id: String)
+        case removed(CalendarRemovalKey, CalendarRemovalResult)
         case response(id: String, CalendarResponse)
     }
 
@@ -118,7 +166,8 @@ extension CalendarWindowModel {
             && (event.organizerIsMe == true || (event.organizerIsMe == nil && event.attendees.isEmpty))
         let canMove = refusal == nil && event.isMovableByMe
         let canEdit = refusal == nil && mine && abilities.contains(.editDetails)
-        let canRemove = refusal == nil && mine && abilities.contains(.remove)
+        let removesInvite = refusal == nil && !mine && event.isInvitationCopy && abilities.contains(.removeInvite)
+        let canRemove = refusal == nil && ((mine && abilities.contains(.remove)) || removesInvite)
         let canRespond = refusal == nil && event.canRespond && abilities.contains(.respond)
         var reason = refusal
         if reason == nil, !mine, !event.canRespond {
@@ -133,6 +182,7 @@ extension CalendarWindowModel {
                                        notes: event.notes ?? "", start: event.start, end: event.end,
                                        response: event.myResponse, canMove: canMove, canEditDetails: canEdit,
                                        canRemove: canRemove, canRespond: canRespond, reason: reason, note: nil)
+        opened.removesInvite = removesInvite
         if let fullRights {
             opened.defaultZone = timeZone.identifier
             opened.form = CalendarEventForm(event: event, calendarKey: key, defaultZone: timeZone.identifier)
@@ -145,6 +195,7 @@ extension CalendarWindowModel {
         card = nil
         scopeQuestion = nil
         removeQuestion = nil
+        removalContext = nil
     }
 
     public func saveCard() async {
@@ -206,6 +257,33 @@ extension CalendarWindowModel {
         }
     }
 
+    // From an event's context menu: the same card, question and held change as the card's own buttons.
+    public func respond(_ response: CalendarResponse, to event: CalendarEvent) async {
+        openEvent(event)
+        await respond(response)
+    }
+
+    public func askToRemove(_ event: CalendarEvent) {
+        openEvent(event)
+        askToRemoveCardEvent()
+    }
+
+    /// What the event's menus offer: Delete for the user's own event, Remove for someone else's invitation, or nothing.
+    public func removalTitle(for event: CalendarEvent) -> String? {
+        guard !event.id.isEmpty, let found = provider(for: event).provider, found.info.createRefusal == nil else {
+            return nil
+        }
+        let mine = event.organizerIsMe == true || (event.organizerIsMe == nil && event.attendees.isEmpty)
+        if mine { return found.abilities.contains(.remove) ? String(localized: "Delete…") : nil }
+        return event.isInvitationCopy && found.abilities.contains(.removeInvite)
+            ? String(localized: "Remove from Calendar…") : nil
+    }
+
+    public func canRespond(to event: CalendarEvent) -> Bool {
+        guard let found = provider(for: event).provider, found.info.createRefusal == nil else { return false }
+        return event.canRespond && found.abilities.contains(.respond)
+    }
+
     public func askToRemoveCardEvent() {
         guard var current = card else { return }
         guard current.canRemove else {
@@ -213,31 +291,86 @@ extension CalendarWindowModel {
             card = current
             return
         }
-        removeQuestion = CalendarRemoveQuestion(eventID: current.event.copyKey, title: current.event.title,
-                                                emailsPeople: current.emailsPeople)
+        scopeQuestion = nil
+        do {
+            guard let provider = provider(for: current.event).provider else { throw CalendarError.notConfigured }
+            let target = try provider.removalProvider(for: current.event)
+            guard let source = storeKey(for: current.event) else { throw CalendarError.notConfigured }
+            guard CalendarEventStore.key(for: target) == source else {
+                throw CalendarError.refused("This calendar can't keep deletion bound to the selected source. Open the event again.")
+            }
+            let key = CalendarRemovalKey(source: source, account: current.calendarKey.lowercased(), eventID: current.event.id)
+            guard !pendingRemovals.contains(key) else {
+                current.note = String(localized: "A deletion for this event is already pending.")
+                card = current
+                return
+            }
+            var question = CalendarRemoveQuestion(eventID: current.event.copyKey, title: current.event.title,
+                                                  emailsPeople: current.emailsPeople)
+            question.isInvite = current.removesInvite
+            question.isRecurring = current.event.isRecurringForRemoval
+            question.canRecreate = !question.isInvite && !question.isRecurring && !current.emailsPeople
+                && !current.event.isAllDay
+            question.availableScopes = question.isRecurring ? target.removalScopes : [.thisEvent]
+            if question.isInvite && question.isRecurring {
+                question.availableScopes = question.availableScopes.filter {
+                    CalendarRecurrenceScope.invitationRemovalOptions.contains($0)
+                }
+                if question.availableScopes == CalendarRecurrenceScope.invitationRemovalOptions {
+                    question.note = CalendarRemoveQuestion.organizerOnlyFuture
+                }
+            }
+            if question.isRecurring, question.note == nil,
+               question.availableScopes != CalendarRecurrenceScope.removalOptions {
+                question.note = String(localized: "This calendar can't remove some repeating-event scopes from Mail.")
+            }
+            if target.removalIdentity == nil {
+                question.availableScopes = []
+                question.note = String(localized: "This calendar can't keep deletion bound to the selected source.")
+            }
+            removalContext = CalendarRemovalContext(questionID: question.id, cardID: current.identity,
+                activeAccount: environment.router.activeAccountID, key: key, target: target)
+            removeQuestion = question
+        } catch {
+            current.note = CalendarSidebarModel.message(error)
+            card = current
+        }
     }
 
     public func confirmRemove() async {
-        guard let question = removeQuestion, card?.event.copyKey == question.eventID else {
-            removeQuestion = nil
+        guard let question = removeQuestion, !question.isRecurring else { return }
+        await confirmRemove(.thisEvent, questionID: question.id)
+    }
+
+    public func confirmRemove(_ scope: CalendarRecurrenceScope, questionID: UUID) async {
+        guard let question = removeQuestion, question.id == questionID,
+              let context = removalContext, context.questionID == questionID,
+              let current = card, current.identity == context.cardID, current.event.copyKey == question.eventID,
+              current.calendarKey.lowercased() == context.key.account, current.canRemove,
+              environment.router.activeAccountID == context.activeAccount,
+              !pendingRemovals.contains(context.key) else { return }
+        do {
+            guard let provider = provider(for: current.event).provider,
+                  context.target.removalIdentity != nil,
+                  try provider.removalProvider(for: current.event).removalIdentity == context.target.removalIdentity,
+                  storeKey(for: current.event) == context.key.source else {
+                throw CalendarError.refused("The selected calendar changed. Open the event again.")
+            }
+            guard question.availableScopes.contains(scope), !question.isRecurring || context.target.removalScopes.contains(scope),
+                  question.isRecurring || scope == .thisEvent else {
+                throw CalendarError.refused("This calendar doesn't support that deletion scope from Mail.")
+            }
+        } catch {
+            removeQuestion?.note = CalendarSidebarModel.message(error)
             return
         }
         removeQuestion = nil
-        await removeCardEvent()
+        removalContext = nil
+        commitRemove(current, scope: scope, context: context)
     }
 
     public func removeCardEvent() async {
-        guard var current = card else { return }
-        guard current.canRemove else {
-            current.note = current.reason ?? String(localized: "This calendar can't remove events from Mail yet.")
-            card = current
-            return
-        }
-        if current.event.isRecurring {
-            scopeQuestion = CalendarScopeQuestion(eventID: current.event.copyKey, action: .remove)
-            return
-        }
-        commitRemove(current)
+        askToRemoveCardEvent()
     }
 
     public func answerScope(_ scope: CalendarEditScope) async {
@@ -256,7 +389,7 @@ extension CalendarWindowModel {
         case .save:
             if let current = card { await commitSave(current) }
         case .remove:
-            if let current = card { commitRemove(current) }
+            askToRemoveCardEvent()
         case .move(let start, let end):
             if let event = events.first(where: { $0.copyKey == question.eventID }) { await commitMove(event, start: start, end: end) }
         }
@@ -330,31 +463,55 @@ extension CalendarWindowModel {
         await changed(id, line: nil)
     }
 
-    private func commitRemove(_ current: CalendarEventCard) {
-        guard let target = provider(for: current.event).provider else { return }
+    private func commitRemove(_ current: CalendarEventCard, scope: CalendarRecurrenceScope, context: CalendarRemovalContext) {
+        let target = context.target
         let event = current.event
         let id = UUID()
-        overlays[id] = .removed(id: event.copyKey)
+        let recurring = event.isRecurringForRemoval
+        let known = CalendarRemovalResult(selectedID: event.id, parentID: event.recurringEventID
+            ?? (recurring ? event.id : nil), scope: scope, originalCutoff: event.originalStartTime)
+        overlays[id] = .removed(context.key, known)
+        pendingRemovals.insert(context.key)
         closeCard()
-        let emails = current.emailsPeople
-        let title = emails ? String(localized: "Deleting \(event.title)… Google emails the attendees.")
-                           : String(localized: "Deleting \(event.title)…")
+        let invite = current.removesInvite
+        let emails = !invite && (recurring || current.emailsPeople)
+        let title = invite ? String(localized: "Removing \(event.title) from your calendar…")
+            : emails ? String(localized: "Deleting \(event.title)… Google emails the attendees.")
+            : String(localized: "Deleting \(event.title)…")
         hold(id, title: title) { [weak self] in
+            defer { self?.pendingRemovals.remove(context.key) }
+            var confirmedRecurring = recurring
             do {
-                try await target.removeEvent(event, sendUpdates: emails ? .all : .none)
-                self?.dropFromStore(event)
+                let result = try await target.removeEvent(event, scope: scope, sendUpdates: emails ? .all : .none)
+                confirmedRecurring = confirmedRecurring || result.parentID != nil
+                self?.eventStore.applyRemoval(context.key.source, result: result)
             } catch {
-                self?.failed(String(localized: "Couldn't delete \(event.title). \(CalendarSidebarModel.message(error))"), id)
+                if case CalendarError.unclear = error {
+                    self?.eventStore.invalidateRemoval(context.key.source)
+                    await self?.load(force: true)
+                }
+                if self?.card == nil {
+                    var failedCard = current
+                    failedCard.note = CalendarSidebarModel.message(error)
+                    self?.card = failedCard
+                }
+                let failure = invite ? String(localized: "Couldn't remove \(event.title) from your calendar.")
+                                     : String(localized: "Couldn't delete \(event.title).")
+                self?.failed("\(failure) \(CalendarSidebarModel.message(error))", id)
                 return
             }
-            if !emails, !event.isAllDay {
+            if invite {
+                await self?.changed(id, line: String(localized: "Removed \(event.title) from your calendar."))
+                return
+            }
+            if !confirmedRecurring, !emails, !event.isAllDay {
                 self?.offerUndo(String(localized: "Deleted \(event.title).")) { [weak self] in
                     let draft = CalendarEventDraft(title: event.title, start: event.start, end: event.end,
                                                    timeZone: event.timeZone ?? TimeZone.current.identifier,
                                                    sendUpdates: .none, location: event.location ?? "",
                                                    notes: event.notes ?? "")
                     let made = try await target.createEvent(draft)
-                    self?.store(made, replacing: event)
+                    self?.eventStore.applyLocal(context.key.source, upsert: Self.untagged(made))
                 }
                 await self?.changed(id, line: nil)
                 return
@@ -464,6 +621,7 @@ extension CalendarWindowModel {
     func undo(_ id: UUID) async {
         if let task = held.removeValue(forKey: id) {
             task.cancel()
+            if case .removed(let key, _)? = overlays[id] { pendingRemovals.remove(key) }
             overlays[id] = nil
             environment.notices.post(String(localized: "Canceled. Nothing on your calendar changed."),
                                      duration: NoticeCenter.infoDuration)

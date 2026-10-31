@@ -21,7 +21,8 @@ import Testing
         CalendarEventRecord(event: CalendarEvent(id: "series1_20261110", title: "Weekly sync", start: start,
                                                  end: start.addingTimeInterval(1_800), timeZone: "America/New_York",
                                                  attendees: [EmailAddress(name: "Sam Rivera", email: "sam@example.org")],
-                                                 organizerIsMe: false, recurringEventID: "series1", extras: extras),
+                                                 organizerIsMe: false, recurringEventID: "series1",
+                                                 originalStartTime: .timed(start, timeZone: "America/New_York"), extras: extras),
                             etag: "v1", recurringEventID: "series1")
     }
 
@@ -60,10 +61,11 @@ import Testing
 
     @Test func anAllDayEventKeepsItsDetailsWhenTheZoneChanges() throws {
         let allDay = CalendarEvent(id: "offsite", title: "Offsite", start: Self.start, end: Self.start.addingTimeInterval(86_400),
-                                   isAllDay: true, extras: Self.extras)
+                                   isAllDay: true, originalStartTime: .date("2026-11-01"), extras: Self.extras)
         let moved = CalendarEventRecord(event: allDay, readIn: TimeZone(identifier: "America/Los_Angeles")!)
             .materialized(in: TimeZone(identifier: "Asia/Tokyo")!)
         #expect(moved.event.start != allDay.start, "the dates are placed in the new zone")
         #expect(moved.event.extras == Self.extras)
+        #expect(moved.event.originalStartTime == .date("2026-11-01"))
     }
 }
