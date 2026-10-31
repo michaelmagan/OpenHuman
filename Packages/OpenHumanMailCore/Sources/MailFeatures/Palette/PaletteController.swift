@@ -240,6 +240,7 @@ public final class PaletteController {
         .composeRemind: "bell",
         .saveSnippet: "text.badge.plus", .saveMessageAsSnippet: "text.badge.plus", .showCc: "person.2",
         .showBcc: "person.2", .focusTo: "person", .closeComposer: "xmark", .openDraft: "pencil",
+        .sendDrafts: "paperplane",
         .rescheduleSend: "calendar.badge.clock", .cancelScheduledSend: "calendar.badge.minus",
         .reviewSend: "paperplane", .reviewKeep: "checkmark", .reviewDiscard: "trash", .reviewSkip: "forward",
         .reviewNext: "chevron.down", .reviewPrevious: "chevron.up", .reviewEdit: "pencil", .reviewLeave: "arrow.left",

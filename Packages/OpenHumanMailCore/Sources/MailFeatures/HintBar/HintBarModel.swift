@@ -32,6 +32,12 @@ public enum HintContext: String, Hashable, Sendable, CaseIterable {
         case .calendar: return [.calendarNewEvent, .calendarShowToday, .calendarBackToMail, .commandPalette]
         }
     }
+
+    /// With drafts checked in Drafts, the list leads with sending them in place of opening one.
+    func candidates(checkedDrafts: Bool) -> [ActionID] {
+        guard self == .list, checkedDrafts else { return candidates }
+        return [.sendDrafts] + candidates.filter { $0 != .openThread }
+    }
 }
 
 public struct ShortcutHint: Hashable, Sendable, Identifiable {
@@ -45,11 +51,11 @@ public struct ShortcutHint: Hashable, Sendable, Identifiable {
 public enum HintBar {
     public static let limit = 4
 
-    public static func hints(for context: HintContext, descriptors: [ActionDescriptor],
+    public static func hints(for context: HintContext, checkedDrafts: Bool = false, descriptors: [ActionDescriptor],
                              title: (ActionDescriptor) -> String = { $0.title },
                              availability: (ActionID) -> ActionAvailability) -> [ShortcutHint] {
         var result: [ShortcutHint] = []
-        for id in context.candidates {
+        for id in context.candidates(checkedDrafts: checkedDrafts) {
             guard result.count < limit, let descriptor = descriptors.first(where: { $0.id == id }) else { continue }
             let state = availability(id)
             guard state != .hidden, let binding = binding(of: descriptor, in: context.scope) else { continue }
@@ -108,7 +114,8 @@ public final class HintBarModel {
     public var hints: [ShortcutHint] {
         let registry = router.environment.actions
         let context = router.actionContext()
-        return HintBar.hints(for: self.context, descriptors: registry.descriptors,
+        let checkedDrafts = context.location == .system(.drafts) && context.checkedCount > 0
+        return HintBar.hints(for: self.context, checkedDrafts: checkedDrafts, descriptors: registry.descriptors,
                              title: { ActionRules.title(for: $0, in: context) }) {
             registry.availability($0, host: router, context: context)
         }

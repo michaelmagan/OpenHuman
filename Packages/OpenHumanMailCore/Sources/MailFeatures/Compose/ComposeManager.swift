@@ -15,6 +15,8 @@ public final class ComposeManager: ActionPresenting {
         didSet { if sending != oldValue { updateSendingLine() } }
     }
     public internal(set) var shownSendingID: UUID?
+    /// The drafts the last batch send couldn't send; they stay in Drafts.
+    public internal(set) var lastBatchFailures: [DraftKey] = []
 
     @ObservationIgnored public weak var next: (any ActionPresenting)?
     @ObservationIgnored public var openWindow: (@MainActor (ComposeSession) -> Void)?
@@ -40,6 +42,7 @@ public final class ComposeManager: ActionPresenting {
     @ObservationIgnored var sendReminderDrafts: Set<DraftKey> = []
     @ObservationIgnored var sendReminderUpdate: Task<Void, Never>?
     @ObservationIgnored var sendingUndoEntries: [UUID: UndoCoordinator.Entry.ID] = [:]
+    @ObservationIgnored var batches: [UUID: BatchSend] = [:]
     @ObservationIgnored private var defaultFrom: [AccountID: String?] = [:]
     @ObservationIgnored private var restored = false
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []

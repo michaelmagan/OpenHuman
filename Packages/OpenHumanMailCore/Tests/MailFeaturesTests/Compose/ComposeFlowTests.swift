@@ -493,9 +493,9 @@ func soon(_ condition: @MainActor () -> Bool, sourceLocation: SourceLocation = #
 
     @Test func onlyTheComposerSends() throws {
         let sources = try Self.sources()
-        #expect(Self.files(sources, matching: #"\.send\([^)]*undoWindow:"#) == ["ComposeManager+Send.swift"])
+        #expect(Self.files(sources, matching: #"\.send\([^)]*undoWindow:"#) == ["ComposeManager+Send.swift", "ComposeManager+BatchSend.swift"])
         #expect(Self.files(sources, matching: #"\.scheduleSend\("#) == ["ComposeManager+Send.swift"])
-        #expect(Self.files(sources, matching: #"\.sendNow\("#) == ["ComposeManager+Send.swift"])
+        #expect(Self.files(sources, matching: #"\.sendNow\("#) == ["ComposeManager+Send.swift", "ComposeManager+BatchSend.swift"])
         #expect(Self.files(sources, matching: #"manager\.send\(|\.send\(session\)"#) == ["ComposeActionHandler.swift"])
         #expect(Self.files(sources, matching: #"manager\.sendLater\("#) == ["ComposeActionHandler.swift"])
     }

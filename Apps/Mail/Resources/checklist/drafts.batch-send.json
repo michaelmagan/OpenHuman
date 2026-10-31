@@ -1,0 +1,15 @@
+{
+  "id": "drafts.batch-send",
+  "area": "Composer",
+  "title": "Send several checked drafts at once, with or without reminders",
+  "steps": [
+    "Launch Mail with -UseFakeGmail and go to Drafts, then check three drafts with X, including one scheduled draft and one with no recipient; the hint bar shows ⌘↵ Send 3 drafts",
+    "Press ⌘↵ (or click Send Drafts in the toolbar, or right-click a checked row and choose Send drafts…)",
+    "Read the confirmation, turn Remind me if no reply off with R, then press Return",
+    "Press ⌘Z while the Sending toast is shown, then repeat and let the batch go out"
+  ],
+  "deepLink": null,
+  "expected": "The confirmation names the count, the recipients and how many won't be sent, and lists the scheduled and recipient-less drafts under Staying in Drafts; they stay checked afterwards. One ⌘Z brings every draft in the batch back to Drafts. When the batch goes out, one notice says how many were sent, no reminder is set on those conversations, and the reminder setting in Settings is unchanged.",
+  "requires": "fake",
+  "addedIn": "2026-10-30"
+}

@@ -124,12 +124,16 @@ extension ComposeManager {
     static let sendingLimit = 20
 
     func addSending(_ session: ComposeSession, draft: DraftKey, state: SendingMessage.State) {
-        var list = sending.filter { $0.id != session.id }
-        list.append(SendingMessage(
+        addSending(SendingMessage(
             id: session.id, draft: draft, account: session.account.id, thread: session.thread, mode: session.mode,
             from: session.from.address, to: session.to.tokens, cc: session.cc.tokens, bcc: session.bcc.tokens,
             subject: session.subject, text: session.plainText, attachmentNames: session.attachments.map(\.filename),
             date: timing.now(), state: state))
+    }
+
+    func addSending(_ message: SendingMessage) {
+        var list = sending.filter { $0.id != message.id }
+        list.append(message)
         while list.count > Self.sendingLimit {
             if let done = list.firstIndex(where: { !$0.state.isOnItsWay }) { list.remove(at: done) } else { list.removeFirst() }
         }
@@ -151,12 +155,16 @@ extension ComposeManager {
         for message in sending where message.draft == draft { removeSending(message.id) }
     }
 
+    /// "Sending 3 drafts…" while only checked drafts sent together are on their way, matching their Undo toast.
     func updateSendingLine() {
-        let count = sending.filter(\.state.isOnItsWay).count
+        let onItsWay = sending.filter(\.state.isOnItsWay)
+        let count = onItsWay.count
+        let batched = Set(batches.values.flatMap { $0.items.map(\.id) })
+        let drafts = onItsWay.allSatisfy { batched.contains($0.id) }
         let line: String? = switch count {
         case 0: nil
-        case 1: String(localized: "Sending 1 message…")
-        default: String(localized: "Sending \(count) messages…")
+        case 1: drafts ? String(localized: "Sending 1 draft…") : String(localized: "Sending 1 message…")
+        default: drafts ? String(localized: "Sending \(count) drafts…") : String(localized: "Sending \(count) messages…")
         }
         if environment.status.sendingLine != line { environment.status.sendingLine = line }
     }

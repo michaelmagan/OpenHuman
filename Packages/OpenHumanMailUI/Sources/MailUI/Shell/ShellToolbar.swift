@@ -16,6 +16,7 @@ public struct ShellToolbar: ToolbarContent {
         public static let back = "mail.back"
         public static let selectAll = "mail.selectAll"
         public static let splits = "mail.splits"
+        public static let sendDrafts = "mail.sendDrafts"
         public static let calendar = "mail.calendar"
         public static let compose = "mail.compose"
         public static let search = "mail.search"
@@ -44,6 +45,9 @@ public struct ShellToolbar: ToolbarContent {
         if let state = surface.splitState {
             ToolbarItem(id: ItemID.splits, placement: .principal) { SplitInboxPicker(router: router, state: state) }
         }
+        if let count = surface.checkedDraftCount {
+            ToolbarItem(id: ItemID.sendDrafts, placement: .primaryAction) { sendDraftsButton(count: count) }
+        }
         if let reader = surface.reader {
             ReaderToolbarGroup(actions: ReaderToolbarActions(router: router, reader: reader), router: router)
         }
@@ -66,6 +70,24 @@ public struct ShellToolbar: ToolbarContent {
         .help(Self.help(router, .backToList, title: "Back to the list"))
         .accessibilityLabel("Back")
         .accessibilityIdentifier("toolbar.back")
+    }
+
+    private func sendDraftsButton(count: Int) -> some View {
+        let enabled = router.isEnabled(.sendDrafts)
+        return Button {
+            _ = router.perform(.sendDrafts, source: .toolbar)
+        } label: {
+            NativeToolbarLabel(Self.sendDraftsTitle(count), systemImage: "paperplane")
+                .labelStyle(.titleAndIcon)
+        }
+        .disabled(!enabled)
+        .help(enabled ? Self.help(router, .sendDrafts, title: "Send the checked drafts") : "Sending isn't available here")
+        .accessibilityLabel(count == 1 ? "Send 1 checked draft" : "Send \(count) checked drafts")
+        .accessibilityIdentifier("toolbar.sendDrafts")
+    }
+
+    static func sendDraftsTitle(_ count: Int) -> String {
+        count == 1 ? "Send Draft" : "Send \(count) Drafts"
     }
 
     private func calendarButton(isOpen: Bool) -> some View {
@@ -152,6 +174,13 @@ struct ShellSurface {
     var selectableList: ThreadListModel? {
         guard isMail, let state, state.mode == .list, !state.searchOpen else { return nil }
         return state.list
+    }
+
+    /// Drafts checked in the Drafts list, for the toolbar's Send button. Nil over a conversation, search, All
+    /// Inboxes or the Calendar, which is drawn over the mail column while the list and its checks stay behind it.
+    var checkedDraftCount: Int? {
+        guard let list = selectableList, state?.location == .system(.drafts), list.checkedCount > 0 else { return nil }
+        return list.checkedCount
     }
 
     var splitState: AccountState? {

@@ -39,6 +39,8 @@ public struct OverlayHostView: View {
             lifecycle(GetMeToZeroView(model: model) { center.dismiss() }).id(center.showing)
         case .ask(let model):
             lifecycle(AskPanelView(model: model)).id(center.showing)
+        case .batchSend(let model):
+            lifecycle(BatchSendView(model: model) { center.dismiss() }).id(center.showing)
         }
     }
 

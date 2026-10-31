@@ -334,6 +334,7 @@ struct State: Sendable {
     var nextGmailDraft = 1
     var failNextRemote: [String] = []
     var failNextCommand: MailPortError?
+    var failingDeliveries: [DraftKey: String] = [:]
     var signInOutcomes: [FakeSignInOutcome] = []
     var unsubscribeRequests: [MessageKey] = []
     var searchIncomplete: [AccountID: [SearchIncompleteness]] = [:]

@@ -64,7 +64,7 @@ extension ComposeManager {
                     guard let self else { return }
                     switch row?.status {
                     case nil, .sent?:
-                        await self.apply(intent)
+                        await self.applySendReminder(intent)
                         return
                     case .sending?:
                         continue
@@ -77,7 +77,7 @@ extension ComposeManager {
         }
     }
 
-    private func apply(_ intent: PendingSendReminder) async {
+    func applySendReminder(_ intent: PendingSendReminder) async {
         forgetSendReminder(intent.draft)
         var conversation = intent.thread
         if conversation == nil { conversation = try? await environment.data.sentConversation(intent.draft) }

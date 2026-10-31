@@ -32,6 +32,7 @@ public enum ActionRules {
         case .autoLabelWrong: context.targets.autoLabel.map { "Wrong label (not \($0))" } ?? descriptor.title
         case .clearChecks:
             context.checkedCount == 0 && (context.searchOpen || isSearch(context.location)) ? "Close search" : descriptor.title
+        case .sendDrafts: context.selection.count > 1 ? "Send \(context.selection.count) drafts…" : "Send draft…"
         case .aiToggleInstantReply:
             context.togglesOn.contains(.aiToggleInstantReply) ? "Stop showing quick replies when replying"
                                                               : "Show quick replies when replying"
@@ -63,6 +64,7 @@ public enum ActionRules {
         case .openDraft:
             return c.targets.anyDraft || c.targets.anyScheduled || c.location == .system(.drafts)
                 || c.location == .system(.scheduled) ? nil : .hidden
+        case .sendDrafts: return c.location == .system(.drafts) ? nil : .hidden
         case .rescheduleSend, .cancelScheduledSend:
             return c.targets.anyScheduled || c.location == .system(.scheduled) ? nil : .hidden
         case .removeLabel, .removeLabelAndDone:

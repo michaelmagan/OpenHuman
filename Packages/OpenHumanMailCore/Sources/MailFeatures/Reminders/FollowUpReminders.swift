@@ -69,13 +69,16 @@ public final class FollowUpReminders {
     }
 
     func sendCommitted(_ session: ComposeSession, draft key: DraftKey, rule: SentMailReminderRule, sentAt: Date) async {
+        await sendCommitted(draft: key, account: session.account, recipients: session.allRecipients.map(\.email),
+                            subject: session.subject, text: session.plainText,
+                            thread: session.thread ?? session.draftThread, rule: rule, sentAt: sentAt)
+    }
+
+    func sendCommitted(draft key: DraftKey, account: Account, recipients: [String], subject: String, text: String,
+                       thread known: ThreadKey?, rule: SentMailReminderRule, sentAt: Date) async {
         guard let environment, let center = environment.ai else { return }
-        let account = session.account
-        guard SentMailReminderRule.mayNeedFollowUp(session.allRecipients.map(\.email),
-                                                   myAddresses: account.myAddresses) else { return }
-        let text = session.plainText
-        let subject = session.subject
-        var thread = session.thread ?? session.draftThread
+        guard SentMailReminderRule.mayNeedFollowUp(recipients, myAddresses: account.myAddresses) else { return }
+        var thread = known
         let accountKey = AICenter.policyKey(email: account.email)
         var context: [AIMessageInput] = []
         if let thread { context = await contextMessages(thread, account: account, accountKey: accountKey, before: sentAt) }

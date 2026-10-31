@@ -306,6 +306,14 @@ extension State {
 
     mutating func completeHeld(_ id: Int64, now: Date, byOtherInstall: Bool) -> Bool {
         guard let held = held.removeValue(forKey: id) else { return false }
+        if let error = failingDeliveries.removeValue(forKey: held.draft), var draft = drafts[held.draft] {
+            draft.status = .failed
+            draft.lastError = error
+            draft.updatedAt = now
+            drafts[held.draft] = draft
+            if let thread = draft.thread { invalidate([thread]) }
+            return false
+        }
         return deliverDraft(held.draft, now: now, byOtherInstall: byOtherInstall)
     }
 
