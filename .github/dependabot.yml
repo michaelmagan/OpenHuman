@@ -1,0 +1,56 @@
+version: 2
+
+# Every ecosystem waits 7 days after a release before proposing it, so a
+# compromised or yanked version has time to be caught upstream first.
+# Security updates bypass the cooldown. Minors and patches land as one PR per
+# ecosystem; majors come one PR each.
+updates:
+  # Swift Package Manager. Each package resolves on its own, and the swift
+  # updater needs a committed Package.resolved, so this lists every directory
+  # that has one. The rest (OpenHumanAI, OpenHumanCore, OpenHumanLinks,
+  # OpenHumanSemanticIndex, Tools/AIEval) depend only on local paths.
+  # These dependencies ship inside the app, so the bumps use `build:`.
+  - package-ecosystem: swift
+    directories:
+      - /Packages/OpenHumanAIMLX
+      - /Packages/OpenHumanCLI
+      - /Packages/OpenHumanCloudSync
+      - /Packages/OpenHumanGmail
+      - /Packages/OpenHumanMailCore
+      - /Packages/OpenHumanMailLive
+      - /Packages/OpenHumanMailUI
+      - /Packages/OpenHumanStore
+      - /Packages/OpenHumanSync
+      - /Tools/PerfHarness
+      - /Tools/SearchEval
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+    groups:
+      # Why: mlx-swift and mlx-swift-lm are exact-pinned as a matched pair, and
+      # mlx-swift is 0.x, so any bump (minor included) can break; move them together
+      mlx:
+        patterns: ["mlx-swift*"]
+      swift:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # Workflow actions are pinned to commit SHAs; Dependabot rewrites both the
+  # SHA and its trailing `# vN` comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]

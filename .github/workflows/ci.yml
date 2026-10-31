@@ -14,6 +14,35 @@ permissions:
   contents: read
 
 jobs:
+  # Why: fast feedback on a hosted runner, without waiting for the self-hosted Mac
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Why: check-test-patterns diffs against the merge base with the PR's base branch
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check imports and generated contracts
+        run: |
+          Tools/ci/check-imports.sh
+          python3 Tools/ci/check-checklist.py
+          python3 -m unittest discover -s Tools/ci/tests -p 'test_*.py'
+
+      - name: Check added test lines
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 -B Tools/ci/check-test-patterns.py --base "origin/$BASE_REF"
+
+      - name: Check Package.resolved files agree
+        run: python3 -B Tools/ci/check-resolved.py
+
+      - name: Shellcheck
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck -S warning
+
   macos-app:
     runs-on: ${{ vars.MACOS_RUNNER_LABEL || 'xcode-27' }}
     timeout-minutes: 90
@@ -23,7 +52,7 @@ jobs:
       XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
       SWIFT_BACKTRACE: enable=yes,sanitize=yes,threads=all
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Select Xcode
         id: xcode
@@ -51,7 +80,7 @@ jobs:
           fi
           xcrun metal --version
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             Packages/*/.build
@@ -96,13 +125,13 @@ jobs:
       - name: Package development artifact
         run: Tools/ci/package-app.sh build/dd/Build/Products/Release/OpenHumanMail.app build/OpenHumanMail.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: OpenHumanMail-${{ github.run_number }}
           path: build/OpenHumanMail.zip
           retention-days: 14
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: test-results
