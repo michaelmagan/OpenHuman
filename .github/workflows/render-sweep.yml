@@ -1,0 +1,154 @@
+name: Render Sweep
+
+# Renders app screens in named states on sample data (Tools/render-sweep.sh) when someone runs it, for example a
+# cloud session that cannot build the app, and uploads the PNGs. docs/RENDER-SWEEP.md explains the inputs and how to
+# fetch the results. It never runs by itself.
+#
+# SECURITY: the render job builds and runs the branch's code, so it holds a read-only token and no secrets. Only the
+# publish job writes (release assets and one PR comment), and it runs no build.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: 'RenderSweepTests function names, comma-separated (Tools/render-sweep.sh --list); empty renders the whole half'
+        type: string
+        default: ''
+      themes:
+        description: 'Theme slugs, comma-separated (light, dark, paper, midnight, ...); empty renders each test''s own themes'
+        type: string
+        default: 'light,dark'
+      only:
+        description: 'Which half: package (main window, reader, overlays, onboarding), app (Settings pages, feedback), or both'
+        type: choice
+        options: [package, app, both]
+        default: package
+      comment:
+        description: 'Post the PNGs on the open pull request whose head is this commit'
+        type: boolean
+        default: true
+
+concurrency:
+  group: render-sweep-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ${{ vars.MACOS_RUNNER_LABEL || 'xcode-27' }}
+    timeout-minutes: 90
+    env:
+      # Why: a released Xcode, never the newest installed beta (same as ci.yml)
+      XCODE_APP: ${{ vars.XCODE_APP || '/Applications/Xcode_27.0.app' }}
+      XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        id: xcode
+        run: |
+          if [ ! -d "$XCODE_APP" ]; then
+            echo "::error::$XCODE_APP is not installed on this runner; set the XCODE_APP and XCODE_VERSION repository variables"
+            ls -d /Applications/Xcode*.app || true
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          found="$(xcodebuild -version | sed -n 's/^Xcode //p')"
+          if [ "$found" != "$XCODE_VERSION" ]; then
+            echo "::error::$XCODE_APP is Xcode $found, expected $XCODE_VERSION"
+            exit 1
+          fi
+          echo "build=$(xcodebuild -version | sed -n 's/^Build version //p')" >> "$GITHUB_OUTPUT"
+
+      # Why: MLX compiles Metal shaders, and the runner image does not install the Metal toolchain for every Xcode
+      - name: Install the Metal toolchain
+        run: |
+          if ! xcrun metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/oh-scratch
+          key: render-sweep-spm-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved') }}
+          restore-keys: render-sweep-spm-${{ steps.xcode.outputs.build }}-
+
+      - name: Render
+        env:
+          # Inputs reach the script through the environment, never the shell text; the script validates them
+          TESTS: ${{ inputs.tests }}
+          THEMES: ${{ inputs.themes }}
+          ONLY: ${{ inputs.only }}
+          OH_SCRATCH_ROOT: ${{ runner.temp }}/oh-scratch
+        run: |
+          mkdir -p "$OH_SCRATCH_ROOT"
+          args=(--out "$RUNNER_TEMP/render-sweep" --swiftpm)
+          [ "$ONLY" = both ] || args+=(--only "$ONLY")
+          [ -z "$TESTS" ] || args+=(--tests "$TESTS")
+          [ -z "$THEMES" ] || args+=(--themes "$THEMES")
+          echo "Tools/render-sweep.sh ${args[*]}"
+          Tools/render-sweep.sh "${args[@]}"
+
+      - name: Check the renders
+        if: always()
+        run: |
+          out="$RUNNER_TEMP/render-sweep"
+          test -f "$out/index.json" || { echo "::error::the sweep wrote no index.json"; exit 1; }
+          python3 Tools/render-sweep-check.py --list "$out" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: render-sweep
+          path: ${{ runner.temp }}/render-sweep
+          if-no-files-found: warn
+          retention-days: 14
+
+  publish:
+    needs: render
+    if: inputs.comment
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Why: every publish edits the one pr-screenshots release; run them one at a time
+    concurrency:
+      group: render-sweep-publish
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      # The scripts read the renders as data
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: Tools/ci
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: render-sweep
+          path: renders
+
+      - name: Find the pull request
+        id: pr
+        env:
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          pr="$(gh pr list --state open --limit 200 --json number,headRefOid \
+            --jq "map(select(.headRefOid == \"$HEAD_SHA\")) | .[0].number // empty")"
+          if [ -z "$pr" ]; then
+            echo "::notice::No open pull request has $HEAD_SHA as its head; the PNGs are in the render-sweep artifact only"
+          fi
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+          echo "sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to the pull request
+        if: steps.pr.outputs.number != ''
+        env:
+          PR: ${{ steps.pr.outputs.number }}
+          SHA: ${{ steps.pr.outputs.sha }}
+        run: Tools/ci/publish-render-sweep.sh renders "$PR" "$SHA"
