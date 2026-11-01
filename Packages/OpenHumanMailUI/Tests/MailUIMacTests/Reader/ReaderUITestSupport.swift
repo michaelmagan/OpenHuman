@@ -52,6 +52,7 @@ final class StubHost: ReaderHost {
 }
 
 enum UIFixtures {
+    static let now = Date(timeIntervalSince1970: 1_791_000_000)
     static let account = AccountID(1)
     static let me = EmailAddress(name: "Robin Example", email: "robin@example.com")
     static let dana = EmailAddress(name: "Dana Ruiz", email: "dana@news.example.com")
@@ -62,7 +63,7 @@ enum UIFixtures {
     static func summary(_ row: Int64, from: EmailAddress = dana, unread: Bool = false, minutesAgo: Double = 60,
                         attachments: [AttachmentInfo] = [], cc: [EmailAddress] = []) -> MessageSummary {
         MessageSummary(id: message(row), from: from, to: [me, EmailAddress(name: "Sam", email: "sam@example.com")], cc: cc, bcc: [],
-                       date: Date().addingTimeInterval(-minutesAgo * 60), snippet: "Snippet \(row)", isUnread: unread,
+                       date: now.addingTimeInterval(-minutesAgo * 60), snippet: "Snippet \(row)", isUnread: unread,
                        attachments: attachments)
     }
 
@@ -104,9 +105,11 @@ struct ReaderHarness {
     let host: StubHost
 
     static func make(_ source: UITestSource, thread: ThreadKey, theme: ThemeTokens = .light,
-                     webKit: ReaderWebKit = TestWebKit.noNetwork, windowRouter: Bool = false) async throws -> ReaderHarness {
+                     webKit: ReaderWebKit = TestWebKit.noNetwork, windowRouter: Bool = false,
+                     accessorySlot: ReaderHeaderAccessoryStore = ReaderHeaderAccessoryStore()) async throws -> ReaderHarness {
         await webKit.prepare()
-        let store = FakeMailStore(corpus: .make(threadCount: 3, now: Date()), options: .init())
+        let store = FakeMailStore(corpus: .make(threadCount: 3, now: UIFixtures.now),
+                                  options: .init(now: { UIFixtures.now }))
         let environment = AppEnvironment(data: store, commands: store, accounts: store, settings: store, isFake: true)
         let router = windowRouter ? environment.router : AppRouter(environment: environment)
         router.start()
@@ -132,7 +135,8 @@ struct ReaderHarness {
         window.contentViewController = controller
         window.setFrame(frame, display: true)
         window.orderFrontRegardless()
-        let model = ReaderModel(thread: thread, data: source, renderQueue: environment.renderQueue)
+        let model = ReaderModel(thread: thread, data: source, renderQueue: environment.renderQueue,
+                                accessorySlot: accessorySlot)
         controller.model = model
         model.start()
         try await until { model.state == .loaded }

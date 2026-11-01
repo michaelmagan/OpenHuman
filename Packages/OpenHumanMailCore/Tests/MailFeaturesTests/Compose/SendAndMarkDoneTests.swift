@@ -189,7 +189,7 @@ import Testing
     @Test func aReminderSetWithTheSendSurvivesTheArchive() async throws {
         let f = ComposeFixture()
         let (thread, session) = try await reply(f, markDone: false)
-        session.pendingReminder = ComposeSession.PendingReminder(dueAt: Date().addingTimeInterval(5 * 86_400), kind: .ifNoReply)
+        session.pendingReminder = ComposeSession.PendingReminder(dueAt: fixedNow.addingTimeInterval(5 * 86_400), kind: .ifNoReply)
         #expect(await f.run(.send, in: session))
         await f.toast("Reply sent.")
         await eventuallyAsync { !(await inInbox(f, thread)) }

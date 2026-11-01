@@ -7,7 +7,7 @@ import Testing
 
 @MainActor
 private func loadedModel(_ store: FakeMailStore, count: Int, location: MailLocation = .system(.inbox),
-                         now: @escaping @Sendable () -> Date = { Date() }) async -> ThreadListModel {
+                         now: @escaping @Sendable () -> Date = { fixedNow }) async -> ThreadListModel {
     let model = ThreadListModel(data: store, location: location, account: AccountID(1), now: now)
     model.start()
     await eventually { model.rows.count == min(count, ThreadListModel.initialLimit) }

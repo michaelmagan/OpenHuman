@@ -34,10 +34,9 @@ struct ReaderSnapshotTests {
         for m in detail.messages { bodies[m.id] = MessageContent(html: nil, text: "Body \(m.id.rowID)") }
         bodies[messages[7].id] = MessageContent(html: F.newsletterHTML, text: nil)
         let accessory = UIRecordingAccessory()
-        ReaderHeaderAccessorySlot.current = accessory
-        defer { ReaderHeaderAccessorySlot.current = nil }
         let h = try await ReaderHarness.make(UITestSource(details: [detail], bodies: bodies, files: [1: pdfFile]),
-                                             thread: detail.id, theme: theme)
+                                             thread: detail.id, theme: theme,
+                                             accessorySlot: ReaderHeaderAccessoryStore(current: accessory))
         defer { h.close() }
         h.window.setFrame(NSRect(x: -5000, y: -5000, width: 1360, height: 860), display: true)
         let key = messages[7].id
