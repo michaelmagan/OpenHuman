@@ -29,6 +29,13 @@ struct CalendarRemovalAuthorization: Sendable {
     let allowAbsentCleanup: Bool
     /// Removes this calendar's copy of an event another calendar organizes; never notifies anyone.
     var asGuest = false
+    /// For a series trim, what the guard needs to derive the shortened rules again from its own read.
+    var trim: CalendarRemovalTrim?
+}
+
+struct CalendarRemovalTrim: Sendable {
+    let cutoff: GoogleOriginalStart
+    let timeZone: String
 }
 
 extension GoogleCalendarClient {
@@ -108,7 +115,9 @@ extension GoogleCalendarClient {
         // Every target is read and authorized before the first write. No ordinary generated instance is enumerated here.
         let body: Data?
         if prefix.isEmpty { body = nil } else { body = try json(["recurrence": prefix.recurrence]) }
-        let response = try await performRemoval(series, method: prefix.isEmpty ? "DELETE" : "PATCH", body: body, updates: .all)
+        let trim = prefix.isEmpty ? nil : CalendarRemovalTrim(cutoff: cutoff, timeZone: zone)
+        let response = try await performRemoval(series, method: prefix.isEmpty ? "DELETE" : "PATCH", body: body, updates: .all,
+                                                trim: trim)
         if !prefix.isEmpty {
             do {
                 for exception in cleanup {
@@ -268,12 +277,13 @@ extension GoogleCalendarClient {
 
     @discardableResult
     private func performRemoval(_ target: WireEvent, method: String, body: Data?, updates: GoogleSendUpdates,
-                                allowAbsentCleanup: Bool = false, asGuest: Bool = false) async throws -> HTTPResponse {
+                                allowAbsentCleanup: Bool = false, asGuest: Bool = false,
+                                trim: CalendarRemovalTrim? = nil) async throws -> HTTPResponse {
         guard let id = target.id, let etag = target.etag else { throw GoogleCalendarRemovalError.conflict }
         let authorization = CalendarRemovalAuthorization(method: method, target: id, etag: etag,
             parent: target.recurringEventId, original: target.originalStartTime?.original,
             master: target.recurrence?.isEmpty == false, body: body, sendUpdates: updates.rawValue,
-            allowAbsentCleanup: allowAbsentCleanup, asGuest: asGuest)
+            allowAbsentCleanup: allowAbsentCleanup, asGuest: asGuest, trim: trim)
         let nonce = transport.authorizeRemoval(authorization)
         defer { transport.discardRemovalAuthorization(nonce) }
         return try await send(method, url(["calendars", calendarID, "events", id],

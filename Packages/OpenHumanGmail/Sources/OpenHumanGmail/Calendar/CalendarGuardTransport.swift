@@ -95,12 +95,14 @@ public final class CalendarGuardTransport: HTTPTransport {
         } else if !(auth.parent == nil && !auth.master) && auth.sendUpdates != "all" {
             throw refused()
         }
+        var proposed: [String]?
         if auth.method == "PATCH" {
-            guard auth.master, let body = request.body,
+            guard auth.master, auth.trim != nil, let body = request.body,
                   let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
                   Set(object.keys) == ["recurrence"], let rules = object["recurrence"] as? [String], !rules.isEmpty else {
                 throw refused()
             }
+            proposed = rules
         }
         var components = URLComponents(url: request.url, resolvingAgainstBaseURL: false)
         components?.query = nil
@@ -128,6 +130,17 @@ public final class CalendarGuardTransport: HTTPTransport {
               wire.originalStartTime?.original == auth.original,
               (wire.recurrence?.isEmpty == false) == auth.master,
               wire.event(defaultZone: .gmt) != nil else { throw refused() }
+        // Checked here on the fresh read as well as in the client: the organizer's guests are always told.
+        if !auth.asGuest, Self.hasGuests(wire, calendarID: calendarID), !["all", "externalOnly"].contains(auth.sendUpdates) {
+            throw refused()
+        }
+        // A trim may only keep an earlier part of the rules just read, and must be the plan for that read.
+        if let proposed {
+            guard let trim = auth.trim, let current = wire.recurrence, let start = wire.start?.original,
+                  GoogleRemovalPrefix.narrows(current, to: proposed),
+                  let plan = try? GoogleRemovalPrefix.plan(current, start: start, cutoff: trim.cutoff, timeZone: trim.timeZone),
+                  !plan.isEmpty, plan.recurrence == proposed else { throw refused() }
+        }
         var forwarded = request
         for name in [Self.scopedRemovalHeader, Self.removalRuleHeader, Self.editRuleHeader, Self.answerAsHeader] {
             forwarded.headers[name] = nil
@@ -221,6 +234,14 @@ public final class CalendarGuardTransport: HTTPTransport {
         if guests.isEmpty { return nil }
         return ["all", "externalOnly"].contains(sendUpdates ?? "") ? nil
             : "an event with guests is deleted only with sendUpdates all or externalOnly, so they are told"
+    }
+
+    // Fail closed: a guest list Google shortened may still name guests
+    static func hasGuests(_ event: WireEvent, calendarID: String) -> Bool {
+        if event.attendeesOmitted == true { return true }
+        return (event.attendees ?? []).contains {
+            $0.`self` != true && $0.email?.lowercased() != calendarID.lowercased() && $0.resource != true
+        }
     }
 
     static func sendUpdatesValue(_ url: URL) -> String? {
