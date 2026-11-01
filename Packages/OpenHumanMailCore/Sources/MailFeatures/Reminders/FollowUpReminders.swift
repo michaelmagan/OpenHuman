@@ -100,6 +100,12 @@ public final class FollowUpReminders {
         await setReminder(thread, due: due, sentAt: sentAt, reason: answer.reason)
     }
 
+    /// Records that the person chose no reminder for this send, so a later catch-up never asks about it.
+    func noteNoReminderWanted(_ thread: ThreadKey, sentAt: Date) async {
+        await remember(FollowUpNote(thread: thread.gmailThreadID.rawValue, sentAt: sentAt, needsFollowUp: false),
+                       account: thread.account)
+    }
+
     public func catchUp() async throws(CatchUpError) -> CatchUpResult {
         guard !isCatchingUp else { throw .busy }
         guard let environment, let center = environment.ai else { throw .unavailable(String(localized: "AI isn't set up")) }

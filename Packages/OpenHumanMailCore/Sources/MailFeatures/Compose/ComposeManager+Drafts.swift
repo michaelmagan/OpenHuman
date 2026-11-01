@@ -53,7 +53,7 @@ extension ComposeManager {
 @MainActor
 final class DraftRowActionHandler: ActionHandler {
     static let coreIDs: [ActionID] = [.openDraft, .sendDrafts]
-    static let sendLaterIDs: [ActionID] = [.rescheduleSend, .cancelScheduledSend]
+    static let sendLaterIDs: [ActionID] = [.rescheduleSend, .cancelScheduledSend, .sendScheduledNow]
 
     private weak var environment: AppEnvironment?
 
@@ -78,6 +78,8 @@ final class DraftRowActionHandler: ActionHandler {
             return manager.rescheduleSend(in: thread)
         case .cancelScheduledSend:
             return manager.cancelScheduledSend(in: thread)
+        case .sendScheduledNow:
+            return manager.sendScheduledNowAction(in: thread)
         default:
             return .notHandled
         }

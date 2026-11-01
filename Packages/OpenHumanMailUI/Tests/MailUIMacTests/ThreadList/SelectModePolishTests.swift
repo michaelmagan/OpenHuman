@@ -129,9 +129,8 @@ import Testing
         return cell
     }
 
-    @Test func theHeaderBoxIsDrawnLikeTheRowBox() throws {
+    @Test func theRowBoxUsesTheSharedSizeAndColours() {
         #expect(ThreadRowView.checkboxSize == SelectCheckbox.side)
-        let side = SelectCheckbox.side
         for resolved in [ResolvedTheme.light, ResolvedTheme.dark] {
             let t = resolved.tokens
             let style = ThreadRowStyle(theme: t)
@@ -139,32 +138,31 @@ import Testing
             #expect(RenderReviewFixTests.same(style.accentFill, colors.fill.nsColor))
             #expect(RenderReviewFixTests.same(style.accentOnFill, colors.tick.nsColor))
             #expect(RenderReviewFixTests.same(style.tertiary, colors.outline.nsColor))
-            for checked in [true, false] {
-                let renderer = ImageRenderer(content: SelectCheckboxGlyph(checked: checked).environment(\.theme, resolved))
-                renderer.scale = 2
-                let image = try #require(renderer.cgImage)
-                #expect(image.width == Int(side * 2) && image.height == Int(side * 2))
-                let pixels = try #require(GlyphPixels(image))
-                let topMiddle = pixels.at(Int(side), 3)
-                let centre = pixels.at(Int(side), Int(side))
-                if checked {
-                    #expect(GlyphPixels.matches(topMiddle, colors.fill), "accent fill: \(resolved.themeID)")
-                } else {
-                    #expect(centre.alpha == 0, "an empty box is an outline: \(resolved.themeID)")
-                    #expect(pixels.at(Int(side), 1).alpha > 0, "the outline is drawn: \(resolved.themeID)")
-                }
-            }
         }
     }
 
-    @Test func theTickPointsTheSameWayInBothCoordinateSystems() {
-        let box = CGRect(x: 10, y: 20, width: 14, height: 14)
-        let up = SelectCheckbox.tick(in: box, yUp: true).boundingBox
-        let down = SelectCheckbox.tick(in: box, yUp: false).boundingBox
-        #expect(box.contains(up) && box.contains(down))
-        #expect(abs(up.width - down.width) < 0.001 && abs(up.height - down.height) < 0.001)
-        #expect(abs((up.minY - box.minY) - (box.maxY - down.maxY)) < 0.001, "mirrored, not moved")
-        #expect(SelectCheckbox.outlineRect(box) == box.insetBy(dx: SelectCheckbox.lineWidth / 2, dy: SelectCheckbox.lineWidth / 2))
+    @Test func theHeaderBoxIsMixedWhileSomeRowsAreCheckedAndClickingChecksThemAll() async throws {
+        let store = FakeMailStore(corpus: .make(threadCount: 3, now: Self.now))
+        let list = ThreadListModel(data: store, location: .system(.inbox), account: AccountID(1))
+        list.start()
+        defer { list.stop() }
+        try await until { list.rows.count == 3 }
+        let rows = list.rows.map(\.id)
+        list.selection.toggle(rows[0])
+        #expect(list.headerCheck == .some)
+        #expect(SelectAllCheckbox.sources(list.headerCheck, list: list).map(\.wrappedValue) == [true, false],
+                "one on and one off: the system box shows its dash")
+        list.selection.toggle(rows[1])
+        list.selection.toggle(rows[2])
+        #expect(list.headerCheck == .all)
+        #expect(SelectAllCheckbox.sources(list.headerCheck, list: list).map(\.wrappedValue) == [true])
+
+        list.clearChecks()
+        list.selection.toggle(rows[1])
+        for source in SelectAllCheckbox.sources(list.headerCheck, list: list) { source.wrappedValue = true }
+        #expect(list.selection.checked == Set(rows) && list.headerCheck == .all, "a click on the dash checks every row")
+        for source in SelectAllCheckbox.sources(list.headerCheck, list: list) { source.wrappedValue = false }
+        #expect(list.selection.checked.isEmpty && list.headerCheck == .hidden, "a click on the full box clears them")
     }
 
     @Test func theHeaderCheckboxSlotKeepsItsWidthSoTheTabsNeverMove() {
@@ -196,32 +194,5 @@ import Testing
             if let attachment = value as? NSTextAttachment { result.append(attachment) }
         }
         return result
-    }
-}
-
-private struct GlyphPixels {
-    let width: Int
-    let bytes: [UInt8]
-
-    init?(_ image: CGImage) {
-        width = image.width
-        var buffer = [UInt8](repeating: 0, count: image.width * image.height * 4)
-        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
-              let context = CGContext(data: &buffer, width: image.width, height: image.height, bitsPerComponent: 8,
-                                      bytesPerRow: image.width * 4, space: space,
-                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
-        bytes = buffer
-    }
-
-    func at(_ x: Int, _ y: Int) -> (red: Int, green: Int, blue: Int, alpha: Int) {
-        let i = (y * width + x) * 4
-        return (Int(bytes[i]), Int(bytes[i + 1]), Int(bytes[i + 2]), Int(bytes[i + 3]))
-    }
-
-    static func matches(_ pixel: (red: Int, green: Int, blue: Int, alpha: Int), _ color: ThemeColor) -> Bool {
-        pixel.alpha == 255 && abs(pixel.red - Int((color.red * 255).rounded())) <= 3
-            && abs(pixel.green - Int((color.green * 255).rounded())) <= 3
-            && abs(pixel.blue - Int((color.blue * 255).rounded())) <= 3
     }
 }

@@ -242,6 +242,7 @@ public final class PaletteController {
         .showBcc: "person.2", .focusTo: "person", .closeComposer: "xmark", .openDraft: "pencil",
         .sendDrafts: "paperplane",
         .rescheduleSend: "calendar.badge.clock", .cancelScheduledSend: "calendar.badge.minus",
+        .sendScheduledNow: "paperplane.circle",
         .reviewSend: "paperplane", .reviewKeep: "checkmark", .reviewDiscard: "trash", .reviewSkip: "forward",
         .reviewNext: "chevron.down", .reviewPrevious: "chevron.up", .reviewEdit: "pencil", .reviewLeave: "arrow.left",
         .formatBold: "bold", .formatItalic: "italic", .formatUnderline: "underline", .formatStrikethrough: "strikethrough",

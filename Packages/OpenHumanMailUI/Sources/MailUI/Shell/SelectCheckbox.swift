@@ -27,37 +27,3 @@ public enum SelectCheckbox {
         return path
     }
 }
-
-struct SelectCheckboxGlyph: View {
-    let checked: Bool
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        let colors = SelectCheckbox.colors(theme.tokens)
-        let radius = SelectCheckbox.cornerRadius(theme.tokens)
-        Group {
-            if checked {
-                ZStack {
-                    RoundedRectangle(cornerRadius: radius).fill(colors.fill.color)
-                    SelectCheckboxTick().stroke(colors.tick.color, style: StrokeStyle(lineWidth: SelectCheckbox.lineWidth,
-                                                                                      lineCap: .round, lineJoin: .round))
-                }
-            } else {
-                SelectCheckboxOutline(radius: radius).stroke(colors.outline.color, lineWidth: SelectCheckbox.lineWidth)
-            }
-        }
-        .frame(width: SelectCheckbox.side, height: SelectCheckbox.side)
-    }
-}
-
-struct SelectCheckboxTick: Shape {
-    func path(in rect: CGRect) -> Path { Path(SelectCheckbox.tick(in: rect, yUp: false)) }
-}
-
-struct SelectCheckboxOutline: Shape {
-    let radius: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        Path(roundedRect: SelectCheckbox.outlineRect(rect), cornerRadius: radius)
-    }
-}

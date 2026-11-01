@@ -28,6 +28,7 @@ public final class ComposeManager: ActionPresenting {
     @ObservationIgnored public var staging: any AttachmentStaging
     @ObservationIgnored public var calendar: Calendar = .current
     @ObservationIgnored public var locale: Locale = .current
+    @ObservationIgnored public var batchPacing = BatchSendPacing()
 
     @ObservationIgnored unowned let environment: AppEnvironment
     @ObservationIgnored let handler: ComposeActionHandler

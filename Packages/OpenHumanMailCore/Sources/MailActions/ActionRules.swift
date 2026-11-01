@@ -67,6 +67,9 @@ public enum ActionRules {
         case .sendDrafts: return c.location == .system(.drafts) ? nil : .hidden
         case .rescheduleSend, .cancelScheduledSend:
             return c.targets.anyScheduled || c.location == .system(.scheduled) ? nil : .hidden
+        case .sendScheduledNow:
+            guard c.selection.count <= 1 else { return .hidden }
+            return c.targets.anyScheduled || c.location == .system(.scheduled) ? nil : .hidden
         case .removeLabel, .removeLabelAndDone:
             if case .label = c.location { return nil }
             return .hidden

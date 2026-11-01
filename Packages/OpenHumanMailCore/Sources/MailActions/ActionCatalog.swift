@@ -84,6 +84,10 @@ public enum ActionCatalog {
         ActionDescriptor(.cancelScheduledSend, "Cancel scheduled send", category: .thread, scopes: listAndReader,
                          changesMail: true, target: .focusedThread,
                          keywords: ["unschedule", "cancel send later", "don't send", "scheduled"], module: .sendLater),
+        ActionDescriptor(.sendScheduledNow, "Send now…", category: .thread, scopes: listAndReader, effect: .external,
+                         target: .focusedThread,
+                         keywords: ["send immediately", "send scheduled draft now", "skip schedule", "scheduled"],
+                         module: .sendLater),
     ]
 
     static let selection: [ActionDescriptor] = [
