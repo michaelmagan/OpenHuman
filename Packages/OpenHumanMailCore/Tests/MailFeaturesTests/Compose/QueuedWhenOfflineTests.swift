@@ -29,7 +29,7 @@ import Testing
         f.heldGate.release()
         await soon { state(f, session) == .sending }
         let going = try #require(f.compose.sending.first { $0.id == session.id })
-        #expect(f.compose.sendingStatus(going, now: Date()) == "Sending…")
+        #expect(f.compose.sendingStatus(going, now: fixedNow) == "Sending…")
         f.store.completeHeldSends()
         await f.posted("Sent.")
         #expect(!f.postedToasts.contains(QueuedSendNotice.text), "online: no 'back online' toast")

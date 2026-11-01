@@ -64,7 +64,7 @@ struct NativeListRowTests {
                              participants: [], messageCount: 1, unreadCount: 0, draftCount: 0, attachmentCount: 0,
                              isUnread: false, isStarred: false, isImportant: false, userLabelIDs: [], lastMessageAt: Self.now,
                              sortAt: Self.now)
-        let format = ThreadRowFormatting()
+        let format = Self.format
         let unreadSender = style.texts(for: row, chips: [], format: format, location: .system(.inbox)).sender
         let readSender = style.texts(for: read, chips: [], format: format, location: .system(.inbox)).sender
         #expect(unreadSender.attribute(.font, at: 0, effectiveRange: nil) as? NSFont == style.strongFont)

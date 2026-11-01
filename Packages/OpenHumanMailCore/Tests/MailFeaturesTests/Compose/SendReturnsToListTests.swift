@@ -112,7 +112,7 @@ import Testing
             Issue.record("scheduled: \(shown.state)")
             return
         }
-        #expect(f.compose.sendingStatus(shown, now: Date()).hasPrefix("Scheduled for "))
+        #expect(f.compose.sendingStatus(shown, now: fixedNow).hasPrefix("Scheduled for "))
         #expect(f.env.status.sendingLine == nil, "a send-later is not on its way yet")
 
         await f.compose.undoSending(shown.id)
@@ -135,15 +135,15 @@ import Testing
         var shown = try #require(f.compose.shownSending)
         #expect(shown.id == session.id && shown.step == .queued && shown.offersUndo)
         #expect(shown.to == session.to.tokens && shown.text == "On it" && shown.mode == .reply)
-        #expect(shown.secondsLeft(now: Date()) > 0)
-        #expect(f.compose.sendingStatus(shown, now: Date()).hasPrefix("Sending in "))
+        #expect(shown.secondsLeft(now: fixedNow) > 0)
+        #expect(f.compose.sendingStatus(shown, now: fixedNow).hasPrefix("Sending in "))
         #expect(f.env.undo?.canUndo == true, "⌘Z still undoes after View took the toast away")
 
         f.heldGate.release()
         await soon { f.compose.shownSending?.step == .sending }
         shown = try #require(f.compose.shownSending)
         #expect(!shown.offersUndo)
-        #expect(["Sending…", "Queued. Sends when you're back online."].contains(f.compose.sendingStatus(shown, now: Date())))
+        #expect(["Sending…", "Queued. Sends when you're back online."].contains(f.compose.sendingStatus(shown, now: fixedNow)))
         #expect(f.env.status.sendingLine == "Sending 1 message…")
 
         f.store.completeHeldSends()
@@ -204,7 +204,7 @@ import Testing
         #expect(f.compose.showSending(session.id))
         let shown = try #require(f.compose.shownSending)
         #expect(shown.offersRetry && shown.offersEdit && !shown.offersUndo && shown.step == nil)
-        #expect(f.compose.sendingStatus(shown, now: Date()) == "Couldn't send. Saved as draft.")
+        #expect(f.compose.sendingStatus(shown, now: fixedNow) == "Couldn't send. Saved as draft.")
 
         f.compose.retrySending(shown.id)
         await f.toast("Sending to ")

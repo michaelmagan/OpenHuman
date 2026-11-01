@@ -190,12 +190,10 @@ struct ReaderViewTests {
 
     @Test func accessorySlotShowsInTheHeader() async throws {
         let accessory = UIRecordingAccessory()
-        ReaderHeaderAccessorySlot.current = accessory
-        defer { ReaderHeaderAccessorySlot.current = nil }
         let detail = F.conversation(5, count: 1)
         let key = detail.messages[0].id
         let h = try await ReaderHarness.make(UITestSource(details: [detail], bodies: [key: MessageContent(html: nil, text: "Hi")]),
-                                             thread: detail.id)
+                                             thread: detail.id, accessorySlot: ReaderHeaderAccessoryStore(current: accessory))
         defer { h.close() }
         try await until { h.container(key)?.header?.accessoryTitle == "· Unsubscribe" }
         let header = try #require(h.container(key)?.header)

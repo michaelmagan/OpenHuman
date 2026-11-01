@@ -241,16 +241,19 @@ private struct CalendarFixture {
         let f = CalendarFixture()
         let model = f.sidebar()
         let slow = f.corpus.threads[1].row.id
+        let loading = Checkpoint()
+        defer { loading.release() }
         model.loadText = { thread in
             if thread == slow {
-                try? await Task.sleep(for: .milliseconds(300))
+                await loading.pass()
                 return CalendarThreadText(subject: "Old", texts: ["October 20, 2026"], participants: [])
             }
             return CalendarThreadText(subject: "New", texts: ["October 14, 2026"], participants: [])
         }
         let older = Task { await model.show(thread: slow) }
-        await Task.yield()
+        await loading.arrived()
         await model.show(thread: f.thread)
+        loading.release()
         await older.value
         #expect(model.thread == f.thread && model.days.map(\.start) == [at(10, 14)])
     }

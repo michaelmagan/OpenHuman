@@ -16,6 +16,7 @@ final class ComposeFixture {
     let compose: ComposeManager
     let discardGate = TestGate()
     let heldGate = TestGate()
+    let stagingDirectory = TemporaryDirectory("oh-compose-fixture")
     private(set) var postedToasts: [String] = []
     static let utc = TimeZone(identifier: "UTC")!
 
@@ -28,6 +29,7 @@ final class ComposeFixture {
                              isFake: true, featureFlags: flags, ai: ai, isLiveAccount: isLiveAccount)
         router = env.router
         compose = env.compose
+        compose.staging = DirectoryAttachmentStaging(directory: stagingDirectory.url)
         let discard = discardGate
         let held = heldGate
         compose.timing = ComposeTiming(autosaveDelay: .milliseconds(1), discardWindow: .seconds(6), now: { fixedNow },
