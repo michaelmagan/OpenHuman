@@ -95,7 +95,30 @@ extension SystemPlatform {
             return ConversationDebugOptions(includeSubjectAndSender: box.state == .on)
         }
         platform.confirmDomainWideRule = { question in await DomainWideRuleAlert.run(question) }
+        platform.confirmSendScheduledNow = { question in await SendScheduledNowAlert.run(question) }
         return platform
+    }
+}
+
+@MainActor
+enum SendScheduledNowAlert {
+    static func make(_ question: ScheduledSendNowQuestion) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = question.title
+        alert.informativeText = question.message
+        alert.addButton(withTitle: question.confirmTitle)
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        return alert
+    }
+
+    static func run(_ question: ScheduledSendNowQuestion) async -> Bool {
+        let alert = make(question)
+        let response = if let window = NSApp.keyWindow ?? NSApp.mainWindow, window.attachedSheet == nil {
+            await alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
+        return response == .alertFirstButtonReturn
     }
 }
 

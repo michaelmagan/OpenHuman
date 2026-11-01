@@ -173,4 +173,29 @@ import Testing
         _ = try await sendThenQuit(f, to: "someone@else.example")
         #expect(await pendingReminders(f).isEmpty)
     }
+
+    @Test func aSendIsReportedStartedOnlyOnceItsReminderIntentIsStored() async throws {
+        let f = ComposeFixture(settings: { HeldSettingWrites($0, holding: ComposeSettings.pendingSendReminders.name) })
+        let writes = try #require(f.env.settings as? HeldSettingWrites)
+        try await f.store.set(AppSettings.autoRemindExternal, true)
+        await f.loaded()
+        #expect(await f.run(.reply))
+        let session = try #require(f.compose.windowSession)
+        await session.settle()
+        session.to.text = "someone@else.example,"
+        session.updateBody(doc("Thanks"))
+        let sending = Task { await f.run(.send, in: session) }
+        await writes.checkpoint.arrived()
+        await eventually { f.env.undo?.stack.contains { String(localized: $0.title) == "Reply sent." } == true }
+        #expect(f.compose.sendsStarting.contains(session.id), "the send waits for its intent while the write is held")
+        #expect(await pendingReminders(f).isEmpty)
+
+        writes.checkpoint.release()
+        #expect(await sending.value)
+        #expect(await pendingReminders(f).map(\.kind) == [.ifNoReply], "stored before the send reports it started")
+        #expect(!f.compose.sendsStarting.contains(session.id))
+        f.compose.held.removeAll()
+        f.heldGate.release()
+        await f.compose.settle()
+    }
 }

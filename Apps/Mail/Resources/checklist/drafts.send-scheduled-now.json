@@ -1,0 +1,15 @@
+{
+  "id": "drafts.send-scheduled-now",
+  "area": "Composer",
+  "title": "Send a scheduled draft now from the Drafts list, and undo it",
+  "steps": [
+    "Launch Mail with -UseFakeGmail, open a draft, schedule it with ⇧⌘L for tomorrow morning, then go to Drafts",
+    "Right-click the scheduled draft's row and choose Send now…",
+    "Read the alert, then click Send Now",
+    "Press ⌘Z while the Sending toast is shown, then repeat and let it go out"
+  ],
+  "deepLink": null,
+  "expected": "Send now… appears for one scheduled draft. The alert names the subject, recipients and scheduled time. ⌘Z restores the schedule and confirms it. Sending again waits through the undo window and shows one Sent. notice. Send drafts… with this and other drafts checked still lists it under Staying in Drafts.",
+  "requires": "fake",
+  "addedIn": "2026-10-31"
+}

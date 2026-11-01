@@ -6,6 +6,13 @@ import OpenHumanCore
 /// Checked drafts sent together from the Drafts list: one undo entry holds every send in the batch, each draft goes
 /// out from its own account through the held-send window, and one notice reports what went out and what stayed.
 struct BatchSend {
+    enum Kind: Equatable {
+        /// Checked drafts from the Drafts list. Reminders off is the person's choice, so the AI catch-up skips them
+        case checked
+        /// One scheduled draft sent before its time. Undo puts its schedule back
+        case scheduledNow(at: Date, condition: SendLaterCondition)
+    }
+
     enum State: Equatable {
         case held
         case sending
@@ -28,6 +35,7 @@ struct BatchSend {
         let detail: String?
     }
 
+    var kind: Kind = .checked
     var items: [Item] = []
     var failedAtStart: [Failure] = []
     var reminders: SentMailReminderRule?
@@ -44,6 +52,51 @@ struct BatchSend {
     }
 
     var sentCount: Int { items.count { $0.state == .sent } }
+}
+
+/// How a large batch is spread out: past `threshold` drafts, each chunk of `chunkSize` is held `pause` longer than the
+/// one before, so the send queue and the provider's rate limits get a few at a time. The batch keeps one undo entry,
+/// which ends with the first chunk's window.
+public struct BatchSendPacing: Sendable, Equatable {
+    public var threshold: Int
+    public var chunkSize: Int
+    public var pause: Duration
+
+    public init(threshold: Int = 25, chunkSize: Int = 10, pause: Duration = .seconds(5)) {
+        self.threshold = threshold
+        self.chunkSize = chunkSize
+        self.pause = pause
+    }
+
+    /// The extra hold for the draft queued at `index` in a batch of `count`.
+    public func extraHold(at index: Int, of count: Int) -> Duration {
+        guard count > threshold, chunkSize > 0, index > 0 else { return .zero }
+        return pause * (index / chunkSize)
+    }
+}
+
+/// The question asked before a scheduled draft goes out ahead of its time.
+public struct ScheduledSendNowQuestion: Sendable, Equatable {
+    public var subject: String
+    public var recipients: String
+    public var scheduledFor: String
+
+    public init(subject: String, recipients: String, scheduledFor: String) {
+        self.subject = subject
+        self.recipients = recipients
+        self.scheduledFor = scheduledFor
+    }
+
+    public var title: String { String(localized: "Send now?") }
+
+    public var message: String {
+        let subject = subject.trimmingCharacters(in: .whitespacesAndNewlines)
+        return subject.isEmpty
+            ? String(localized: "The draft to \(recipients) is scheduled for \(scheduledFor). It will be sent now instead.")
+            : String(localized: "“\(subject)” to \(recipients) is scheduled for \(scheduledFor). It will be sent now instead.")
+    }
+
+    public var confirmTitle: String { String(localized: "Send Now") }
 }
 
 /// What came back from starting a batch. Sends are still in their undo window when this is returned.
@@ -107,14 +160,21 @@ extension ComposeManager {
     /// for this batch's "remind me if no reply" reminders, or nil for none; the stored setting is not changed.
     @discardableResult
     public func sendBatch(_ drafts: [DraftSummary], reminders: SentMailReminderRule?) async -> BatchSendStart {
+        await startBatch(drafts, reminders: reminders, kind: .checked)
+    }
+
+    @discardableResult
+    func startBatch(_ drafts: [DraftSummary], reminders: SentMailReminderRule?, kind: BatchSend.Kind) async -> BatchSendStart {
         var start = BatchSendStart(batch: nil, queued: [], failed: [])
         guard canSend, let commands = environment.commands, !drafts.isEmpty else { return start }
         let seconds = AppSettings.undoSendHold(await Self.read(environment.settings, AppSettings.undoSendSeconds) ?? 10)
         undoSendSeconds = seconds
-        var batch = BatchSend(reminders: reminders)
-        for draft in Self.byAccount(drafts) {
+        var batch = BatchSend(kind: kind, reminders: reminders)
+        let ordered = Self.byAccount(drafts)
+        for draft in ordered {
             do {
-                let token = try await commands.send(draft.id, undoWindow: .seconds(seconds))
+                let hold = Duration.seconds(seconds) + batchPacing.extraHold(at: batch.items.count, of: ordered.count)
+                let token = try await commands.send(draft.id, undoWindow: hold)
                 var item = BatchSend.Item(id: UUID(), draft: draft, token: token)
                 if let reminders { item.reminder = rememberBatchReminder(draft, rule: reminders) }
                 let until = Date().addingTimeInterval(token.sendAfter.timeIntervalSince(timing.now()))
@@ -136,7 +196,13 @@ extension ComposeManager {
         let count = batch.items.count
         let earliest = batch.items.map(\.token.sendAfter).min() ?? timing.now()
         let expiresAt = Date().addingTimeInterval(earliest.timeIntervalSince(timing.now()))
-        let title: LocalizedStringResource = count == 1 ? "Sending 1 draft…" : "Sending \(count) drafts…"
+        let title: LocalizedStringResource
+        if case .scheduledNow = kind, let only = batch.items.first {
+            let fields = only.draft.fields
+            title = "Sending to \(Self.recipientSummary(fields.to + fields.cc + fields.bcc))…"
+        } else {
+            title = count == 1 ? "Sending 1 draft…" : "Sending \(count) drafts…"
+        }
         if let entry = push(title, .sendBatch(batch: id), expiresAt: expiresAt) {
             batches[id]?.undoEntry = entry
             for item in batch.items { sendingUndoEntries[item.id] = entry }
@@ -145,6 +211,71 @@ extension ComposeManager {
         for item in batch.items { track(watchBatchItem(id, item: item)) }
         // Why: every reminder intent is stored before the batch is reported started, so all survive a relaunch
         if batch.items.contains(where: { $0.reminder != nil }) { await sendReminderUpdate?.value }
+        return start
+    }
+
+    func sendScheduledNowAction(in thread: ThreadKey) -> ActionPerformance {
+        guard canSend else {
+            let title = environment.actions.descriptor(.sendScheduledNow)?.title ?? String(localized: "Send now")
+            environment.actions.refuse(.sendScheduledNow, .unavailable(title))
+            return .done
+        }
+        return .started(Task { [weak self] in _ = await self?.sendScheduledNow(in: thread) })
+    }
+
+    /// Sends the conversation's scheduled draft now instead of at its time, once the person confirms. It goes through
+    /// the held-send window like any send, and Undo puts the schedule back. Nil when nothing was sent.
+    @discardableResult
+    public func sendScheduledNow(in thread: ThreadKey) async -> BatchSendStart? {
+        guard canSend, let commands = environment.commands else { return nil }
+        guard let row = await scheduledDraft(in: thread), let at = row.sendAt else {
+            nothingScheduled()
+            return nil
+        }
+        let open = Set(sessions.filter(\.isOpen).compactMap(\.draftKey))
+        if let reason = BatchSendPlan.contentReason(row, openInComposer: open) {
+            let text = BatchSendModel.text(for: reason) { [weak self] in self?.formatSendAt($0) ?? $0.formatted() }
+            environment.notices.post(String(localized: "Not sent: \(text)."), style: .info, duration: NoticeCenter.infoDuration)
+            return nil
+        }
+        let condition = row.sendCondition
+        let fields = row.fields
+        let when = formatSendAt(at) + (condition == .ifNoReply ? Self.ifNoReplySuffix : "")
+        let question = ScheduledSendNowQuestion(subject: fields.subject,
+                                                recipients: Self.recipientSummary(fields.to + fields.cc + fields.bcc),
+                                                scheduledFor: when)
+        guard await environment.system.platform.confirmSendScheduledNow(question) else { return nil }
+        // Why: the schedule may have changed or gone out while the question was up
+        guard let current = await Self.first(environment.data.draft(row.id)) ?? nil, current.status == .scheduled,
+              current.sendAt == at else {
+            nothingScheduled()
+            return nil
+        }
+        do {
+            try await commands.cancelScheduledSend(row.id)
+        } catch {
+            let detail = (error as? MailPortError)?.description ?? String(localized: "Try again.")
+            environment.notices.post(String(localized: "Couldn't send it now. \(detail)"), style: .error)
+            return nil
+        }
+        forgetSending(draft: row.id)
+        let unscheduled = await Self.first(environment.data.draft(row.id)) ?? nil
+        let start = await startBatch([unscheduled ?? current], reminders: nil,
+                                     kind: .scheduledNow(at: at, condition: condition))
+        guard start.batch == nil else { return start }
+        guard at.timeIntervalSince(timing.now()) >= Self.restoreLead else {
+            environment.notices.post(String(localized: "Couldn't send it now. Its scheduled time has passed, so it's back in Drafts."),
+                                     style: .error)
+            return start
+        }
+        do {
+            try await restoreSchedule(draft: row.id, at: at, condition: condition)
+            environment.notices.post(String(localized: "Couldn't send it now, so it stays scheduled for \(when)."),
+                                     style: .error)
+        } catch {
+            environment.notices.post(String(localized: "Couldn't send it now. It's back in Drafts without its schedule."),
+                                     style: .error)
+        }
         return start
     }
 
@@ -215,8 +346,12 @@ extension ComposeManager {
 
     private func batchItemSent(_ batch: UUID, item: BatchSend.Item) async {
         let rule = batches[batch]?.reminders
+        let kind = batches[batch]?.kind
         finishBatchItem(batch, item, .sent)
-        guard let rule else { return }
+        guard let rule else {
+            if kind == .checked { await noteNoReminderWanted(item) }
+            return
+        }
         if let intent = item.reminder {
             await applySendReminder(intent)
         } else if rule.scope == .needsFollowUp,
@@ -229,6 +364,13 @@ extension ComposeManager {
                                           subject: fields.subject, text: BatchSendPlan.plainText(fields),
                                           thread: item.draft.thread, rule: rule, sentAt: timing.now())
         }
+    }
+
+    private func noteNoReminderWanted(_ item: BatchSend.Item) async {
+        var conversation = item.draft.thread
+        if conversation == nil { conversation = try? await environment.data.sentConversation(item.draft.id) }
+        guard let thread = conversation else { return }
+        await environment.followUps.noteNoReminderWanted(thread, sentAt: timing.now())
     }
 
     private func finishBatchItem(_ batch: UUID, _ item: BatchSend.Item, _ state: BatchSend.State) {
@@ -278,12 +420,19 @@ extension ComposeManager {
     }
 
     private func report(_ batch: BatchSend) {
+        // Why: a send-now that never started is reported by sendScheduledNow once the schedule is back
+        if case .scheduledNow = batch.kind, batch.items.isEmpty { return }
         let sent = batch.sentCount
         let failures = batch.failures
         guard !failures.isEmpty else {
             guard sent > 0 else { return }
-            environment.notices.post(sent == 1 ? String(localized: "Sent 1 draft.") : String(localized: "Sent \(sent) drafts."),
-                                     style: .info, duration: environment.notices.timing.brief)
+            let text: String
+            if case .scheduledNow = batch.kind {
+                text = String(localized: "Sent.")
+            } else {
+                text = sent == 1 ? String(localized: "Sent 1 draft.") : String(localized: "Sent \(sent) drafts.")
+            }
+            environment.notices.post(text, style: .info, duration: environment.notices.timing.brief)
             return
         }
         let failed = failures.count
@@ -304,12 +453,13 @@ extension ComposeManager {
         }
         let keys = failures.map(\.draft.id)
         let reminders = batch.reminders
+        let kind = batch.kind
         let account = failures[0].draft.account
         let show = NoticeCenter.Choice(String(localized: "Show Drafts")) { [weak self] in self?.showDrafts(account) }
         lastBatchFailures = keys
         environment.notices.post(message, style: .error, actionTitle: String(localized: "Retry"), duration: nil,
                                  secondary: show) { [weak self] in
-            await self?.retryBatch(keys, reminders: reminders)
+            await self?.retryBatch(keys, reminders: reminders, kind: kind)
         }
     }
 
@@ -331,6 +481,10 @@ extension ComposeManager {
     /// Sends the drafts that failed again, after checking them as the confirmation did. Drafts that can't go now are
     /// reported and left alone.
     public func retryBatch(_ keys: [DraftKey], reminders: SentMailReminderRule?) async {
+        await retryBatch(keys, reminders: reminders, kind: .checked)
+    }
+
+    func retryBatch(_ keys: [DraftKey], reminders: SentMailReminderRule?, kind: BatchSend.Kind) async {
         var rows: [DraftSummary] = []
         let failed = Set(keys)
         for key in keys {
@@ -347,7 +501,7 @@ extension ComposeManager {
         }
         guard !ready.isEmpty else { return }
         for key in ready.map(\.id) { forgetSending(draft: key) }
-        await sendBatch(ready, reminders: reminders)
+        await startBatch(ready, reminders: reminders, kind: kind)
     }
 
     func undoBatch(_ id: UUID) async throws {
@@ -372,6 +526,10 @@ extension ComposeManager {
             }
         }
         if let failure, batches[id]?.items.contains(where: { $0.state == .held }) == true { throw failure }
+        if case .scheduledNow(let at, let condition) = batch.kind, cancelled > 0 {
+            await putScheduleBack(batch.items[0].draft.id, at: at, condition: condition)
+            return
+        }
         if late > 0 {
             let text = late == 1 ? String(localized: "Too late to undo 1 draft: it's already on its way.")
                                  : String(localized: "Too late to undo \(late) drafts: they're already on their way.")
@@ -381,6 +539,25 @@ extension ComposeManager {
                                       : String(localized: "Not sent. The \(cancelled) drafts are back in Drafts.")
             environment.notices.post(text, style: .info, duration: NoticeCenter.infoDuration)
         }
+    }
+
+    private func putScheduleBack(_ draft: DraftKey, at date: Date, condition: SendLaterCondition) async {
+        guard date.timeIntervalSince(timing.now()) >= Self.restoreLead else {
+            environment.notices.post(String(localized: "Not sent. Its scheduled time has passed, so it's back in Drafts."),
+                                     style: .info, duration: NoticeCenter.infoDuration)
+            return
+        }
+        do {
+            try await restoreSchedule(draft: draft, at: date, condition: condition)
+        } catch {
+            let detail = (error as? MailPortError)?.description ?? String(localized: "Try again.")
+            environment.notices.post(String(localized: "Not sent, and the schedule couldn't be put back. \(detail) It's in Drafts."),
+                                     style: .error)
+            return
+        }
+        let when = formatSendAt(date) + (condition == .ifNoReply ? Self.ifNoReplySuffix : "")
+        environment.notices.post(String(localized: "Not sent. It's scheduled for \(when) again."), style: .info,
+                                 duration: NoticeCenter.infoDuration)
     }
 
     var heldBatchSendCount: Int {

@@ -22,6 +22,8 @@ public struct SystemPlatform {
     public var chooseConversationDebugFile: @MainActor (_ suggestedName: String) -> URL? = { _ in nil }
     // Without a window to ask in, a rule for a whole common domain is never made
     public var confirmDomainWideRule: @MainActor (DomainWideRuleConfirmation) async -> DomainWideRuleChoice = { _ in .cancel }
+    // Without a window to ask in, a scheduled draft keeps its schedule
+    public var confirmSendScheduledNow: @MainActor (ScheduledSendNowQuestion) async -> Bool = { _ in false }
     public var copyToClipboard: @MainActor (_ text: String) -> Void = { _ in }
     public var openNotificationSettings: @MainActor () -> Void
     // True while the user is mid-task in Mail, so a Focus change never moves the window under them

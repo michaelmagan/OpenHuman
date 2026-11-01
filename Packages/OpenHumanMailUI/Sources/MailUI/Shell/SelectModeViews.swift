@@ -18,20 +18,27 @@ struct SelectAllCheckbox: View {
                 .accessibilityHidden(true)
         } else {
             let rows = SelectAllShortcuts.tipRows(descriptors)
-            Button {
-                list.headerCheckClicked()
-            } label: {
-                SelectCheckboxGlyph(checked: check == .all)
-                    .frame(width: ShellMetrics.toolbarControlHeight, height: ShellMetrics.toolbarControlHeight)
-                    .contentShape(Rectangle())
+            Toggle(sources: Self.sources(check, list: list), isOn: \.self) {
+                Text(check == .all ? "Clear selection" : "Select all")
             }
-            .buttonStyle(.plain)
+            .labelsHidden()
+            .ohCheckboxToggleStyle()
+            .frame(width: ShellMetrics.toolbarControlHeight, height: ShellMetrics.toolbarControlHeight)
             .shortcutTip(SelectAllShortcuts.tip(descriptors), alignment: .leading, pinned: tipPinned)
             .help(Self.helpText(check == .all, rows))
             .accessibilityLabel(check == .all ? "Clear selection" : "Select all")
             .accessibilityValue(check == .all ? "All conversations checked" : "Some conversations checked")
             .accessibilityHint(Self.spokenHint(rows))
             .accessibilityIdentifier("toolbar.selectAll")
+        }
+    }
+
+    /// One source per state the box shows: checked and unchecked while only some rows are checked, so the system box
+    /// draws its mixed dash. Clicking sets every source to the same value: on checks every row, off clears them.
+    static func sources(_ check: SelectionHeaderCheck, list: ThreadListModel) -> [Binding<Bool>] {
+        let states = check == .all ? [true] : [true, false]
+        return states.map { state in
+            Binding(get: { state }, set: { on in if on { list.checkAll() } else { list.clearChecks() } })
         }
     }
 

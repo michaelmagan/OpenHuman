@@ -661,7 +661,7 @@ public final class ThreadListViewController: NSViewController, NSTableViewDataSo
 
     static let rowMenuSections: [[ActionID]] = [
         [.openThread, .reply, .replyAll, .forward],
-        [.sendDrafts],
+        [.sendDrafts, .sendScheduledNow],
         [.markDone, .moveToInbox, .snooze, .remind, .label, .move],
         [.toggleStar, .toggleRead, .toggleMute, .autoLabelWrong],
         [.blockSender, .blockDomain],

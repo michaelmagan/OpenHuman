@@ -216,6 +216,28 @@ private let no = #"{"needsFollowUp":false,"reason":"Only says thanks","suggested
         #expect(provider.requests.count == asked)
     }
 
+    @Test func theCatchUpLeavesAMessageSentInABatchWithRemindersOffAlone() async throws {
+        let provider = ScriptedProvider { _, _ in .text(yes) }
+        let f = try await fixture(provider, scope: .off)
+        let alone = try await send(f, to: ["someone@else.example"], "Could you send the budget numbers?")
+        let content = DraftFields(to: [EmailAddress(name: nil, email: "someone@else.example")], subject: "Notes",
+                                  bodyHTML: "<p>Could you look over the notes?</p>", bodyText: "Could you look over the notes?")
+        let (key, _) = try await f.store.createDraft(DraftInput(account: ComposeFixture.work, mode: .new, content: content))
+        let draft = try #require(await f.draftRow(key))
+        #expect(await f.compose.sendBatch([draft], reminders: nil).queued == [key])
+        f.store.completeHeldSends()
+        await f.compose.settle()
+        await f.posted("Sent 1 draft.")
+        let batched = try #require(f.store.sentMessages.last { $0.draft == key }).thread
+
+        try await f.store.set(AppSettings.autoRemindExternal, true)
+        try await f.store.set(AppSettings.autoRemindAIDetected, true)
+        let result = try await f.env.followUps.catchUp()
+        #expect(result.remindersSet >= 1)
+        #expect(await reminder(f, alone) != nil, "a message sent on its own is still checked")
+        #expect(await reminder(f, batched) == nil, "the batch went with reminders off, and that choice holds")
+    }
+
     @Test func scopesNoReplyAddressesAndTheSuggestedWait() throws {
         #expect(SentMailReminderRule().scope == .off)
         #expect(SentMailReminderRule(enabled: true).scope == .externalRecipients)

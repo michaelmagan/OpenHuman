@@ -69,9 +69,10 @@ extension ComposeManager {
         let marksDone = await marksDoneWhenSent(session)
         session.expectsDraftGone = true
         let token: SendToken
+        let intentWrite: Task<Void, Never>?
         do {
             token = try await commands.send(key, undoWindow: .seconds(seconds))
-            await rememberSendReminder(of: session, draft: key)
+            intentWrite = await rememberSendReminder(of: session, draft: key)
         } catch {
             session.expectsDraftGone = false
             let detail = (error as? MailPortError)?.description ?? String(localized: "Try again.")
@@ -93,6 +94,8 @@ extension ComposeManager {
         addSending(session, draft: key, state: .queued(until: expiresAt))
         push(title, .send(session: session.id, token: token), expiresAt: expiresAt, view: session.id)
         track(watchHeldSend(heldSend, draft: key))
+        // Why: the send counts as started only once its reminder intent is stored, so a crash can't lose it
+        await intentWrite?.value
     }
 
     static func recipientSummary(_ recipients: [EmailAddress]) -> String {
@@ -513,7 +516,7 @@ extension ComposeManager {
         environment.actions.refuse(id, .unavailable(title))
     }
 
-    private func nothingScheduled() {
+    func nothingScheduled() {
         environment.notices.post(String(localized: "Nothing is scheduled to send in this conversation any more"),
                                  style: .info, duration: NoticeCenter.infoDuration)
     }

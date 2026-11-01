@@ -22,7 +22,10 @@ extension ComposeSettings {
 }
 
 extension ComposeManager {
-    func rememberSendReminder(of session: ComposeSession, draft key: DraftKey) async {
+    /// Stores the "remind me" intent for a send that is now held, so it survives a relaunch. Returns the write, which
+    /// the caller awaits before reporting the send started; nil when the send gets no reminder.
+    @discardableResult
+    func rememberSendReminder(of session: ComposeSession, draft key: DraftKey) async -> Task<Void, Never>? {
         let due: (Date, ReminderKind)?
         if let chosen = session.pendingReminder {
             due = (chosen.dueAt, chosen.kind)
@@ -36,10 +39,10 @@ extension ComposeManager {
                 due = nil
             }
         }
-        guard let (dueAt, kind) = due else { return }
+        guard let (dueAt, kind) = due else { return nil }
         let intent = PendingSendReminder(draft: key, thread: session.thread ?? session.draftThread, dueAt: dueAt, kind: kind)
         sendReminderDrafts.insert(key)
-        updatePendingSendReminders { list in list.filter { $0.draft != key } + [intent] }
+        return updatePendingSendReminders { list in list.filter { $0.draft != key } + [intent] }
     }
 
     func forgetSendReminder(_ draft: DraftKey) {

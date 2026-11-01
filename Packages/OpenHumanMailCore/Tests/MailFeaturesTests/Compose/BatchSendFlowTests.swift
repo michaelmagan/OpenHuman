@@ -7,6 +7,23 @@ import Testing
 @testable import MailFeatures
 
 @MainActor
+final class SendNowAnswers {
+    var asked: [ScheduledSendNowQuestion] = []
+    let answer: Bool
+
+    init(_ answer: Bool) { self.answer = answer }
+
+    var platform: SystemPlatform {
+        var platform = SystemPlatform.inert()
+        platform.confirmSendScheduledNow = { [self] question in
+            asked.append(question)
+            return answer
+        }
+        return platform
+    }
+}
+
+@MainActor
 @Suite(.serialized) struct BatchSendFlowTests {
     static let home = AccountID(2)
 
@@ -233,6 +250,98 @@ import Testing
         #expect(Set(sent(f)) == [made[0].id, made[1].id])
         let kept = await f.draftRow(made[2].id)
         #expect(kept?.status == .scheduled && kept?.sendAt == scheduledAt, "the scheduled draft keeps its schedule")
+    }
+
+    @Test func pacingStartsPastTheThresholdAndAddsAPausePerChunk() {
+        let pacing = BatchSendPacing()
+        #expect(pacing == BatchSendPacing(threshold: 25, chunkSize: 10, pause: .seconds(5)))
+        #expect((0..<25).allSatisfy { pacing.extraHold(at: $0, of: 25) == .zero }, "25 go together")
+        #expect(pacing.extraHold(at: 9, of: 26) == .zero && pacing.extraHold(at: 10, of: 26) == .seconds(5))
+        #expect(pacing.extraHold(at: 25, of: 26) == .seconds(10))
+        #expect(BatchSendPacing(threshold: 1, chunkSize: 0).extraHold(at: 5, of: 9) == .zero)
+    }
+
+    @Test func aLargeBatchGoesOutInChunksUnderOneUndoEntryAndOneNotice() async throws {
+        let f = ComposeFixture()
+        f.compose.batchPacing = BatchSendPacing(threshold: 3, chunkSize: 2, pause: .seconds(4))
+        await f.loaded()
+        let made = try await drafts(f, count: 5)
+        let entriesBefore = f.env.undo?.stack.count ?? 0
+        let start = await f.compose.sendBatch(made, reminders: nil)
+        let id = try #require(start.batch)
+        let hold = Double(AppSettings.undoSendHold((try? await f.store.get(AppSettings.undoSendSeconds)) ?? 10))
+        let offsets = f.compose.batches[id]?.items.map { $0.token.sendAfter.timeIntervalSince(fixedNow) }
+        #expect(offsets == [hold, hold, hold + 4, hold + 4, hold + 8], "two at a time, four seconds apart")
+        #expect((f.env.undo?.stack.count ?? 0) == entriesBefore + 1)
+        #expect(f.env.undo?.stack.last.map { String(localized: $0.title) } == "Sending 5 drafts…")
+
+        await letThemGo(f)
+        #expect(Set(sent(f)) == Set(made.map(\.id)))
+        await f.posted("Sent 5 drafts.")
+        #expect(f.postedToasts.filter { $0.hasPrefix("Sent ") }.count == 1, "one notice for the whole batch")
+    }
+
+    @Test func aBatchUpToTheThresholdIsNotSpreadOut() async throws {
+        let f = ComposeFixture()
+        f.compose.batchPacing = BatchSendPacing(threshold: 3, chunkSize: 1, pause: .seconds(4))
+        await f.loaded()
+        let made = try await drafts(f, count: 3)
+        let id = try #require(await f.compose.sendBatch(made, reminders: nil).batch)
+        let sendAfter = Set(f.compose.batches[id]?.items.map(\.token.sendAfter) ?? [])
+        #expect(sendAfter.count == 1)
+        await letThemGo(f)
+    }
+
+    private func scheduledDraft(_ f: ComposeFixture) async throws -> (draft: DraftSummary, thread: ThreadKey, at: Date) {
+        let draft = try #require(try await drafts(f, count: 1).first)
+        let at = fixedNow.addingTimeInterval(86_400)
+        try await f.store.scheduleSend(draft.id, at: at)
+        return (draft, try #require(draft.thread), at)
+    }
+
+    @Test func sendNowNamesTheScheduledTimeAndUndoPutsTheScheduleBack() async throws {
+        let answers = SendNowAnswers(true)
+        let f = ComposeFixture(platform: answers.platform)
+        await f.loaded()
+        let (draft, thread, at) = try await scheduledDraft(f)
+        let start = try #require(await f.compose.sendScheduledNow(in: thread))
+        let when = f.compose.formatSendAt(at)
+        let question = try #require(answers.asked.first)
+        #expect(answers.asked.count == 1 && question.scheduledFor == when)
+        #expect(question.message.hasPrefix("“Batch 1-1” to ") && question.message.contains("scheduled for \(when)."))
+        #expect(start.queued == [draft.id] && f.store.heldSendCount == 1)
+        #expect(f.env.undo?.stack.last.map { String(localized: $0.title) }?.hasPrefix("Sending to ") == true)
+
+        await f.env.undo?.undoLast()
+        let back = await f.draftRow(draft.id)
+        #expect(back?.status == .scheduled && back?.sendAt == at, "the schedule is back")
+        await f.posted("Not sent. It's scheduled for \(when) again.")
+        await letThemGo(f)
+        #expect(sent(f).isEmpty)
+    }
+
+    @Test func sendNowGoesOnceConfirmed() async throws {
+        let f = ComposeFixture(platform: SendNowAnswers(true).platform)
+        await f.loaded()
+        let (draft, thread, _) = try await scheduledDraft(f)
+        await f.compose.sendScheduledNow(in: thread)
+        await letThemGo(f)
+        #expect(sent(f) == [draft.id])
+        await f.posted("Sent.")
+        #expect(f.compose.heldSendCount == 0)
+    }
+
+    @Test func sendNowCancelledKeepsTheScheduleAndWritesNothing() async throws {
+        let answers = SendNowAnswers(false)
+        let f = ComposeFixture(platform: answers.platform)
+        await f.loaded()
+        let (draft, thread, at) = try await scheduledDraft(f)
+        let callsBefore = f.recorder.calls
+        #expect(await f.compose.sendScheduledNow(in: thread) == nil)
+        #expect(answers.asked.count == 1)
+        #expect(f.recorder.calls == callsBefore, "nothing is unscheduled or sent")
+        let kept = await f.draftRow(draft.id)
+        #expect(kept?.status == .scheduled && kept?.sendAt == at)
     }
 
     @Test func quittingDuringTheUndoWindowSendsTheBatch() async throws {

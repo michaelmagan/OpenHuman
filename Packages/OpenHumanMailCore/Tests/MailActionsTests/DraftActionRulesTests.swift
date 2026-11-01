@@ -50,6 +50,22 @@ import Testing
                 "the composer has its own Cancel on the Sends at line")
     }
 
+    @Test func sendNowIsForOneScheduledDraft() throws {
+        let descriptor = try #require(ActionCatalog.descriptor(.sendScheduledNow))
+        #expect(descriptor.effect == .external && descriptor.module == .sendLater && descriptor.defaultBindings.isEmpty)
+        #expect(descriptor.target == .focusedThread && descriptor.title == "Send now…")
+        #expect(availability(.sendScheduledNow, context(.system(.inbox))) == .hidden)
+        #expect(availability(.sendScheduledNow, context(.system(.drafts))) == .hidden, "not every draft is scheduled")
+        let scheduledDraft = context(.system(.drafts), targets: TargetState(anyScheduled: true))
+        #expect(availability(.sendScheduledNow, scheduledDraft) == .enabled)
+        var twoChecked = scheduledDraft
+        twoChecked.selection = [key, ThreadKey(account: AccountID(1), rowID: 2, gmailThreadID: GmailThreadID("t2"))]
+        #expect(availability(.sendScheduledNow, twoChecked) == .hidden, "one draft at a time")
+        var noPort = scheduledDraft
+        noPort.canWrite = false
+        #expect(availability(.sendScheduledNow, noPort) == .disabled(.unavailable("Send now…")))
+    }
+
     @Test func withoutAWritePortOnlyTheOpeningWorks() {
         var noPort = context(.system(.scheduled))
         noPort.canWrite = false

@@ -77,6 +77,11 @@ public struct BatchSendPlan: Sendable, Equatable {
         case .sent, .discarded: return .noDraft
         case .editing, .failed: break
         }
+        return contentReason(draft, openInComposer: openInComposer)
+    }
+
+    /// Why the draft itself can't go yet, whatever its send status.
+    static func contentReason(_ draft: DraftSummary, openInComposer: Set<DraftKey> = []) -> BatchSendSkipReason? {
         if !draft.canBeScheduled { return .needsReview }
         if draft.hasRemoteConflict { return .changedElsewhere }
         if openInComposer.contains(draft.id) { return .openInComposer }
@@ -227,7 +232,9 @@ public final class BatchSendModel {
         }
     }
 
-    public func text(for reason: BatchSendSkipReason) -> String {
+    public func text(for reason: BatchSendSkipReason) -> String { Self.text(for: reason, formatDate: formatDate) }
+
+    static func text(for reason: BatchSendSkipReason, formatDate: @MainActor (Date) -> String) -> String {
         switch reason {
         case .noDraft: String(localized: "No draft here any more")
         case .scheduled(let date): String(localized: "Stays scheduled for \(formatDate(date))")

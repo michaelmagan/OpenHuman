@@ -128,6 +128,7 @@ extension ActionID {
     public static let sendDrafts = ActionID("draft.sendChecked")
     public static let rescheduleSend = ActionID("scheduledSend.reschedule")
     public static let cancelScheduledSend = ActionID("scheduledSend.cancel")
+    public static let sendScheduledNow = ActionID("scheduledSend.sendNow")
 
     public static let reviewSend = ActionID("review.send")
     public static let reviewKeep = ActionID("review.keep")

@@ -20,12 +20,14 @@ final class ComposeFixture {
     static let utc = TimeZone(identifier: "UTC")!
 
     init(corpus: FakeCorpus = .rich(threadCount: 60, now: fixedNow), flags: FeatureFlags = FeatureFlags(),
-         writePort: Bool = true, isLiveAccount: Bool = false, ai: AICenter? = nil, liveConnectivity: Bool = false) {
+         writePort: Bool = true, isLiveAccount: Bool = false, ai: AICenter? = nil, liveConnectivity: Bool = false,
+         platform: SystemPlatform? = nil, settings: ((FakeMailStore) -> any SettingsPort)? = nil) {
         store = FakeMailStore(corpus: corpus, options: .init(remoteAck: .immediate, heldSends: .manual,
                                                              liveConnectivity: liveConnectivity, now: { fixedNow }))
         recorder = RecordingCommands(store)
-        env = AppEnvironment(data: store, commands: writePort ? recorder : nil, accounts: store, settings: store,
-                             isFake: true, featureFlags: flags, ai: ai, isLiveAccount: isLiveAccount)
+        env = AppEnvironment(data: store, commands: writePort ? recorder : nil, accounts: store,
+                             settings: settings?(store) ?? store, isFake: true, featureFlags: flags, platform: platform,
+                             ai: ai, isLiveAccount: isLiveAccount)
         router = env.router
         compose = env.compose
         let discard = discardGate
@@ -121,6 +123,27 @@ final class TestGate: @unchecked Sendable {
             return waiters
         }
         for c in pending { c.resume() }
+    }
+}
+
+/// The store's settings, with every write of `held` stopped at a checkpoint until the test releases it.
+final class HeldSettingWrites: SettingsPort, @unchecked Sendable {
+    let store: FakeMailStore
+    let held: String
+    let checkpoint = Checkpoint()
+
+    init(_ store: FakeMailStore, holding held: String) {
+        self.store = store
+        self.held = held
+    }
+
+    func observe<V>(_ key: AppSettingKey<V>) -> AsyncStream<V> { store.observe(key) }
+
+    func get<V>(_ key: AppSettingKey<V>) async throws -> V { try await store.get(key) }
+
+    func set<V>(_ key: AppSettingKey<V>, _ value: V) async throws {
+        if key.name == held { await checkpoint.pass() }
+        try await store.set(key, value)
     }
 }
 
