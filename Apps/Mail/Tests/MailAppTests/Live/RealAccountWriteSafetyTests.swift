@@ -436,6 +436,11 @@ private enum RepoSources {
     #expect(codeLines(scopedRemoval, containing: "extraHeaders:") == [
         "extraHeaders: [CalendarGuardTransport.scopedRemovalHeader: nonce, \"If-Match\": etag])",
     ])
+    #expect(codeLines(scopedRemoval, containing: "\"PATCH\"").count == 1, "only the series trim patches")
+    // Reviewed: the guard itself re-checks guest notification and the trimmed rules on its own fresh read.
+    let calendarGuard = try #require(everything["OpenHumanGmail/CalendarGuardTransport.swift"])
+    #expect(codeLines(calendarGuard, containing: "Self.hasGuests(wire, calendarID: calendarID)").count == 1)
+    #expect(codeLines(calendarGuard, containing: "GoogleRemovalPrefix.narrows(current, to: proposed)").count == 1)
     let deletes = codeLines(try #require(everything["OpenHumanGmail/GmailClient.swift"]), containing: "\"DELETE\"")
     #expect(deletes.count == 1 && deletes.allSatisfy { $0.contains(".deleteDraft") && $0.contains("drafts/") })
     let calendarDeletes = codeLines(try #require(everything["OpenHumanGmail/GoogleCalendarClient.swift"]),

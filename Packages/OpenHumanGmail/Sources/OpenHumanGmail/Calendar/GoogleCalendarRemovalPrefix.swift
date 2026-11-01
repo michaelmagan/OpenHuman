@@ -236,3 +236,104 @@ public struct GoogleRemovalPrefix: Sendable, Equatable {
         return a == b && a == date
     }
 }
+
+extension GoogleRemovalPrefix {
+    private enum Kind { case day, timed }
+
+    private struct Lines {
+        var rule: [String: String] = [:]
+        var dates: [String: [String]] = [:]
+
+        init?(_ lines: [String]) {
+            var rules = 0
+            for line in lines {
+                let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+                guard parts.count == 2, !parts[1].isEmpty else { return nil }
+                if parts[0] == "RRULE" {
+                    rules += 1
+                    guard rules == 1 else { return nil }
+                    for item in parts[1].split(separator: ";", omittingEmptySubsequences: false) {
+                        let pair = item.split(separator: "=", omittingEmptySubsequences: false).map(String.init)
+                        guard pair.count == 2, !pair[0].isEmpty, !pair[1].isEmpty, rule[pair[0]] == nil else { return nil }
+                        rule[pair[0]] = pair[1]
+                    }
+                } else {
+                    let name = parts[0].split(separator: ";", omittingEmptySubsequences: false).first.map(String.init)
+                    guard name == "RDATE" || name == "EXDATE", dates[parts[0]] == nil else { return nil }
+                    let values = parts[1].split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+                    guard !values.contains(where: \.isEmpty) else { return nil }
+                    dates[parts[0]] = values
+                }
+            }
+            guard rules == 1, rule["FREQ"] != nil else { return nil }
+        }
+    }
+
+    /// Whether `proposed` keeps only an earlier part of `current`, read line by line without the planner: the same
+    /// RRULE apart from an end no later than before, RDATE values taken from the same line, and every EXDATE value up
+    /// to the new end kept. A COUNT replaced by an UNTIL passes here; the guard bounds it by planning from the same read.
+    static func narrows(_ current: [String], to proposed: [String]) -> Bool {
+        guard proposed != current, let old = Lines(current), let new = Lines(proposed) else { return false }
+        var oldBase = old.rule
+        var newBase = new.rule
+        for key in ["COUNT", "UNTIL"] {
+            oldBase[key] = nil
+            newBase[key] = nil
+        }
+        guard oldBase == newBase else { return false }
+        var narrower = old.rule["COUNT"] == nil && old.rule["UNTIL"] == nil
+        switch (new.rule["UNTIL"], new.rule["COUNT"]) {
+        case (let until?, nil):
+            guard let end = endInstant(until) else { return false }
+            if let before = old.rule["UNTIL"] {
+                guard let was = endInstant(before), was.0 == end.0, end.1 <= was.1 else { return false }
+                narrower = narrower || end.1 < was.1
+            } else if old.rule["COUNT"] != nil {
+                narrower = true
+            }
+        case (nil, let count?):
+            guard let value = Int(count), value >= 1, old.rule["UNTIL"] == nil else { return false }
+            if let before = old.rule["COUNT"] {
+                guard let was = Int(before), value <= was else { return false }
+                narrower = narrower || value < was
+            }
+        default:
+            return false
+        }
+        for (header, values) in new.dates {
+            guard let had = old.dates[header], Set(values).isSubset(of: had) else { return false }
+            if header.hasPrefix("RDATE"), Set(values).count < Set(had).count { narrower = true }
+        }
+        for (header, values) in old.dates where header.hasPrefix("RDATE") && new.dates[header] == nil {
+            narrower = narrower || !values.isEmpty
+        }
+        let end = new.rule["UNTIL"].flatMap(endInstant)
+        for (header, values) in old.dates where header.hasPrefix("EXDATE") {
+            let kept = Set(new.dates[header] ?? [])
+            for value in values where !kept.contains(value) {
+                // Only an exclusion after the new end may go; anything unreadable stays excluded.
+                guard let end, let date = dateInstant(value, header: header), date.0 == end.0, date.1 > end.1 else {
+                    return false
+                }
+            }
+        }
+        return narrower
+    }
+
+    private static func endInstant(_ text: String) -> (Kind, Date)? {
+        if text.count == 8 { return parse(text, pattern: "yyyyMMdd", zone: .gmt).map { (.day, $0) } }
+        return parse(text, pattern: "yyyyMMdd'T'HHmmss'Z'", zone: .gmt).map { (.timed, $0) }
+    }
+
+    private static func dateInstant(_ text: String, header: String) -> (Kind, Date)? {
+        let params = header.split(separator: ";").dropFirst().map(String.init)
+        if params == ["VALUE=DATE"] { return parse(text, pattern: "yyyyMMdd", zone: .gmt).map { (.day, $0) } }
+        if params.isEmpty { return parse(text, pattern: "yyyyMMdd'T'HHmmss'Z'", zone: .gmt).map { (.timed, $0) } }
+        guard params.count == 1, params[0].hasPrefix("TZID="),
+              let zone = TimeZone(identifier: String(params[0].dropFirst(5))),
+              let date = parse(text, pattern: "yyyyMMdd'T'HHmmss", zone: zone), uniqueWallTime(date, zone: zone) else {
+            return nil
+        }
+        return (.timed, date)
+    }
+}

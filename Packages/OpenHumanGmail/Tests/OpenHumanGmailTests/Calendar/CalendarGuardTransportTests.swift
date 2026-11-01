@@ -24,7 +24,9 @@ import Testing
         let body = insertBody(["recurrence": ["RRULE:FREQ=WEEKLY;UNTIL=20261101T165959Z"]])
         func authorization() -> String {
             calendar.authorizeRemoval(CalendarRemovalAuthorization(method: "PATCH", target: "master", etag: "\"v1\"",
-                parent: nil, original: nil, master: true, body: body, sendUpdates: "all", allowAbsentCleanup: false))
+                parent: nil, original: nil, master: true, body: body, sendUpdates: "all", allowAbsentCleanup: false,
+                trim: CalendarRemovalTrim(cutoff: .timed(ISO8601DateFormatter().date(from: "2026-11-01T17:00:00Z")!,
+                    timeZone: "America/Los_Angeles"), timeZone: "America/Los_Angeles")))
         }
         for change in ["target", "body", "updates", "etag", "invented-token"] {
             let nonce = change == "invented-token" ? "not-registered" : authorization()
