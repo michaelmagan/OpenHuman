@@ -47,7 +47,9 @@ struct OneSuggestionStage {
             settings: AISettingsBox(store: InMemoryAISettingsStore(
                 AISettings(draftReplies: .onDeviceAuto, instantReplyStrip: composerStrip)))) : nil
         let calendar = FakeCalendar(events: busy ? [meeting] : [])
-        let environment = AppEnvironment.fake(corpus: .small, options: .init(remoteAck: .immediate, now: { OneSuggestionStage.sent }),
+        // Why: a corpus dated from today buries the fixed-date message further down the inbox every day
+        let environment = AppEnvironment.fake(corpus: .rich(threadCount: 200, now: sent),
+                                              options: .init(remoteAck: .immediate, now: { OneSuggestionStage.sent }),
                                               featureFlags: FeatureFlags(), ai: center, calendar: calendar)
         let store = try #require(environment.data as? FakeMailStore)
         let assistant = try #require(environment.scheduling)
@@ -60,12 +62,18 @@ struct OneSuggestionStage {
             w = try await InlineReplyWindow.make(size: size, frameName: frameName, exclusive: true,
                                                  environment: environment)
         }
-        let account = try #require(environment.router.accounts.first?.account)
-        let message = store.deliverMessage(account: account.id, from: EmailAddress(name: "Dana Ruiz", email: "dana@example.org"),
-                                           subject: "Sync up", text: text, unread: false, at: sent)
-        let thread = try #require(try await Self.thread(of: message, in: store, account: account.id))
-        return OneSuggestionStage(w: w, store: store, calendar: calendar, assistant: assistant, center: center,
-                                  thread: thread, message: message)
+        do {
+            let account = try #require(environment.router.accounts.first?.account)
+            let message = store.deliverMessage(account: account.id, from: EmailAddress(name: "Dana Ruiz", email: "dana@example.org"),
+                                               subject: "Sync up", text: text, unread: false, at: sent)
+            let thread = try #require(try await Self.thread(of: message, in: store, account: account.id))
+            return OneSuggestionStage(w: w, store: store, calendar: calendar, assistant: assistant, center: center,
+                                      thread: thread, message: message)
+        } catch {
+            // Why: the caller gets no stage to close, and an open window holds the focus gate
+            w.close()
+            throw error
+        }
     }
 
     private static func thread(of message: MessageKey, in store: FakeMailStore, account: AccountID) async throws -> ThreadKey? {

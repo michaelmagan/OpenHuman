@@ -63,16 +63,18 @@ import Testing
     }
 
     @Test func aThankYouNoteShowsNoCalendarChipsAndWednesdayAtThreeDoes() async throws {
-        let thanks = try await OneSuggestionStage.make(text: "Ofc. So glad you're part of our community!!",
-                                                       frameName: "dev.openhuman.tests.one-suggestion-thanks")
-        try await thanks.open()
-        let row = try #require(thanks.center?.inlineReplies.current)
-        try await until { row.decision != .undecided && (row.state == .ready || row.state == .none) }
-        await thanks.assistant.analyze(thanks.thread, force: true)
-        #expect(thanks.assistant.analyses[thanks.thread] == nil && thanks.assistant.status[thanks.thread] == nil)
-        #expect(thanks.assistant.suggestions(for: thanks.thread).isEmpty)
-        #expect(!row.items.contains { $0.kind != .quickReply }, "no calendar chip in the strip")
-        thanks.close()
+        do {
+            let thanks = try await OneSuggestionStage.make(text: "Ofc. So glad you're part of our community!!",
+                                                           frameName: "dev.openhuman.tests.one-suggestion-thanks")
+            defer { thanks.close() }
+            try await thanks.open()
+            let row = try #require(thanks.center?.inlineReplies.current)
+            try await until { row.decision != .undecided && (row.state == .ready || row.state == .none) }
+            await thanks.assistant.analyze(thanks.thread, force: true)
+            #expect(thanks.assistant.analyses[thanks.thread] == nil && thanks.assistant.status[thanks.thread] == nil)
+            #expect(thanks.assistant.suggestions(for: thanks.thread).isEmpty)
+            #expect(!row.items.contains { $0.kind != .quickReply }, "no calendar chip in the strip")
+        }
 
         let wednesday = try await OneSuggestionStage.make(text: "Thanks! Could we meet Wednesday at 3?",
                                                           frameName: "dev.openhuman.tests.one-suggestion-wednesday")
