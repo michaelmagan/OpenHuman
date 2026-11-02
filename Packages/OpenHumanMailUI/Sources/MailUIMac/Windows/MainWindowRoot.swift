@@ -13,7 +13,7 @@ public struct MainWindowRoot: View {
         self.environment = environment
         self.themes = themes
         self.onAttach = onAttach
-        ThemeActionHandler.install(in: environment.actions, store: themes)
+        ThemeActionHandler.installHandler(in: environment.actions, store: themes)
     }
 
     public var body: some View {
@@ -43,6 +43,7 @@ public struct MainWindowRoot: View {
         .background(WindowHooks(theme: resolved, router: router))
         .task { await environment.status.run() }
         .task { await environment.failedOperationNotices.run() }
+        .modifier(ThemeAccentCommands(actions: environment.actions, themes: themes))
     }
 
     private func inspectorShown(hidden: Bool) -> Binding<Bool> {
@@ -54,6 +55,18 @@ public struct MainWindowRoot: View {
                            if calendar?.isVisible == true { calendar?.setVisible(false) }
                            if contact?.isVisible == true { contact?.setVisible(false) }
                        })
+    }
+}
+
+// Why: its own modifier, so a theme reload re-evaluates this and not the window's body
+private struct ThemeAccentCommands: ViewModifier {
+    let actions: ActionRegistry
+    let themes: ThemeStore
+
+    func body(content: Content) -> some View {
+        content.onChange(of: themes.available, initial: true) {
+            ThemeActionHandler.registerAccents(in: actions, store: themes)
+        }
     }
 }
 
