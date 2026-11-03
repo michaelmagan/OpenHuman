@@ -6,6 +6,30 @@
     <description>Most recent updates to OpenHuman Mail</description>
     <language>en</language>
     <item>
+      <title>Version 0.1.3</title>
+      <pubDate>Tue, 03 Nov 2026 03:43:16 +0000</pubDate>
+      <sparkle:version>1216</sparkle:version>
+      <sparkle:shortVersionString>0.1.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[
+      <style>
+        h2, h3, h4 { font-size: 1em; margin: 1em 0 0.3em; }
+        p { margin: 0.4em 0; }
+        ul { margin: 0.2em 0; padding-left: 1.4em; }
+        li { margin: 0.15em 0; }
+      </style>
+      <h3>OpenHuman Mail v0.1.3</h3>
+      <p>This pre-release is available as a DMG download only.</p>
+      <ul>
+        <li>Fixes Mail hanging at launch with a busy spinner and needing a force quit.</li>
+        <li>Sturdier handling of the main window, so a single window is kept and restored reliably.</li>
+        <li>Polish for sending several drafts at once.</li>
+      </ul>
+      <p>If Mail is stuck on a hung 0.1.2, the in-app update cannot reach it. Download this version and install it manually once; after that, updates arrive as usual.</p>
+      ]]></description>
+      <enclosure url="https://github.com/michaelmagan/OpenHuman/releases/download/v0.1.3/OpenHuman-Mail-0.1.3.dmg" length="37302778" type="application/octet-stream" sparkle:edSignature="CVk6e9SGLUpy8tvjXyhirgpkpDPdyKyE+hH+B9Le6C6NGNMD+NVYvWKvz3UJGLps5Y4d/LveW/uTQAq8aLAuBQ==" />
+    </item>
+    <item>
       <title>Version 0.1.2</title>
       <pubDate>Sat, 31 Oct 2026 21:48:04 +0000</pubDate>
       <sparkle:version>1214</sparkle:version>
