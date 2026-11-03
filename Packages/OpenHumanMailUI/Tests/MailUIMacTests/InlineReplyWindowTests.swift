@@ -279,13 +279,31 @@ final class UnconstrainedTestWindow: NSWindow {
 @MainActor
 enum FocusWindowGate {
     private static var held = false
-    private static var waiters: [CheckedContinuation<Void, Never>] = []
 
-    static func enter() async {
-        if held { await withCheckedContinuation { waiters.append($0) } } else { held = true }
+    /// A holder that never leaves fails the next test here and hands it the gate, so one leak can't hang the run.
+    /// Long enough for every exclusive test queued ahead of this one in a parallel run.
+    static func enter(patience: Duration = .seconds(600), sourceLocation: SourceLocation = #_sourceLocation) async {
+        do {
+            try await until(timeout: patience) { !held } // flake-ok: bounds a leaked gate
+        } catch {
+            Issue.record("the focus window gate was never released: a test left without closing its window",
+                         sourceLocation: sourceLocation)
+        }
+        held = true
     }
 
     static func leave() {
-        if waiters.isEmpty { held = false } else { waiters.removeFirst().resume() }
+        held = false
+    }
+}
+
+@MainActor
+struct FocusWindowGateTests {
+    @Test func aGateNobodyReleasesFailsTheWaiterInsteadOfHangingTheRun() async {
+        await FocusWindowGate.enter()
+        defer { FocusWindowGate.leave() }
+        await withKnownIssue {
+            await FocusWindowGate.enter(patience: .zero)
+        }
     }
 }
