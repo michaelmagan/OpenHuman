@@ -3,7 +3,13 @@ name: CI
 on:
   push:
     branches: [main]
+  # Pull requests that change only documentation or images skip the macOS jobs.
+  # Nothing is a required check, so a skipped workflow cannot block a merge;
+  # pushes to main always run everything.
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
 
 concurrency:
