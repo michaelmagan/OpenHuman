@@ -27,6 +27,7 @@ public final class ActionRegistry {
     @ObservationIgnored private var registeredModules: [FeatureModuleID: [ActionID]] = [:]
     @ObservationIgnored private var extraDescriptors: [ActionDescriptor] = []
     @ObservationIgnored private var userKeymap = KeymapOverrides()
+    @ObservationIgnored private var rebuildCount = 0
 
     public init(recents: RecentActions = RecentActions()) {
         self.recents = recents
@@ -38,17 +39,25 @@ public final class ActionRegistry {
     }
 
     public func register(_ descriptors: [ActionDescriptor], handler: any ActionHandler, module: FeatureModuleID?) {
+        var changed = false
         for descriptor in descriptors {
             handlers[descriptor.id] = handler
             if ActionCatalog.descriptor(descriptor.id) == nil, !extraDescriptors.contains(where: { $0.id == descriptor.id }) {
                 extraDescriptors.append(descriptor)
+                changed = true
             }
         }
         if let module {
-            registeredModules[module, default: []].append(contentsOf: descriptors.map(\.id))
-            if !enabledModules.contains(module) { enabledModules.append(module) }
+            let known = registeredModules[module]
+            let added = descriptors.map(\.id).filter { !(known ?? []).contains($0) }
+            if known == nil || !added.isEmpty {
+                registeredModules[module] = (known ?? []) + added
+                if !enabledModules.contains(module) { enabledModules.append(module) }
+                changed = true
+            }
         }
-        rebuild()
+        // Why: observers of the registry would redraw for nothing, and a redraw that registers again never ends
+        if changed { rebuild() }
     }
 
     public func noteEnabled(_ module: FeatureModuleID) {
@@ -126,15 +135,19 @@ public final class ActionRegistry {
         return handled
     }
 
+    // Why: reads no observed property, so a rebuild inside a view's body can't make that body depend on what it writes
     private func rebuild() {
         let enabled = Set(registeredModules.values.joined())
         let base = ActionCatalog.all.filter { descriptor in
             descriptor.module == nil || enabled.contains(descriptor.id)
         } + extraDescriptors
-        keymap = Keymap.resolve(userKeymap, descriptors: base)
+        let resolved = Keymap.resolve(userKeymap, descriptors: base)
+        let applied = resolved.apply(to: base)
+        keymap = resolved
         defaultDescriptors = base
-        descriptors = keymap.apply(to: base)
-        index = Dictionary(uniqueKeysWithValues: descriptors.enumerated().map { ($1.id, $0) })
-        keymapRevision += 1
+        descriptors = applied
+        index = Dictionary(uniqueKeysWithValues: applied.enumerated().map { ($1.id, $0) })
+        rebuildCount += 1
+        keymapRevision = rebuildCount
     }
 }

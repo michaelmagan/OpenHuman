@@ -12,11 +12,21 @@ public final class ThemeActionHandler: ActionHandler {
     }
 
     public static func install(in registry: ActionRegistry, store: ThemeStore) {
-        let handler = ThemeActionHandler(store: store)
+        installHandler(in: registry, store: store)
+        registerAccents(in: registry, store: store)
+    }
+
+    /// Writes nothing observed, so a view's `init` can call it.
+    public static func installHandler(in registry: ActionRegistry, store: ThemeStore) {
         let catalog = ActionCatalog.descriptors(in: .view).filter { $0.id.rawValue.hasPrefix("theme.") }
-        registry.register(handler, for: catalog.map(\.id))
+        registry.register(ThemeActionHandler(store: store), for: catalog.map(\.id))
+    }
+
+    /// Adds the accents the library has gained. A new accent changes what the registry publishes, so call this
+    /// outside a view's `body`.
+    public static func registerAccents(in registry: ActionRegistry, store: ThemeStore) {
         let extra = store.library.accentIDs.filter { !ActionCatalog.builtInAccents.contains($0) }
-        registry.register(extra.map(ActionCatalog.accentDescriptor), handler: handler, module: nil)
+        registry.register(extra.map(ActionCatalog.accentDescriptor), handler: ThemeActionHandler(store: store), module: nil)
     }
 
     public func availability(of id: ActionID, in context: ActionContext, host: (any ActionHost)?) -> ActionAvailability {
