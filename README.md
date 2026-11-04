@@ -29,9 +29,9 @@ OpenHuman is an open-source, clean-room clone of Superhuman.
 
 It is Swift-native, runs locally (including its AI features), and is agent-ready, with a command-line interface for external AI agents.
 
-This is a very early alpha, so expect bugs. It runs on Apple silicon Macs with macOS 26.0 or later. Its author has only tested it on macOS 27 on Apple silicon. Features that depend on macOS 27, such as Apple's on-device model, degrade gracefully on macOS 26 and offer alternatives. It is built with Xcode 27 and Swift 6.4.
+This is a very early alpha, so expect bugs. It runs on Apple silicon Macs with macOS 26.0 or later. I've only tested it on macOS 27 on Apple silicon. Features that depend on macOS 27, such as Apple's on-device model, degrade gracefully on macOS 26 and offer alternatives. It is built with Xcode 27 and Swift 6.4.
 
-[Download the signed and notarized release](https://github.com/michaelmagan/OpenHuman/releases/tag/v0.1.3), or build from source. Maintainers can follow the [release guide](docs/release/RELEASE-HOWTO.md) to build, verify and publish a DMG. Homebrew installation will be announced when ready.
+[Download the signed and notarized release](https://github.com/michaelmagan/OpenHuman/releases/tag/v0.1.3), or build from source.
 
 <br>
 
@@ -83,17 +83,11 @@ This is a very early alpha, so expect bugs. It runs on Apple silicon Macs with m
 
 ## Download and install
 
-[Download version 0.1.3](https://github.com/michaelmagan/OpenHuman/releases/tag/v0.1.3) (`OpenHuman-Mail-0.1.3.dmg`). This early development pre-release is a Developer ID signed, Apple-notarized DMG for Apple silicon Macs running macOS 26.0 or later. Every release so far is a pre-release, so GitHub's "latest release" link does not point to one; the [releases page](https://github.com/michaelmagan/OpenHuman/releases) lists them all.
+[Download version 0.1.3](https://github.com/michaelmagan/OpenHuman/releases/tag/v0.1.3) (`OpenHuman-Mail-0.1.3.dmg`).
 
-Open the DMG and drag OpenHuman Mail to Applications. On first launch, follow onboarding to create and import your own Google Desktop app OAuth client. No shared Google client is bundled.
+Open the DMG and drag OpenHuman Mail to Applications. It's bring your own Google Oauth, so on first launch, follow onboarding to create and import your own Google Desktop app OAuth client.
 
-Release builds check for updates with Sparkle and install them from within the app (Settings › General › Updates). If you are on a 0.1.2 that hangs at launch, the in-app update cannot reach it: install 0.1.3 manually once.
-
-## Opening an unsigned build
-
-macOS may block unsigned builds because they are not notarized by Apple. To open one, try to open the app once. Then open System Settings, click Privacy & Security, and scroll to Security. Click Open Anyway, enter your login password, and click OK. The Open Anyway button stays available for about an hour after you first try to open the app.
-
-Local development builds and CI development artifacts use ad-hoc signing and are not notarized by Apple.
+Release builds check for updates with Sparkle and install them from within the app (Settings › General › Updates).
 
 ## Build
 
