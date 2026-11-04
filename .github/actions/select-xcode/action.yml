@@ -1,0 +1,45 @@
+name: Select Xcode
+description: >
+  Selects the pinned Xcode (XCODE_APP and XCODE_VERSION from the job environment),
+  installs the Metal toolchain when the runner lacks it, and outputs the values the
+  build caches are keyed on.
+
+outputs:
+  build:
+    description: Xcode build version, for example 27A266a
+    value: ${{ steps.xcode.outputs.build }}
+  month:
+    description: Current UTC year and month; compilation caches start over each month so they do not grow without bound
+    value: ${{ steps.xcode.outputs.month }}
+
+runs:
+  using: composite
+  steps:
+    - name: Select Xcode
+      id: xcode
+      shell: bash
+      run: |
+        if [ ! -d "$XCODE_APP" ]; then
+          echo "::error::$XCODE_APP is not installed on this runner; set the XCODE_APP and XCODE_VERSION repository variables"
+          ls -d /Applications/Xcode*.app || true
+          exit 1
+        fi
+        sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+        xcodebuild -version
+        found="$(xcodebuild -version | sed -n 's/^Xcode //p')"
+        if [ "$found" != "$XCODE_VERSION" ]; then
+          echo "::error::$XCODE_APP is Xcode $found, expected $XCODE_VERSION"
+          exit 1
+        fi
+        echo "build=$(xcodebuild -version | sed -n 's/^Build version //p')" >> "$GITHUB_OUTPUT"
+        echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+        xcrun swift --version
+
+    # Why: MLX compiles Metal shaders, and the runner image does not install the Metal toolchain for every Xcode
+    - name: Install the Metal toolchain
+      shell: bash
+      run: |
+        if ! xcrun metal --version >/dev/null 2>&1; then
+          xcodebuild -downloadComponent MetalToolchain
+        fi
+        xcrun metal --version

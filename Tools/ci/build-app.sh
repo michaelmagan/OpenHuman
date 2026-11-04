@@ -14,6 +14,8 @@ XcodeGen and generates the Xcode project.
                                    developer tools: the Developer menu, the test checklist, Developer
                                    options and the sample-data launch arguments. Release has none of them
   --derived-data <dir>             default <repo>/build/dd (ignored by git)
+  --arch <arm64|universal>         default arm64: the app runs only on Apple silicon. universal adds
+                                   x86_64 and roughly doubles the compile time of a Release build
   --build-number <n>               CURRENT_PROJECT_VERSION; default: the project's value
   --local-install                  after a Release or DevTools build, copy the app to "OpenHuman Mail.app"
                                    in the install folder (default ~/Applications, created if missing; no sudo).
@@ -30,11 +32,12 @@ Keychain access again after every rebuild. No notarization, no Developer ID, no 
 EOF
 }
 
-CONFIG=Release; DD="$ROOT/build/dd"; BUILD_NUMBER=""; INSTALL=0; INSTALL_DIR="${OH_INSTALL_DIR:-$HOME/Applications}"
+CONFIG=Release; ARCH=arm64; DD="$ROOT/build/dd"; BUILD_NUMBER=""; INSTALL=0; INSTALL_DIR="${OH_INSTALL_DIR:-$HOME/Applications}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --configuration) CONFIG="$2"; shift 2 ;;
         --derived-data) DD="$2"; shift 2 ;;
+        --arch) ARCH="$2"; shift 2 ;;
         --build-number) BUILD_NUMBER="$2"; shift 2 ;;
         --local-install) INSTALL=1; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
@@ -43,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 case "$CONFIG" in Debug|DevTools|Release) ;; *) echo "build-app: --configuration must be Debug, DevTools or Release" >&2; exit 2 ;; esac
+case "$ARCH" in arm64|universal) ;; *) echo "build-app: --arch must be arm64 or universal" >&2; exit 2 ;; esac
 [[ "$INSTALL" == 0 || "$CONFIG" != Debug ]] || { echo "build-app: --local-install needs --configuration Release or DevTools" >&2; exit 2; }
 
 "$ROOT/Tools/bootstrap.sh"
@@ -53,6 +57,7 @@ args=(build -project "$ROOT/Apps/Mail/Mail.xcodeproj" -scheme Mail -configuratio
 cache_dir="${OH_COMPILATION_CACHE_PATH:-$HOME/Library/Caches/OpenHuman/compilation-cache}"
 args+=(COMPILATION_CACHE_ENABLE_CACHING=YES "COMPILATION_CACHE_CAS_PATH=$cache_dir")
 [[ -z "$BUILD_NUMBER" ]] || args+=("CURRENT_PROJECT_VERSION=$BUILD_NUMBER")
+[[ "$ARCH" == universal ]] || args+=(ARCHS=arm64)
 if [[ ! -f "$ROOT/Apps/Mail/Config/Local.xcconfig" ]]; then
     args+=(CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=)
 fi
