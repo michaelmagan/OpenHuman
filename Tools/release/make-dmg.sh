@@ -403,10 +403,10 @@ if [[ "$DRY" == 0 && ! -d "$SPARKLE" ]]; then
     say "no Sparkle.framework in the app; nothing to leave out"
 else
     if [[ "$UNSIGNED" == 1 ]]; then
-        RESIGN=(codesign --force --sign - --preserve-metadata=identifier,entitlements,flags)
+        RESIGN=(codesign --force --sign - "--preserve-metadata=identifier,entitlements,flags")
     else
         RESIGN=(codesign --force --sign "$SIGN_HASH" ${KEYCHAIN[@]+"${KEYCHAIN[@]}"} --options runtime --timestamp
-                --preserve-metadata=identifier,entitlements)
+                "--preserve-metadata=identifier,entitlements")
     fi
     run rm -rf "$SPARKLE/Versions/B/XPCServices" "$SPARKLE/XPCServices"
     run "${RESIGN[@]}" "$SPARKLE/Versions/B/Autoupdate"

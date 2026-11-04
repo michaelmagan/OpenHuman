@@ -40,9 +40,12 @@ updates:
         update-types: [minor, patch]
 
   # Workflow actions are pinned to commit SHAs; Dependabot rewrites both the
-  # SHA and its trailing `# vN` comment.
+  # SHA and its trailing `# vN` comment. The local composite actions under
+  # .github/actions are listed too, so any action they call is kept current.
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/*
     schedule:
       interval: weekly
       day: monday
