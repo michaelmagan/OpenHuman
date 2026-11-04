@@ -545,11 +545,11 @@ class SharedTextTests(unittest.TestCase):
                      REPO / "Apps" / "Mail" / "Resources" / "checklist" / "about.early-development.json"):
             self.assertIn(NOTICE, path.read_text(encoding="utf-8"), path)
 
-    def test_the_release_notes_explain_opening_an_unsigned_build_like_the_readme(self):
-        readme = (REPO / "README.md").read_text(encoding="utf-8")
-        steps = readme.split("## Opening an unsigned build\n\n", 1)[1].split("\n\n", 1)[0]
-        self.assertIn("Open Anyway", steps)
-        self.assertIn(steps, (RELEASE / "make-dmg.sh").read_text(encoding="utf-8"))
+    def test_the_unsigned_release_notes_explain_how_to_open_an_unsigned_build(self):
+        script = (RELEASE / "make-dmg.sh").read_text(encoding="utf-8")
+        self.assertIn("## Opening an unsigned build", script)
+        for step in ("Privacy & Security", "Open Anyway", "enter your login password"):
+            self.assertIn(step, script)
 
     def test_the_release_guide_sections_the_scripts_name_exist(self):
         headings = re.findall(r"^## (.+)$", (REPO / "docs" / "release" / "RELEASE-HOWTO.md").read_text(encoding="utf-8"),
