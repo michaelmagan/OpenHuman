@@ -46,28 +46,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - uses: ./.github/actions/select-xcode
         id: xcode
-        run: |
-          if [ ! -d "$XCODE_APP" ]; then
-            echo "::error::$XCODE_APP is not installed on this runner; set the XCODE_APP and XCODE_VERSION repository variables"
-            ls -d /Applications/Xcode*.app || true
-            exit 1
-          fi
-          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
-          found="$(xcodebuild -version | sed -n 's/^Xcode //p')"
-          if [ "$found" != "$XCODE_VERSION" ]; then
-            echo "::error::$XCODE_APP is Xcode $found, expected $XCODE_VERSION"
-            exit 1
-          fi
-          echo "build=$(xcodebuild -version | sed -n 's/^Build version //p')" >> "$GITHUB_OUTPUT"
-
-      # Why: MLX compiles Metal shaders, and the runner image does not install the Metal toolchain for every Xcode
-      - name: Install the Metal toolchain
-        run: |
-          if ! xcrun metal --version >/dev/null 2>&1; then
-            xcodebuild -downloadComponent MetalToolchain
-          fi
 
       - uses: actions/cache@v4
         with:
