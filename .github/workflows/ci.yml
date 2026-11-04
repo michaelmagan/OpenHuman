@@ -29,6 +29,12 @@ jobs:
   # SwiftSoup and the rest); the packages' own sources are rebuilt because a fresh checkout
   # gives them new modification times. Xcode's compilation cache is keyed on content, so the
   # app build replays every unchanged compile job. It starts over each month.
+  #
+  # The package caches leave out SwiftPM's build descriptions (XCBuildData/*.xcbuilddata).
+  # They record absolute tool paths, and the Metal toolchain is mounted at a random path on
+  # each runner, so a restored description runs a metal compiler that no longer exists.
+  # SwiftPM regenerates them in seconds; build.db stays, so only the tasks whose tool paths
+  # changed (the MLX shader compiles and the links) run again.
 
   macos-packages:
     runs-on: ${{ vars.MACOS_RUNNER_LABEL || 'xcode-27' }}
@@ -51,10 +57,14 @@ jobs:
             Packages/*/.build
             !Packages/OpenHumanMailUI/.build
             !Packages/*/.build/*/debug/index
-          key: spm-packages-v1-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-${{ github.sha }}
+            !Packages/*/.build/out/Intermediates.noindex/XCBuildData/*.xcbuilddata
+          key: spm-packages-v2-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-${{ github.sha }}
           restore-keys: |
-            spm-packages-v1-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-
-            spm-packages-v1-${{ steps.xcode.outputs.build }}-
+            spm-packages-v2-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-
+            spm-packages-v2-${{ steps.xcode.outputs.build }}-
+
+      - name: Drop restored build descriptions
+        run: rm -rf Packages/*/.build/out/Intermediates.noindex/XCBuildData/*.xcbuilddata
 
       - name: Build and test packages
         env:
@@ -68,6 +78,7 @@ jobs:
             Packages/*/.build
             !Packages/OpenHumanMailUI/.build
             !Packages/*/.build/*/debug/index
+            !Packages/*/.build/out/Intermediates.noindex/XCBuildData/*.xcbuilddata
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: Print last started tests
@@ -208,10 +219,14 @@ jobs:
           path: |
             Packages/OpenHumanMailUI/.build
             !Packages/OpenHumanMailUI/.build/*/debug/index
-          key: spm-mail-ui-v1-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-${{ github.sha }}
+            !Packages/OpenHumanMailUI/.build/out/Intermediates.noindex/XCBuildData/*.xcbuilddata
+          key: spm-mail-ui-v2-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-${{ github.sha }}
           restore-keys: |
-            spm-mail-ui-v1-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-
-            spm-mail-ui-v1-${{ steps.xcode.outputs.build }}-
+            spm-mail-ui-v2-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-
+            spm-mail-ui-v2-${{ steps.xcode.outputs.build }}-
+
+      - name: Drop restored build descriptions
+        run: rm -rf Packages/OpenHumanMailUI/.build/out/Intermediates.noindex/XCBuildData/*.xcbuilddata
 
       - name: Test Mail UI and window layouts
         env:
@@ -224,6 +239,7 @@ jobs:
           path: |
             Packages/OpenHumanMailUI/.build
             !Packages/OpenHumanMailUI/.build/*/debug/index
+            !Packages/OpenHumanMailUI/.build/out/Intermediates.noindex/XCBuildData/*.xcbuilddata
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: Print last started tests
