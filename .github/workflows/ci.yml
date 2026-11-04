@@ -12,17 +12,27 @@ on:
       - '**/*.md'
   workflow_dispatch:
 
+# A new push to a pull request cancels its older run. Runs on main are never cancelled:
+# each one is the record that main is green, and it refreshes the build caches that
+# pull requests restore.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
-  macos-app:
+  # Build caches. Pull requests can restore caches saved on main, but not those of other
+  # pull requests, so main saves after every run and a pull request saves only when it found
+  # nothing to restore. Package .build folders keep the compiled dependencies (MLX, GRDB,
+  # SwiftSoup and the rest); the packages' own sources are rebuilt because a fresh checkout
+  # gives them new modification times. Xcode's compilation cache is keyed on content, so the
+  # app build replays every unchanged compile job. It starts over each month.
+
+  macos-packages:
     runs-on: ${{ vars.MACOS_RUNNER_LABEL || 'xcode-27' }}
-    timeout-minutes: 90
+    timeout-minutes: 60
     env:
       # Why: a released Xcode, never the newest installed beta
       XCODE_APP: ${{ vars.XCODE_APP || '/Applications/Xcode_27.0.app' }}
@@ -31,49 +41,83 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - uses: ./.github/actions/select-xcode
         id: xcode
-        run: |
-          if [ ! -d "$XCODE_APP" ]; then
-            echo "::error::$XCODE_APP is not installed on this runner; set the XCODE_APP and XCODE_VERSION repository variables"
-            ls -d /Applications/Xcode*.app || true
-            exit 1
-          fi
-          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
-          xcodebuild -version
-          found="$(xcodebuild -version | sed -n 's/^Xcode //p')"
-          if [ "$found" != "$XCODE_VERSION" ]; then
-            echo "::error::$XCODE_APP is Xcode $found, expected $XCODE_VERSION"
-            exit 1
-          fi
-          echo "build=$(xcodebuild -version | sed -n 's/^Build version //p')" >> "$GITHUB_OUTPUT"
-          xcrun swift --version
 
-      # Why: MLX compiles Metal shaders, and the runner image does not install the Metal toolchain for every Xcode
-      - name: Install the Metal toolchain
-        run: |
-          if ! xcrun metal --version >/dev/null 2>&1; then
-            xcodebuild -downloadComponent MetalToolchain
-          fi
-          xcrun metal --version
-
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: cache
         with:
           path: |
             Packages/*/.build
-            ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
-          key: macos-spm-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Apps/Mail/project.yml') }}
+            !Packages/OpenHumanMailUI/.build
+            !Packages/*/.build/*/debug/index
+          key: spm-packages-v1-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-${{ github.sha }}
+          restore-keys: |
+            spm-packages-v1-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-
+            spm-packages-v1-${{ steps.xcode.outputs.build }}-
+
+      - name: Build and test packages
+        env:
+          OH_TEST_LOG_DIR: ${{ runner.temp }}/package-test-logs
+        run: Tools/ci/build-packages.sh --platform macos --exclude OpenHumanMailUI
+
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && (github.ref == 'refs/heads/main' || steps.cache.outputs.cache-matched-key == '') }}
+        with:
+          path: |
+            Packages/*/.build
+            !Packages/OpenHumanMailUI/.build
+            !Packages/*/.build/*/debug/index
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - name: Print last started tests
+        if: failure()
+        run: |
+          if [ -d "$RUNNER_TEMP/package-test-logs" ]; then
+            find "$RUNNER_TEMP/package-test-logs" -name '*.log' -type f -print0 \
+              | xargs -0 grep -hE 'Test (Case )?.*started' | tail -n 40 || true
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: package-diagnostics
+          path: |
+            ${{ runner.temp }}/package-test-logs/*.log
+            ~/Library/Logs/DiagnosticReports/*.ips
+            ~/Library/Logs/DiagnosticReports/*.crash
+          if-no-files-found: ignore
+
+  macos-app:
+    runs-on: ${{ vars.MACOS_RUNNER_LABEL || 'xcode-27' }}
+    timeout-minutes: 90
+    env:
+      XCODE_APP: ${{ vars.XCODE_APP || '/Applications/Xcode_27.0.app' }}
+      XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
+      SWIFT_BACKTRACE: enable=yes,sanitize=yes,threads=all
+      OH_COMPILATION_CACHE_PATH: ${{ github.workspace }}/build/compilation-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/select-xcode
+        id: xcode
+
+      - uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: |
+            build/compilation-cache
+            build/test-dd/SourcePackages
+            build/dd/SourcePackages
+          key: xcode-app-v1-${{ steps.xcode.outputs.build }}-${{ steps.xcode.outputs.month }}-${{ github.sha }}
+          restore-keys: |
+            xcode-app-v1-${{ steps.xcode.outputs.build }}-${{ steps.xcode.outputs.month }}-
 
       - name: Check imports and generated contracts
         run: |
           Tools/ci/check-imports.sh
           python3 Tools/ci/check-checklist.py
           python3 -m unittest discover -s Tools/ci/tests -p 'test_*.py'
-
-      - name: Build and test packages
-        env:
-          OH_TEST_LOG_DIR: ${{ runner.temp }}/package-test-logs
-        run: Tools/ci/build-packages.sh --platform macos --exclude OpenHumanMailUI
 
       - name: Bootstrap app project
         run: Tools/bootstrap.sh
@@ -92,8 +136,9 @@ jobs:
           set -o pipefail
           mkdir -p build
           xcodebuild test -project Apps/Mail/Mail.xcodeproj -scheme Mail \
-            -destination 'platform=macOS,arch=arm64' \
+            -destination 'platform=macOS,arch=arm64' -derivedDataPath build/test-dd \
             CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+            COMPILATION_CACHE_ENABLE_CACHING=YES "COMPILATION_CACHE_CAS_PATH=$OH_COMPILATION_CACHE_PATH" \
             -resultBundlePath build/TestResults.xcresult 2>&1 | tee "$RUNNER_TEMP/app-test.log"
 
       - name: Build development artifact
@@ -101,6 +146,19 @@ jobs:
 
       - name: Package development artifact
         run: Tools/ci/package-app.sh build/dd/Build/Products/Release/OpenHumanMail.app build/OpenHumanMail.zip
+
+      - name: Report compilation cache size
+        if: ${{ !cancelled() }}
+        run: du -sh "$OH_COMPILATION_CACHE_PATH" || true
+
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && (github.ref == 'refs/heads/main' || steps.cache.outputs.cache-matched-key == '') }}
+        with:
+          path: |
+            build/compilation-cache
+            build/test-dd/SourcePackages
+            build/dd/SourcePackages
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -117,10 +175,6 @@ jobs:
       - name: Print last started tests
         if: failure()
         run: |
-          if [ -d "$RUNNER_TEMP/package-test-logs" ]; then
-            find "$RUNNER_TEMP/package-test-logs" -name '*.log' -type f -print0 \
-              | xargs -0 grep -hE 'Test (Case )?.*started' | tail -n 40 || true
-          fi
           if [ -f "$RUNNER_TEMP/app-test.log" ]; then
             grep -E 'Test (Case )?.*started' "$RUNNER_TEMP/app-test.log" | tail -n 40 || true
           fi
@@ -128,9 +182,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: package-diagnostics
+          name: app-diagnostics
           path: |
-            ${{ runner.temp }}/package-test-logs/*.log
             ${{ runner.temp }}/app-test.log
             ~/Library/Logs/DiagnosticReports/*.ips
             ~/Library/Logs/DiagnosticReports/*.crash
@@ -146,42 +199,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - uses: ./.github/actions/select-xcode
         id: xcode
-        run: |
-          if [ ! -d "$XCODE_APP" ]; then
-            echo "::error::$XCODE_APP is not installed on this runner; set the XCODE_APP and XCODE_VERSION repository variables"
-            ls -d /Applications/Xcode*.app || true
-            exit 1
-          fi
-          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
-          xcodebuild -version
-          found="$(xcodebuild -version | sed -n 's/^Xcode //p')"
-          if [ "$found" != "$XCODE_VERSION" ]; then
-            echo "::error::$XCODE_APP is Xcode $found, expected $XCODE_VERSION"
-            exit 1
-          fi
-          echo "build=$(xcodebuild -version | sed -n 's/^Build version //p')" >> "$GITHUB_OUTPUT"
-          xcrun swift --version
 
-      - name: Install the Metal toolchain
-        run: |
-          if ! xcrun metal --version >/dev/null 2>&1; then
-            xcodebuild -downloadComponent MetalToolchain
-          fi
-          xcrun metal --version
-
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: cache
         with:
           path: |
-            Packages/*/.build
-            ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
-          key: macos-spm-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Apps/Mail/project.yml') }}
+            Packages/OpenHumanMailUI/.build
+            !Packages/OpenHumanMailUI/.build/*/debug/index
+          key: spm-mail-ui-v1-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-${{ github.sha }}
+          restore-keys: |
+            spm-mail-ui-v1-${{ steps.xcode.outputs.build }}-${{ hashFiles('Packages/*/Package.resolved', 'Packages/*/Package.swift') }}-
+            spm-mail-ui-v1-${{ steps.xcode.outputs.build }}-
 
       - name: Test Mail UI and window layouts
         env:
           OH_TEST_LOG_DIR: ${{ runner.temp }}/package-test-logs
         run: Tools/ci/build-packages.sh --platform macos --serialized-tests OpenHumanMailUI
+
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() && (github.ref == 'refs/heads/main' || steps.cache.outputs.cache-matched-key == '') }}
+        with:
+          path: |
+            Packages/OpenHumanMailUI/.build
+            !Packages/OpenHumanMailUI/.build/*/debug/index
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: Print last started tests
         if: failure()

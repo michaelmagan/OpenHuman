@@ -16,6 +16,9 @@ Tools/bootstrap.sh
 Tools/ci/build-app.sh
 ```
 
+`Tools/ci/build-app.sh` builds only the arm64 slice, since the app runs only on Apple
+silicon; `--arch universal` adds x86_64 and about doubles the compile time.
+
 Bootstrap downloads the pinned, checksum-verified XcodeGen version from
 `Tools/versions.env` and generates `Apps/Mail/Mail.xcodeproj`. The app links
 [Sparkle](https://sparkle-project.org) for in-app updates, a Swift package pinned
@@ -59,7 +62,10 @@ runner with a released Xcode (27.0), never the newest installed beta, and instal
 the Metal toolchain component when the runner lacks it (MLX compiles Metal
 shaders). The repository variables `MACOS_RUNNER_LABEL`, `XCODE_APP` and
 `XCODE_VERSION` can select another compatible runner or Xcode. Missing toolchains
-and failed checks fail the job.
+and failed checks fail the job. Three jobs run side by side: the packages, the app
+(tests and a Release artifact) and the Mail UI package. They restore SwiftPM build
+folders and Xcode's compilation cache saved by the latest run on `main`, so a pull
+request recompiles mainly what it changed.
 
 The project also generates from a source archive without Git metadata (for
 example GitHub's Download ZIP); only the build's commit stamp needs Git.
