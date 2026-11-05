@@ -3,6 +3,7 @@ import MailActions
 import MailFakes
 import MailFeatures
 import MailModel
+import MailRender
 import MailTheme
 import MailUI
 import OpenHumanCore
@@ -26,15 +27,21 @@ import Testing
         let (thread, messages) = try await w.conversationWithAMiddleSender()
         let model = try await w.open(thread)
         let keys = messages.map(\.id)
-        try await until { w.highlighted() == [keys.last!] && w.window.firstResponder === w.reader.focusView }
+        try await w.waitFor("the newest message is highlighted and the conversation has the keys") {
+            w.highlighted() == [keys.last!] && w.window.firstResponder === w.reader.focusView
+        }
         #expect(model.replyTarget == keys.last, "the highlighted message is the one a reply answers")
 
         #expect(press(Keys.event("O", code: 31, modifiers: .shift, window: w.window), in: w))
-        try await until { w.reader.messageViews.count == keys.count && w.reader.messageViews.values.allSatisfy(\.isExpanded) }
+        try await w.waitFor("⇧O expands every message") {
+            w.reader.messageViews.count == keys.count && w.reader.messageViews.values.allSatisfy(\.isExpanded)
+        }
+        try await w.settleConversation(model)
         for index in stride(from: keys.count - 2, through: 0, by: -1) {
+            let height = w.reader.focusView.frame.height
             #expect(press(Keys.arrow(.up, window: w.window), in: w), "↑ is the conversation's (message \(index))")
             #expect(model.focusedMessage == keys[index])
-            try await until {
+            try await w.waitFor("↑ highlights message \(index) and scrolls it into view (document height at the press: \(height))") {
                 w.window.contentView?.layoutSubtreeIfNeeded()
                 guard let frame = w.frameInDocument(keys[index]) else { return false }
                 return w.highlighted() == [keys[index]] && w.reader.visibleDocumentRect.contains(NSPoint(x: frame.midX, y: frame.minY + 1))
@@ -47,7 +54,7 @@ import Testing
         for _ in keys.indices where model.focusedMessage != keys.last {
             #expect(press(Keys.arrow(.down, window: w.window), in: w))
         }
-        try await until { w.highlighted() == [keys.last!] }
+        try await w.waitFor("↓ comes back to the newest message") { w.highlighted() == [keys.last!] }
         w.window.contentView?.layoutSubtreeIfNeeded()
         let document = w.reader.focusView
         let before = w.reader.visibleDocumentRect.minY
@@ -279,6 +286,75 @@ private extension InlineReplyWindow {
     func frameInDocument(_ key: MessageKey) -> NSRect? {
         guard let view = reader.messageViews[key] else { return nil }
         return view.convert(view.bounds, to: reader.focusView)
+    }
+
+    // Expanding every message starts loading their bodies, and an HTML body reports its height after it loads. A body
+    // above the focused message that grows after the reader scrolled to it pushes that message back out of view, so
+    // wait until every expanded body is shown and the conversation's height has held still before moving the focus.
+    func settleConversation(_ model: ReaderModel, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        var lastHeight: CGFloat?
+        var stableSamples = 0
+        try await waitFor("every expanded body is shown and the conversation holds still", sourceLocation: sourceLocation) {
+            window.contentView?.layoutSubtreeIfNeeded()
+            let height = reader.focusView.frame.height
+            stableSamples = height == lastHeight ? stableSamples + 1 : 0
+            lastHeight = height
+            return model.messages.allSatisfy { bodyIsShown($0) } && stableSamples >= 10
+        }
+    }
+
+    func bodyIsShown(_ message: ReaderModel.Message) -> Bool {
+        guard message.isExpanded else { return true }
+        let view = reader.messageViews[message.id]
+        switch message.body {
+        case .notLoaded, .fetching: return false
+        case .failed, .rendered(.empty): return true
+        case .rendered(.plain): return view?.plainBody != nil
+        case .rendered(.html): return view?.htmlBody?.current?.isShown == true && view?.htmlBody?.incoming == nil
+        }
+    }
+
+    // `until`, with the conversation's focus, scroll position and every message's body and frame in the failure
+    func waitFor(_ step: String, sourceLocation: SourceLocation = #_sourceLocation,
+                 _ condition: @MainActor () -> Bool) async throws {
+        do {
+            try await until { condition() }
+        } catch let error as TimeoutError {
+            Issue.record(Comment(rawValue: "\(step): not reached within \(testBackstop)\n" + focusReport()),
+                         sourceLocation: sourceLocation)
+            throw error
+        }
+    }
+
+    func focusReport() -> String {
+        window.contentView?.layoutSubtreeIfNeeded()
+        let model = router.reader
+        let responder = window.firstResponder.map { String(describing: type(of: $0)) } ?? "none"
+        var lines = ["first responder: \(responder)" + (window.firstResponder === reader.focusView ? " (the conversation)" : ""),
+                     "visible \(NSStringFromRect(reader.visibleDocumentRect)) of document height \(reader.focusView.frame.height)"]
+        for (index, message) in (model?.messages ?? []).enumerated() {
+            let view = reader.messageViews[message.id]
+            let focus = message.id == model?.focusedMessage ? " focused" : ""
+            let plate = view.map { " plate \($0.plateLook)" } ?? " no view"
+            let frame = frameInDocument(message.id).map(NSStringFromRect) ?? "none"
+            lines.append("  [\(index)]\(focus)\(plate), expanded \(message.isExpanded), body \(bodyReport(message, view)), "
+                + "frame \(frame)")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func bodyReport(_ message: ReaderModel.Message, _ view: MessageContainerView?) -> String {
+        switch message.body {
+        case .notLoaded: return "not loaded"
+        case .fetching: return "fetching"
+        case .failed: return "failed"
+        case .rendered(.empty): return "empty"
+        case .rendered(.plain): return view?.plainBody == nil ? "plain, no view" : "plain"
+        case .rendered(.html):
+            guard let html = view?.htmlBody else { return "html, no view" }
+            let height = html.current?.measuredHeight.map { "\($0)" } ?? "none"
+            return "html, shown \(html.current?.isShown == true), height \(height)" + (html.incoming == nil ? "" : ", swapping")
+        }
     }
 }
 
