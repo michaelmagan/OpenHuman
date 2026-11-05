@@ -30,6 +30,12 @@ private final class WindowClock {
 }
 
 @MainActor
+private final class PostedToasts {
+    private(set) var messages: [String] = []
+    init(_ notices: NoticeCenter) { notices.onPost = { [weak self] toast in self?.messages.append(toast.message) } }
+}
+
+@MainActor
 private struct CalendarWindowFixture {
     let env: AppEnvironment
     let work: FakeCalendar
@@ -806,23 +812,25 @@ private final class DidWriteReloadCalendar: CalendarProviding, Sendable {
     }
 
     @Test func theFirstClickShowsEachTipOnceAndTheKeyCountsAsLearnt() async throws {
+        // Why: count what was posted, not what is still on screen, so a toast's wall-clock expiry can't hide the tip
         let f = CalendarWindowFixture()
+        let posted = PostedToasts(f.env.notices)
         let model = f.window()
         await model.open(source: .toolbar)
         await model.close(source: .toolbar)
         await model.open(source: .palette)
         await model.close(source: .menu)
-        let messages = f.env.notices.toasts.map(\.message)
-        #expect(messages.filter { $0 == "Next time, hit 2 to go to Calendar instantly!" }.count == 1)
-        #expect(messages.filter { $0 == "Next time, hit 1 to go back to your mail." }.count == 1)
+        #expect(posted.messages.filter { $0 == "Next time, hit 2 to go to Calendar instantly!" }.count == 1)
+        #expect(posted.messages.filter { $0 == "Next time, hit 1 to go back to your mail." }.count == 1)
         #expect(Set(try await f.env.settings?.get(AppSettings.calendarTipsShown) ?? []) == ["1", "2"])
 
         let keys = CalendarWindowFixture()
+        let keyPosted = PostedToasts(keys.env.notices)
         let keyed = keys.window()
         await keyed.open(source: .keyboard)
         await keyed.close(source: .keyboard)
         await keyed.open(source: .toolbar)
-        #expect(!keys.env.notices.toasts.contains { $0.message.hasPrefix("Next time") }, "using the key teaches it")
+        #expect(!keyPosted.messages.contains { $0.hasPrefix("Next time") }, "using the key teaches it")
     }
 
     @Test func aCalendarTickedOffIsNotReadAndStaysOff() async throws {

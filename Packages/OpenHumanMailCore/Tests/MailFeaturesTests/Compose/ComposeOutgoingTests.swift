@@ -108,6 +108,8 @@ import Testing
         f.store.completeHeldSends()
         await f.posted("Sent.", "Reminder set for")
         #expect(session.pendingReminder == nil)
+        // Why: the undo toast is posted as the command starts; the store has the reminder only once it finishes
+        await eventuallyAsync { await reminder(f, thread) != before }
         let stored = try #require(await reminder(f, thread))
         #expect(stored.kind == .ifNoReply)
     }
@@ -152,6 +154,8 @@ import Testing
         f.store.completeHeldSends()
         await f.posted("Sent.", "Reminder set for")
         let sent = try #require(f.store.sentMessages.last)
+        // Why: the undo toast is posted as the command starts; the store has the reminder only once it finishes
+        await eventuallyAsync { await reminder(f, sent.thread) != nil }
         let stored = try #require(await reminder(f, sent.thread))
         #expect(stored.kind == .always)
     }

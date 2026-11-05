@@ -54,11 +54,14 @@ import Testing
             if case .offline(since: h.clock.now)? = engine.connectivity.current[h.account] { return true }
             return false
         }
+        _ = try await engine.syncNow(h.account, reason: "test")
+        #expect(engine.connectivity.current[h.account] == .offline(since: h.clock.now),
+                "a run that finishes while the network is down leaves the account offline")
         let drainer = try #require(await engine.drainer(for: h.account))
         let passes = await drainer.passes
         system.send(.networkReachable(true))
         try await eventually("drainer poked") { await drainer.passes > passes }
-        try await h.waitForSyncs(engine, 2)
+        try await h.waitForSyncs(engine, 3)
         try await eventually("online again") {
             if case .online(syncing: false, _)? = engine.connectivity.current[h.account] { return true }
             return false

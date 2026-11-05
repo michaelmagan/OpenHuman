@@ -271,7 +271,12 @@ actor AccountRuntime {
             pollState = .running
             if pollTask == nil { pollTask = Task { await self.pollLoop() } }
         }
-        env.connectivity.set(account, .online(syncing: false, lastSyncAt: status?.lastSuccessAt ?? env.clock.now))
+        let online = AccountConnectivity.online(syncing: false, lastSyncAt: status?.lastSuccessAt ?? env.clock.now)
+        let reachability = env.reachability
+        env.connectivity.update { states in
+            states[account] = ConnectivityHub.afterRun(online, previous: states[account],
+                                                       isReachable: reachability.isReachable)
+        }
         reportPhase(status)
         warnAboutScheduleLabels()
         if backfill { await syncer.startBackfill() }
@@ -281,8 +286,11 @@ actor AccountRuntime {
         let code = AccountSyncer.code(error)
         let now = env.clock.now
         let last = (try? env.store.syncStatus(account: account))?.lastSuccessAt
+        let reachability = env.reachability
         env.connectivity.update { states in
-            states[account] = ConnectivityHub.afterFailure(error, now: now, previous: states[account], lastSyncAt: last)
+            let next = ConnectivityHub.afterFailure(error, now: now, previous: states[account], lastSyncAt: last)
+            states[account] = ConnectivityHub.afterRun(next, previous: states[account],
+                                                       isReachable: reachability.isReachable)
         }
         env.emit(.syncFailed(account, code))
         if case GmailError.reauthRequired = error {
