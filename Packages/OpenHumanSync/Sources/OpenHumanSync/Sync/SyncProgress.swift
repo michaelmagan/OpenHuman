@@ -90,16 +90,15 @@ final class ProgressBroadcaster: Sendable {
 
     var current: SyncProgress { state.withLock { $0.value } }
 
+    // Why: yielding after unlocking let two concurrent updates reach observers in the opposite order, leaving them on a stale value
     func update(_ change: (inout SyncProgress) -> Void) {
-        let (value, observers): (SyncProgress?, [AsyncStream<SyncProgress>.Continuation]) = state.withLock { s in
+        state.withLock { s in
             var next = s.value
             change(&next)
-            guard next != s.value else { return (nil, []) }
+            guard next != s.value else { return }
             s.value = next
-            return (next, Array(s.observers.values))
+            for observer in s.observers.values { observer.yield(next) }
         }
-        guard let value else { return }
-        for observer in observers { observer.yield(value) }
     }
 
     func stream() -> AsyncStream<SyncProgress> {

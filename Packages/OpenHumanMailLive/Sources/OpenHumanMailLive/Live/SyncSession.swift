@@ -302,6 +302,7 @@ private final class ConnectivityMerge: Sendable {
         var stopped = false
     }
     private let state = Mutex(State())
+    private let serial = Mutex(())
     private let store: MailStore
     private let publish: @Sendable ([AccountID: ConnectivityState]) -> Void
 
@@ -343,7 +344,13 @@ private final class ConnectivityMerge: Sendable {
         for task in watchers { task.cancel() }
     }
 
+    // Why: an engine change and a store change recompute from different tasks; unserialized, the one that read the store
+    // first could publish last and leave the status area on a stale state that later identical recomputes never replace
     private func recompute(_ change: (inout State) -> Void) {
+        serial.withLock { _ in recomputeSerially(change) }
+    }
+
+    private func recomputeSerially(_ change: (inout State) -> Void) {
         let ids = state.withLock { s -> [AccountID] in
             change(&s)
             return s.accounts

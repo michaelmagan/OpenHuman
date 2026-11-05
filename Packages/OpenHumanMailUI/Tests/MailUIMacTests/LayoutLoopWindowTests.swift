@@ -268,29 +268,45 @@ enum LayoutLoopProbe {
 
     // Loading the sidebar's data does not wait for SwiftUI's inspector to finish resizing the window. Finish that
     // fixture setup at a size the display can hold before testing the layout caused by legacy scroll bars.
+    // Why: when the inspector needs more width than the display has, SwiftUI widens the window again after every
+    // pull-back, so pulling the same frame back twice would fight it until the timeout. Each oversized frame is
+    // pulled back once; if SwiftUI returns to it, that is the window's own minimum and the fixture keeps it.
     static func settleFixtureFrame(of window: NSWindow, state: String, watchdog: LayoutStallWatchdog) async throws {
         let screen = try #require(window.screen ?? NSScreen.main ?? NSScreen.screens.first)
         let visible = screen.visibleFrame
         var lastFrame: NSRect?
         var lastLayout: NSRect?
         var stableSamples = 0
-        try await until(timeout: .seconds(10)) {
-            watchdog.beat("settling the fixture frame")
-            window.contentView?.layoutSubtreeIfNeeded()
-            let frame = window.frame
-            let fitted = fittedFrame(frame, within: visible)
-            if frame != fitted {
-                window.setFrame(fitted, display: true)
-                lastFrame = nil
-                lastLayout = nil
-                stableSamples = 0
-                return false
+        var pulledBack: Set<String> = []
+        var moves: [String] = []
+        do {
+            try await until(timeout: .seconds(10)) {
+                watchdog.beat("settling the fixture frame")
+                window.contentView?.layoutSubtreeIfNeeded()
+                let frame = window.frame
+                let fitted = fittedFrame(frame, within: visible)
+                if frame != fitted, pulledBack.insert(NSStringFromRect(frame)).inserted {
+                    moves.append("pulled \(NSStringFromRect(frame)) back to \(NSStringFromRect(fitted))")
+                    window.setFrame(fitted, display: true)
+                    lastFrame = nil
+                    lastLayout = nil
+                    stableSamples = 0
+                    return false
+                }
+                let layout = window.contentLayoutRect
+                if frame != lastFrame || layout != lastLayout {
+                    moves.append("frame \(NSStringFromRect(frame)), content \(NSStringFromRect(layout))")
+                }
+                stableSamples = frame == lastFrame && layout == lastLayout ? stableSamples + 1 : 0
+                lastFrame = frame
+                lastLayout = layout
+                return window.toolbar != nil && stableSamples >= settledCycles
             }
-            let layout = window.contentLayoutRect
-            stableSamples = frame == lastFrame && layout == lastLayout ? stableSamples + 1 : 0
-            lastFrame = frame
-            lastLayout = layout
-            return window.toolbar != nil && stableSamples >= settledCycles
+        } catch {
+            Issue.record("\(state): the fixture window did not hold still for \(settledCycles) samples "
+                + "(toolbar: \(window.toolbar != nil), visible \(NSStringFromRect(visible))); last moves:\n  "
+                + moves.suffix(12).joined(separator: "\n  "))
+            throw error
         }
         print("LayoutLoop fixture \(state): frame \(NSStringFromRect(window.frame)), visible \(NSStringFromRect(visible))")
     }

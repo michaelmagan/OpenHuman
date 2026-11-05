@@ -21,17 +21,15 @@ final class AccountHub<Value: Equatable & Sendable>: Sendable {
         update { $0[account] = value }
     }
 
+    // Why: yielding after unlocking let two concurrent updates reach observers in the opposite order, leaving them on a stale value
     func update(_ change: (inout [AccountID: Value]) -> Void) {
-        let (value, observers): ([AccountID: Value]?, [AsyncStream<[AccountID: Value]>.Continuation]) =
-            state.withLock { s in
-                var next = s.value
-                change(&next)
-                guard next != s.value else { return (nil, []) }
-                s.value = next
-                return (next, Array(s.observers.values))
-            }
-        guard let value else { return }
-        for observer in observers { observer.yield(value) }
+        state.withLock { s in
+            var next = s.value
+            change(&next)
+            guard next != s.value else { return }
+            s.value = next
+            for observer in s.observers.values { observer.yield(next) }
+        }
     }
 
     func stream() -> AsyncStream<[AccountID: Value]> {
