@@ -303,9 +303,10 @@ enum LayoutLoopProbe {
                 return window.toolbar != nil && stableSamples >= settledCycles
             }
         } catch {
-            Issue.record("\(state): the fixture window did not hold still for \(settledCycles) samples "
-                + "(toolbar: \(window.toolbar != nil), visible \(NSStringFromRect(visible))); last moves:\n  "
-                + moves.suffix(12).joined(separator: "\n  "))
+            let recent: String = moves.suffix(12).joined(separator: "\n  ")
+            let message: String = "\(state): the fixture window did not hold still for \(settledCycles) samples "
+                + "(toolbar: \(window.toolbar != nil), visible \(NSStringFromRect(visible))); last moves:\n  " + recent
+            Issue.record(Comment(rawValue: message))
             throw error
         }
         print("LayoutLoop fixture \(state): frame \(NSStringFromRect(window.frame)), visible \(NSStringFromRect(visible))")
