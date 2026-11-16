@@ -3,15 +3,9 @@ import MailFeatures
 import MailModel
 import MailTheme
 import OpenHumanCore
-
-/// A row the sidebar can select. The router's state decides which one is selected; selecting one navigates.
-public enum MailSidebarSelection: Hashable, Sendable {
-    case allInboxes
-    /// The account's inbox: its split tabs, or its plain Inbox without splits.
-    case inbox(AccountID)
-    case location(AccountID, MailLocation)
-    case calendar
-}
+#if os(macOS)
+import AppKit
+#endif
 
 /// A user label in the sidebar's outline, with the labels nested under it.
 struct MailSidebarLabel: Identifiable, Hashable {
@@ -89,7 +83,7 @@ struct MailSidebarSections: Equatable {
 }
 
 @MainActor
-enum MailSidebarModel {
+public enum MailSidebarModel {
     static func current(_ router: AppRouter) -> MailSidebarSelection? {
         selection(calendarOpen: router.environment.calendarWindowIfStarted?.isOpen == true,
                   allInboxes: router.unifiedInbox != nil, account: router.active?.id, location: router.active?.location,
@@ -103,6 +97,40 @@ enum MailSidebarModel {
         guard let account, let location else { return nil }
         if location == .system(.inbox) || tabs.contains(location) { return .inbox(account) }
         return .location(account, location)
+    }
+
+    /// The row shown selected: the one ↑ ↓ moved to while the sidebar has the keys, else the current place.
+    static func shown(_ router: AppRouter) -> MailSidebarSelection? {
+        router.sidebarHighlight ?? current(router)
+    }
+
+    /// A row chosen in the list. While the sidebar has the keys, ↑ ↓ only move the highlight and Return opens it; a
+    /// click opens the row at once and gives the keys back to the list.
+    static func choose(_ selection: MailSidebarSelection?, router: AppRouter, byPointer: Bool = isPointerEvent) {
+        guard let selection else { return }
+        guard router.sidebarHasKeys else { return select(selection, router: router) }
+        guard byPointer else {
+            router.sidebarHighlight = selection == current(router) ? nil : selection
+            return
+        }
+        select(selection, router: router)
+        router.leaveSidebar()
+    }
+
+    /// Return in the sidebar: opens the highlighted row, if ↑ ↓ moved away from the current place, and gives the keys
+    /// back.
+    public static func openHighlight(router: AppRouter) {
+        if let highlight = router.sidebarHighlight { select(highlight, router: router) }
+        router.leaveSidebar()
+    }
+
+    static var isPointerEvent: Bool {
+        #if os(macOS)
+        guard let type = NSApp.currentEvent?.type else { return false }
+        return [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp].contains(type)
+        #else
+        return true
+        #endif
     }
 
     static func select(_ selection: MailSidebarSelection?, router: AppRouter) {

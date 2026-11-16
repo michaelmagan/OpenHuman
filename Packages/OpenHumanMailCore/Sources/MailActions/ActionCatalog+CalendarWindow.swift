@@ -20,7 +20,7 @@ extension ActionCatalog {
     private static let anywhereAndCalendar: Set<ActionScope> = [.global, .calendar]
 
     /// Every place of the mail that has keys of its own: 2 goes to the Calendar from each.
-    private static let mailPlaces: Set<ActionScope> = [.list, .reader, .review]
+    private static let mailPlaces: Set<ActionScope> = [.list, .reader, .review, .sidebar]
 
     // 1 is Mail and 2 the Calendar; 2 in the Calendar goes back to the mail as it was (W is the week view)
     static let calendarWindow: [ActionDescriptor] = [

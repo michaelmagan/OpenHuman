@@ -331,8 +331,7 @@ public enum ActionCatalog {
 
     static let view: [ActionDescriptor] = [
         ActionDescriptor(.toggleLabelSidebar, "Label Sidebar", category: .view,
-                         bindings: [.chord("s", [.control, .command]), .named(.left, onlyIn: [.list])],
-                         scopes: [.global, .list]),
+                         bindings: [.chord("s", [.control, .command])]),
         ActionDescriptor(.refresh, "Refresh", category: .view, bindings: [.chord("r", .command)],
                          keywords: ["sync now", "check mail", "get new mail", "reload", "fetch mail", "update"]),
     ] + theme

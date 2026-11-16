@@ -9,6 +9,8 @@ public enum ActionScope: String, Hashable, Sendable, Codable, CaseIterable {
     case global, list, reader, composer, palette
     case review
     case calendar
+    /// The window's sidebar while it has the keys: ← in the list moves them there.
+    case sidebar
 }
 
 extension ActionID {
@@ -34,6 +36,11 @@ extension ActionID {
     public static let goSavedSearch = ActionID("nav.goSavedSearch")
     public static let searchGmail = ActionID("nav.searchGmail")
     public static let toggleLabelSidebar = ActionID("view.toggleLabelSidebar")
+    public static let focusLabelSidebar = ActionID("view.focusLabelSidebar")
+    public static let sidebarOpen = ActionID("sidebar.open")
+    public static let sidebarLeave = ActionID("sidebar.leave")
+    public static let sidebarNext = ActionID("sidebar.next")
+    public static let sidebarPrevious = ActionID("sidebar.previous")
 
     public static let themeLight = ActionID("theme.light")
     public static let themeDark = ActionID("theme.dark")

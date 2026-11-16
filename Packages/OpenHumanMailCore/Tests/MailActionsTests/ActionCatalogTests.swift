@@ -157,7 +157,8 @@ import Testing
 
 @Test func onlyMovementRepeats() {
     let movement: Set<ActionID> = [.nextThread, .previousThread, .nextSplit, .previousSplit, .extendSelectionDown,
-                                   .extendSelectionUp, .nextMessage, .previousMessage, .reviewNext, .reviewPrevious]
+                                   .extendSelectionUp, .nextMessage, .previousMessage, .reviewNext, .reviewPrevious,
+                                   .sidebarNext, .sidebarPrevious]
     for descriptor in ActionCatalog.all {
         #expect(descriptor.allowsKeyRepeat == movement.contains(descriptor.id), "\(descriptor.id)")
     }
@@ -181,14 +182,14 @@ import Testing
     for id in [ActionID.calendarPreviousDay, .calendarNextDay, .calendarToday] {
         #expect(keys(id) == [] && ActionCatalog.descriptor(id)?.module == .calendar, "\(id): palette only")
     }
-    #expect(keys(.toggleLabelSidebar) == ["⌃⌘S", "←"])
+    #expect(keys(.toggleLabelSidebar) == ["⌃⌘S"] && keys(.focusLabelSidebar) == ["←"])
     #expect(keys(.compose) == ["C", "⌘N"])
     let (remindKey, snoozeKey) = ActionCatalog.remindOnH ? ("H", "⇧H") : ("⇧H", "H")
     #expect(keys(.remind) == [remindKey] && keys(.snooze) == [snoozeKey])
     let sidebar = try #require(ActionCatalog.descriptor(.calendarToggleSidebar))
     #expect(sidebar.scopes(of: sidebar.defaultBindings[0]) == [.list, .reader], "a bare 0 never acts in an overlay")
-    let labels = try #require(ActionCatalog.descriptor(.toggleLabelSidebar))
-    #expect(labels.scopes(of: labels.defaultBindings[1]) == [.list])
+    let labels = try #require(ActionCatalog.descriptor(.focusLabelSidebar))
+    #expect(labels.scopes(of: labels.defaultBindings[0]) == [.list], "← moves to the sidebar from the list only")
     let unsubscribe = try #require(ActionCatalog.descriptor(.unsubscribe))
     #expect(unsubscribe.scopes == [.list, .reader] && unsubscribe.effect == .external)
 }

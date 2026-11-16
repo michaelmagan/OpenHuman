@@ -158,7 +158,7 @@ import Testing
             (.sequence("g", "m"), [.global], .goMuted), (.sequence("g", "h"), [.global], .goReminders),
             (.sequence("g", "e"), [.global], .goDone), (.key("i"), [.list], .aiSummarize),
             (.key("0"), [.reader], .calendarToggleSidebar), (.key("b"), [.list], .calendarCreateEvent),
-            (.named(.left), [.list], .toggleLabelSidebar), (.chord("n", .command), [.list], .compose),
+            (.named(.left), [.list], .focusLabelSidebar), (.chord("n", .command), [.list], .compose),
             (.chord("F", .command), [.composer], .chooseFrom), (.chord("U", .command), [.composer], .attachFiles),
             (.chord("T", .command), [.composer], .focusTo), (.chord("f", .command), [.reader], .findInConversation),
             (.named(.escape), [.review], .reviewLeave), (.chord("7", [.command, .shift]), [.composer], .formatNumberedList),

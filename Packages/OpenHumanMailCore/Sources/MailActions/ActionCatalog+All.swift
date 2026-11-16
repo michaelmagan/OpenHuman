@@ -12,6 +12,7 @@ extension ActionCatalog {
         goTo,
         accounts,
         view,
+        sidebarFocus,
         calendar,
         message,
         app,

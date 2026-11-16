@@ -28,6 +28,16 @@ public final class AppRouter {
     public internal(set) var accountCountMode: AccountCountMode = AppSettings.accountCounts.defaultValue
     public internal(set) var allInboxesEnabled = AppSettings.allInboxesShown.defaultValue
     public var sequenceHint: String?
+    /// The sidebar row ↑ ↓ moved to while the sidebar has the keys; Return opens it. Nil shows the current place.
+    public var sidebarHighlight: MailSidebarSelection?
+    /// True while the sidebar list has the keys; the window keeps it current. Losing the keys drops the highlight.
+    public var sidebarHasKeys = false {
+        didSet { if !sidebarHasKeys, sidebarHighlight != nil { sidebarHighlight = nil } }
+    }
+    /// Raised by ← in the list: the window gives the sidebar the keys.
+    public internal(set) var sidebarFocusRequest = 0
+    /// Raised when the sidebar is left or a place is chosen in it: the window gives the keys back.
+    public internal(set) var sidebarReturnRequest = 0
 
     @ObservationIgnored public let environment: AppEnvironment
     @ObservationIgnored private let startLocation: MailLocation?

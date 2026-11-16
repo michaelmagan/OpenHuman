@@ -20,7 +20,7 @@ public struct ShortcutLine: Hashable, Sendable, Identifiable {
         if scopes.contains(.global) { return "Everywhere" }
         let names: [(ActionScope, String)] = [(.list, "list"), (.reader, "conversation"), (.composer, "composer"),
                                               (.review, "review queue"), (.palette, "palette"),
-                                              (.calendar, "calendar")]
+                                              (.calendar, "calendar"), (.sidebar, "sidebar")]
         let parts = names.filter { scopes.contains($0.0) }.map(\.1)
         let text = switch parts.count {
         case 0: "Everywhere"

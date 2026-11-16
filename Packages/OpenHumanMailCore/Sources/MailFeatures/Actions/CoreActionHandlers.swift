@@ -33,7 +33,7 @@ public final class ActionFeedback {
 final class ShellActionHandler: ActionHandler {
     static let ids: [ActionID] = [.nextThread, .previousThread, .openThread, .backToList, .nextSplit, .previousSplit,
                                   .goInbox, .goStarred, .goDrafts, .goSent, .goAllMail, .goDone, .goWaiting,
-                                  .toggleLabelSidebar]
+                                  .toggleLabelSidebar, .focusLabelSidebar]
         + (1...9).map(ActionID.switchToAccount)
     static let moduleIDs: [FeatureModuleID: [ActionID]] = [
         .snooze: [.goSnoozed], .reminders: [.goReminders], .sendLater: [.goScheduled], .review: [.goReview, .reviewLeave],

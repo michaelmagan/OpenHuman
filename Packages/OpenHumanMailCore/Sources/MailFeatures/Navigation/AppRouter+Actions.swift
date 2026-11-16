@@ -28,6 +28,8 @@ extension AppRouter {
         case .toggleLabelSidebar:
             isLabelSidebarVisible.toggle()
             return true
+        case .focusLabelSidebar:
+            return focusSidebar()
         default:
             break
         }
@@ -77,7 +79,7 @@ extension AppRouter {
 
     func shellIsEnabled(_ action: ActionID) -> Bool {
         if let position = action.accountPosition { return showsAccountSwitcher && position <= accounts.count }
-        if action == .toggleLabelSidebar { return true }
+        if action == .toggleLabelSidebar || action == .focusLabelSidebar { return true }
         guard let active else { return false }
         if action == .reviewLeave {
             guard active.mode == .list, case .reviewQueue? = active.location else { return false }

@@ -8,7 +8,7 @@ import Testing
 @Suite struct CalendarWindowKeyTests {
     @Test func theCalendarHasItsOwnKeysAndTheMailKeepsIts() {
         let table = KeyTable.build(ActionCatalog.all)
-        for scope: ActionScope in [.list, .reader, .review] {
+        for scope: ActionScope in [.list, .reader, .review, .sidebar] {
             #expect(table.bindings[scope]?[.char("2")] == .calendarOpen, "2 goes to the Calendar from \(scope)")
         }
         let calendar = table.bindings[.calendar] ?? [:]

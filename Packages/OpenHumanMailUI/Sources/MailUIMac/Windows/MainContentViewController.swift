@@ -25,6 +25,10 @@ public final class MainContentViewController: NSViewController {
     private var wakeObserver: (any NSObjectProtocol)?
     private var seenFieldFocus = 0
     private var seenResultsFocus = 0
+    var seenSidebarFocus = 0
+    var seenSidebarReturn = 0
+    var shownSidebarVisible = true
+    var firstResponderObservation: NSKeyValueObservation?
     /// Waiting for the results to load before they take the keys; true when the first result is to be selected.
     private var pendingResultsFocus: Bool?
     private var shownSearchOpen = false
@@ -80,6 +84,11 @@ public final class MainContentViewController: NSViewController {
         }
         keyRouter.activeScopes = { [weak self] in
             if self?.router.environment.overlays.isShowing == true { return [.global] }
+            if self?.sidebarHasTheKeys() == true {
+                // Why: a click in the sidebar while the Calendar shows leaves the Calendar's keys working
+                let calendar = self?.router.environment.calendarWindowIfStarted?.isOpen == true
+                return calendar ? [.sidebar, .calendar, .global] : [.sidebar, .global]
+            }
             if self?.router.environment.calendarWindowIfStarted?.isOpen == true { return [.calendar, .global] }
             if self?.router.unifiedInbox != nil { return [.global] }
             if self?.router.mode == .list, case .reviewQueue? = self?.router.active?.location {
@@ -87,7 +96,11 @@ public final class MainContentViewController: NSViewController {
             }
             return self?.router.mode == .reader ? [.reader, .global] : [.list, .global]
         }
-        keyRouter.perform = { [weak self] action, _ in self?.router.perform(action) ?? false }
+        keyRouter.perform = { [weak self] action, scope in
+            guard let self else { return false }
+            if scope == .sidebar, let handled = self.performInSidebar(action) { return handled }
+            return self.router.perform(action)
+        }
         keyRouter.editingKeyHandler = { [weak self] event in self?.editSearchQuery(with: event) ?? false }
         keyRouter.fieldEditorKeyHandler = { [weak self] event, editor in
             self?.editSearchField(with: event, in: editor) ?? false
@@ -113,6 +126,7 @@ public final class MainContentViewController: NSViewController {
     public override func viewDidAppear() {
         super.viewDidAppear()
         keyRouter.install()
+        observeSidebarKeys()
     }
 
     public override func viewWillDisappear() {
@@ -120,6 +134,7 @@ public final class MainContentViewController: NSViewController {
         // Why: AppKit calls this when the Calendar hides the mail too, and the Calendar's keys come through this router
         if view.window == nil || !view.isHidden {
             keyRouter.uninstall()
+            firstResponderObservation = nil
         }
         captureScroll(into: boundAccount)
         router.persist()
@@ -230,6 +245,7 @@ public final class MainContentViewController: NSViewController {
             pendingResultsFocus = mode == .list ? search.resultsFocusStartsAtTop : nil
         }
         if pendingResultsFocus != nil { focusResultsOnceShown() }
+        renderSidebarFocus()
         if search.isOpen != shownSearchOpen {
             let closed = shownSearchOpen
             shownSearchOpen = search.isOpen

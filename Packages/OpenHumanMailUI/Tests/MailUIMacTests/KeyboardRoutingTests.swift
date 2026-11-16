@@ -201,7 +201,7 @@ import WebKit
         #expect(table.bindings[.list]?[KeyChord(.character("u"), modifiers: .command)] == .unsubscribe)
         #expect(table.bindings[.reader]?[KeyChord(.character("u"), modifiers: .command)] == .unsubscribe)
         #expect(table.bindings[.list]?[.char("M")] == .toggleMute && table.bindings[.list]?[.char("m")] == .toggleMute)
-        #expect(table.bindings[.list]?[.named(.left)] == .toggleLabelSidebar)
+        #expect(table.bindings[.list]?[.named(.left)] == .focusLabelSidebar)
         #expect(table.bindings[.global]?[KeyChord(.character("n"), modifiers: .command)] == .compose)
         #expect(table.sequences[.global]?[.char("g")]?[.char("h")] == .goReminders)
         #expect(table.sequences[.global]?[.char("g")]?[.char("m")] == .goMuted)

@@ -62,6 +62,26 @@ import Testing
         }
     }
 
+    @Test func oneAndTwoWorkInTheCalendarWhenTheSidebarHasTheKeys() async throws {
+        let (w, calendar) = try await make()
+        defer { w.close() }
+        let sidebar = try #require(w.content.sidebarTable())
+        w.window.makeFirstResponder(sidebar)
+        try await until(timeout: .seconds(15)) { w.router.sidebarHasKeys }
+        #expect(press("2", in: w), "2 in the sidebar opens the Calendar")
+        try await until(timeout: .seconds(15)) { calendar.isOpen }
+        w.window.makeFirstResponder(sidebar)
+        try await until(timeout: .seconds(15)) { w.content.sidebarHasTheKeys() }
+        #expect(press("2", in: w), "2 in the sidebar while the Calendar shows goes back")
+        try await until(timeout: .seconds(15)) { !calendar.isOpen }
+        #expect(press("2", in: w))
+        try await until(timeout: .seconds(15)) { calendar.isOpen }
+        w.window.makeFirstResponder(sidebar)
+        try await until(timeout: .seconds(15)) { w.content.sidebarHasTheKeys() }
+        #expect(press("1", in: w), "1 in the sidebar while the Calendar shows is Mail")
+        try await until(timeout: .seconds(15)) { !calendar.isOpen }
+    }
+
     @Test func digitsTypedInTheCalendarsFieldsAreTextAndTheKeysComeBackWhenTheEventCloses() async throws {
         let (w, calendar) = try await make()
         defer { w.close() }

@@ -5,7 +5,8 @@ import OpenHumanCore
 import SwiftUI
 
 /// The column shown in the window's sidebar: All Inboxes, one section per account with its mailboxes, the active
-/// account's labels, and Calendar. Selection is the system's; choosing a row navigates.
+/// account's labels, and Calendar. Selection is the system's; a click on a row navigates. With the keys here (← in the
+/// list), ↑ ↓ move the selection without navigating and Return opens it; see `MailSidebarModel.choose`.
 public struct MailSidebar: View {
     let router: AppRouter
     @Environment(\.theme) private var theme
@@ -33,7 +34,7 @@ public struct MailSidebar: View {
     }
 
     private var selection: Binding<MailSidebarSelection?> {
-        Binding(get: { MailSidebarModel.current(router) }, set: { MailSidebarModel.select($0, router: router) })
+        Binding(get: { MailSidebarModel.shown(router) }, set: { MailSidebarModel.choose($0, router: router) })
     }
 
     private var allInboxesRow: some View {
