@@ -83,9 +83,9 @@ struct AttachmentDragTests {
 
     @Test func theTileSaysItCanBeDragged() throws {
         let on = try #require(strip(writer: Self.writer).tiles.first)
-        #expect(on.accessibilityHelp() == "Space previews it, double-click opens it, drag it to copy it.")
+        #expect(on.accessibilityHelp() == "Space previews it, Return or a double-click opens it, drag it to copy it.")
         let off = try #require(strip(writer: nil).tiles.first)
-        #expect(off.accessibilityHelp() == "Space previews it, double-click opens it")
+        #expect(off.accessibilityHelp() == "Space previews it, Return or a double-click opens it")
     }
 
     @Test func aFailedWriteReportsBackAndLeavesNothing() async throws {

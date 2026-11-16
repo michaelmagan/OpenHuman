@@ -16,8 +16,9 @@ public enum ActionCatalog {
     public static let returnRepliesAll = true
     public static let remindOnH = true
 
-    private static let replyReturn: KeyBinding.Modifiers = returnRepliesAll ? [.shift] : []
-    private static let replyAllReturn: KeyBinding.Modifiers = returnRepliesAll ? [] : [.shift]
+    // ↵ itself is `openMessageOrReply`'s: it opens the message the keys selected before it replies
+    private static let replyReturn: [KeyBinding] = returnRepliesAll ? [.named(.enter, .shift, onlyIn: [.reader])] : []
+    private static let replyAllReturn: [KeyBinding] = returnRepliesAll ? [] : [.named(.enter, .shift, onlyIn: [.reader])]
 
     static let thread: [ActionDescriptor] = [
         ActionDescriptor(.markDone, "Mark done", category: .thread, bindings: [.key("e")], scopes: listAndReader,
@@ -135,10 +136,10 @@ public enum ActionCatalog {
         ActionDescriptor(.composeInWindow, "New message in window", category: .compose, bindings: [.key("C")],
                          keywords: ["compose", "pop out"]),
         ActionDescriptor(.reply, "Reply", category: .compose,
-                         bindings: [.key("r"), .named(.enter, replyReturn, onlyIn: [.reader])], scopes: listAndReader,
+                         bindings: [.key("r")] + replyReturn, scopes: listAndReader,
                          target: .focusedThread, keywords: ["respond", "answer"]),
         ActionDescriptor(.replyAll, "Reply all", category: .compose,
-                         bindings: [.key("a"), .named(.enter, replyAllReturn, onlyIn: [.reader])], scopes: listAndReader,
+                         bindings: [.key("a")] + replyAllReturn, scopes: listAndReader,
                          target: .focusedThread, keywords: ["respond to all"]),
         ActionDescriptor(.forward, "Forward", category: .compose, bindings: [.key("f")], scopes: listAndReader,
                          target: .focusedThread, keywords: ["fwd", "share"]),
@@ -393,6 +394,10 @@ public enum ActionCatalog {
         ActionDescriptor(.previousMessage, "Previous message", category: .view, bindings: [.key("p"), .named(.up)],
                          scopes: [.reader], keywords: ["up", "older message", "focus message", "select message"],
                          allowsKeyRepeat: true),
+        ActionDescriptor(.openMessageOrReply, returnRepliesAll ? "Open message, then reply all" : "Open message, then reply",
+                         shortTitle: returnRepliesAll ? "Reply all" : "Reply", category: .view,
+                         bindings: [.named(.enter)], scopes: [.reader], keywords: ["open message", "respond"],
+                         appearsInPalette: false, appearsInMenu: false),
         ActionDescriptor(.toggleMessage, "Expand or collapse message", category: .view, bindings: [.key("o")],
                          scopes: [.reader], keywords: ["open message", "close message", "fold"]),
         ActionDescriptor(.expandAllMessages, "Expand all messages", category: .view, bindings: [.key("O")],

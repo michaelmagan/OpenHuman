@@ -4,6 +4,11 @@ import MailActions
 @MainActor
 public protocol TextInputHost: AnyObject {}
 
+/// A focused view that answers ↵ itself, such as an attachment tile opening its file: the scope's ↵ (Reply in a
+/// conversation) does not reach past it.
+@MainActor
+public protocol ReturnKeyOwner: AnyObject {}
+
 public struct KeyChord: Hashable, Sendable {
     public enum Key: Hashable, Sendable {
         case character(String)
@@ -147,6 +152,8 @@ public final class KeyRouter {
             if event.isARepeat, event.keyCode == 36 || event.keyCode == 76,
                !overlayScopes.isEmpty || (window.firstResponder as? NSTextView)?.isFieldEditor == true { return nil }
             if Self.isTextInput(window.firstResponder) { return routeWhileTyping(event) }
+            if window.firstResponder is ReturnKeyOwner, event.keyCode == 36 || event.keyCode == 76,
+               event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty { return event }
         }
         if Self.editingKeyCodes.contains(event.keyCode), overlayScopes.isEmpty, let editingKeyHandler, editingKeyHandler(event) {
             endSequence()

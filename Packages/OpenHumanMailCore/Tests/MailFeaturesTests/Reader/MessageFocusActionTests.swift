@@ -49,6 +49,27 @@ import Testing
         #expect(registry.descriptor(.nextMessage)?.scopes == [.reader])
     }
 
+    @Test func returnOpensTheSelectedMessageFirstAndRepliesOnceItIsOpen() async throws {
+        let f = ComposeFixture()
+        let (reader, messages) = try await open(f)
+        let middle = messages[messages.count - 2].id
+        #expect(await f.run(.previousMessage))
+        if reader.message(middle)?.isExpanded == true { #expect(await f.run(.toggleMessage)) }
+        #expect(reader.focusedMessage == middle && reader.message(middle)?.isExpanded == false)
+        #expect(f.env.actions.availability(.openMessageOrReply, host: f.router) == .enabled)
+
+        #expect(await f.run(.openMessageOrReply))
+        #expect(reader.message(middle)?.isExpanded == true, "↵ on a closed message opens it")
+        #expect(f.compose.windowSession == nil, "and starts no reply")
+
+        #expect(await f.run(.openMessageOrReply))
+        let reply = try #require(f.compose.windowSession)
+        await reply.settle()
+        #expect(reply.mode == (ActionCatalog.returnRepliesAll ? .replyAll : .reply), "↵ on an open message replies")
+        #expect(reply.replyTo == middle, "to the message the keys selected")
+        #expect(f.env.actions.availability(.openMessageOrReply, host: f.router) == .hidden, "the composer has ↵ now")
+    }
+
     @Test func aFocusedComposerKeepsTheArrowAndReturnKeys() async throws {
         let f = ComposeFixture()
         let (reader, messages) = try await open(f)
@@ -126,8 +147,9 @@ import Testing
         #expect(lines[.toggleQuotedText] == ["."] && lines[.showImages] == ["⇧I"])
         let write = try #require(sheet.sections.first { $0.title == "Write" })
         let replies = Dictionary(uniqueKeysWithValues: write.lines.map { ($0.action, $0.keys) })
-        let (replyReturn, replyAllReturn) = ActionCatalog.returnRepliesAll ? ("⇧↵", "↵") : ("↵", "⇧↵")
-        #expect(replies[.reply] == ["R", replyReturn] && replies[.replyAll] == ["A", replyAllReturn])
+        let (replyKeys, replyAllKeys) = ActionCatalog.returnRepliesAll ? (["R", "⇧↵"], ["A"]) : (["R"], ["A", "⇧↵"])
+        #expect(replies[.reply] == replyKeys && replies[.replyAll] == replyAllKeys)
+        #expect(lines[.openMessageOrReply] == ["↵"], "↵ opens the selected message, then replies")
         #expect(replies[.forward] == ["F"])
         sheet.filter = "message"
         #expect(sheet.sections.flatMap(\.lines).map(\.action).contains(.nextMessage))

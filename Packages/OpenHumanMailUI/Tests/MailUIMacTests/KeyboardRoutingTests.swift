@@ -206,9 +206,8 @@ import WebKit
         #expect(table.sequences[.global]?[.char("g")]?[.char("h")] == .goReminders)
         #expect(table.sequences[.global]?[.char("g")]?[.char("m")] == .goMuted)
         #expect(table.sequences[.global]?[.char("g")]?[.char("e")] == .goDone)
-        let (returnAction, shiftReturnAction): (ActionID, ActionID) =
-            ActionCatalog.returnRepliesAll ? (.replyAll, .reply) : (.reply, .replyAll)
-        #expect(table.bindings[.reader]?[.named(.returnKey)] == returnAction)
+        let shiftReturnAction: ActionID = ActionCatalog.returnRepliesAll ? .reply : .replyAll
+        #expect(table.bindings[.reader]?[.named(.returnKey)] == .openMessageOrReply, "↵ opens a closed message first")
         #expect(table.bindings[.reader]?[KeyChord(.named(.returnKey), modifiers: .shift)] == shiftReturnAction)
         #expect(table.bindings[.list]?[.named(.returnKey)] == .openThread, "↵ in the list still opens")
         #expect(table.nonRepeating.contains(.compose) && table.nonRepeating.contains(.search))

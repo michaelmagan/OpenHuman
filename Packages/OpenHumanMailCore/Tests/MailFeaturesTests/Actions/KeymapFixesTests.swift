@@ -100,7 +100,8 @@ import Testing
     @Test func theHintBarAndTheEmptyStatesNameTheCurrentKeys() {
         let conversation = HintBar.hints(for: .conversation, descriptors: ActionCatalog.all) { _ in .enabled }
         let returnHint = conversation.first { $0.keycaps == ["↵"] }
-        #expect(returnHint?.action == (ActionCatalog.returnRepliesAll ? .replyAll : .reply), "the hint is what ↵ does")
+        #expect(returnHint?.action == .openMessageOrReply, "the hint is what ↵ does")
+        #expect(returnHint?.title == (ActionCatalog.returnRepliesAll ? "Reply all" : "Reply"))
         let list = HintBar.hints(for: .list, descriptors: ActionCatalog.all) { _ in .enabled }
         #expect(list.first { $0.action == .remind }?.keycaps == [ActionCatalog.remindOnH ? "H" : "⇧H"])
 

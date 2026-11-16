@@ -46,12 +46,16 @@ import Testing
     }
     #expect(ActionCatalog.descriptor(.nextThread)?.scopes(of: .named(.down, onlyIn: [.list])) == [.list],
             "↓ still moves the list cursor in the list")
-    let (replyReturn, replyAllReturn) = ActionCatalog.returnRepliesAll ? ("⇧↵", "↵") : ("↵", "⇧↵")
-    #expect(ActionCatalog.descriptor(.reply)?.defaultBindings.map(\.description) == ["R", replyReturn])
-    #expect(ActionCatalog.descriptor(.replyAll)?.defaultBindings.map(\.description) == ["A", replyAllReturn])
+    // ↵ in a conversation opens the message the keys selected, then replies; ⇧↵ is the other reply, straight away
+    let (shiftReturn, plainReturn): (ActionID, ActionID) = ActionCatalog.returnRepliesAll ? (.reply, .replyAll) : (.replyAll, .reply)
+    #expect(ActionCatalog.descriptor(shiftReturn)?.defaultBindings.map(\.description).last == "⇧↵")
+    #expect(ActionCatalog.descriptor(plainReturn)?.defaultBindings.map(\.description).count == 1, "its ↵ is the next action's")
+    let openOrReply = try #require(ActionCatalog.descriptor(.openMessageOrReply))
+    #expect(openOrReply.defaultBindings.map(\.description) == ["↵"] && openOrReply.scopes == [.reader])
+    #expect(openOrReply.shortTitle == (ActionCatalog.returnRepliesAll ? "Reply all" : "Reply") && !openOrReply.appearsInMenu)
     for id in [ActionID.reply, .replyAll] {
         let descriptor = try #require(ActionCatalog.descriptor(id))
-        #expect(descriptor.scopes(of: descriptor.defaultBindings[1]) == [.reader] && descriptor.appearsInMenu)
+        #expect(descriptor.defaultBindings.first?.description == (id == .reply ? "R" : "A") && descriptor.appearsInMenu)
     }
     #expect(ActionCatalog.descriptor(.forward)?.appearsInMenu == true)
     #expect(ActionCatalog.descriptor(.openThread)?.scopes == [.list])

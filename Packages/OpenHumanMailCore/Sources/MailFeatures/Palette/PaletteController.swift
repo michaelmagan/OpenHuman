@@ -229,6 +229,7 @@ public final class PaletteController {
         .resetSearchLearning: "arrow.counterclockwise", .toggleSearchSort: "arrow.up.arrow.down",
         .copySearchRanking: "list.number",
         .nextMessage: "chevron.down", .previousMessage: "chevron.up", .toggleMessage: "rectangle.expand.vertical",
+        .openMessageOrReply: "arrowshape.turn.up.left.2",
         .expandAllMessages: "rectangle.expand.vertical", .toggleQuotedText: "ellipsis", .showImages: "photo",
         .showNewMessages: "arrow.down.circle", .findInConversation: "text.magnifyingglass",
         .compose: "square.and.pencil", .composeInWindow: "square.and.pencil", .reply: "arrowshape.turn.up.left",

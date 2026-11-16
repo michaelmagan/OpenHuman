@@ -204,6 +204,29 @@ import Testing
         #expect(all.session.replyTo == middle.id && w.environment.compose.sessions.count == 1)
     }
 
+    @Test func returnOnAClosedMessageOpensItAndReturnAgainReplies() async throws {
+        let w = try await InlineReplyWindow.make(frameName: Self.frameName)
+        defer { w.close() }
+        let returnKey = Keys.event("\r", code: 36, window: w.window)
+        let (thread, messages) = try await w.conversationWithAMiddleSender()
+        let model = try await w.open(thread)
+        try await until { w.window.firstResponder === w.reader.focusView }
+        let middle = messages[messages.count - 2].id
+        #expect(press(Keys.arrow(.up, window: w.window), in: w))
+        #expect(model.focusedMessage == middle)
+        if model.message(middle)?.isExpanded == true { #expect(press(Keys.event("o", code: 31, window: w.window), in: w)) }
+        #expect(model.message(middle)?.isExpanded == false)
+
+        #expect(press(returnKey, in: w))
+        #expect(model.message(middle)?.isExpanded == true, "↵ opens the message the arrows selected")
+        #expect(w.environment.compose.sessions.isEmpty, "and starts no reply")
+        #expect(w.window.makeFirstResponder(w.reader.focusView))
+        #expect(press(returnKey, in: w))
+        let reply = try await w.inlineComposer()
+        #expect(reply.session.mode == (ActionCatalog.returnRepliesAll ? .replyAll : .reply), "↵ again replies")
+        #expect(reply.session.replyTo == middle)
+    }
+
     @Test func aClickInAMessageFocusesIt() async throws {
         let w = try await InlineReplyWindow.make(frameName: Self.frameName)
         defer { w.close() }

@@ -260,8 +260,9 @@ struct ShellWindowTests {
         #expect(sidebar.attributedTitle == nil, "key-equivalent items keep AppKit's own shortcut column")
         #expect(other.attributedTitle == nil)
         #expect(hints.hint(for: "Trash") == "#, ⌫", "every key of the action (message focus)")
-        let (replyReturn, replyAllReturn) = ActionCatalog.returnRepliesAll ? ("⇧↵", "↵") : ("↵", "⇧↵")
-        #expect(hints.hint(for: "Reply") == "R, \(replyReturn)" && hints.hint(for: "Reply all") == "A, \(replyAllReturn)")
+        // ↵ is "open the selected message, then reply", outside the menus; ⇧↵ stays the other reply's
+        let (replyHint, replyAllHint) = ActionCatalog.returnRepliesAll ? ("R, ⇧↵", "A") : ("R", "A, ⇧↵")
+        #expect(hints.hint(for: "Reply") == replyHint && hints.hint(for: "Reply all") == replyAllHint)
         #expect(hints.hint(for: "Undo Last Action") == "⌘Z, Z" && hints.hint(for: "Redo Last Action") == "⇧⌘Z")
         #expect(hints.hint(for: "Search") == "/, ⌘F" && hints.hint(for: "Unsubscribe…") == "⌘U")
         #expect(hints.hint(for: "Bold") == "⌘B" && hints.hint(for: "Numbered list") == "⇧⌘7")

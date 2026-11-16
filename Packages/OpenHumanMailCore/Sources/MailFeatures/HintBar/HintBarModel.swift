@@ -19,12 +19,11 @@ public enum HintContext: String, Hashable, Sendable, CaseIterable {
     }
 
     var candidates: [ActionID] {
-        let returnAction: ActionID = ActionCatalog.returnRepliesAll ? .replyAll : .reply
         let shiftReturnAction: ActionID = ActionCatalog.returnRepliesAll ? .reply : .replyAll
         switch self {
         case .list: return [.markDone, .remind, .openThread, .commandPalette, .snooze, .toggleMute, .search]
         case .conversation:
-            return [.markDone, .remind, returnAction, .commandPalette, .snooze, .toggleMute, shiftReturnAction]
+            return [.markDone, .remind, .openMessageOrReply, .commandPalette, .snooze, .toggleMute, shiftReturnAction]
         case .composer: return [.send, .discardDraft, .attachFiles, .commandPalette]
         case .search: return [.openThread, .search, .commandPalette, .shortcutHelp]
         case .review: return [.commandPalette, .shortcutHelp]

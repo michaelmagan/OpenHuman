@@ -164,8 +164,8 @@ final class AttachmentTileView: NSView {
     override func mouseExited(with event: NSEvent) { isHovered = false }
 
     func updateAccessibilityHelp(dragsOut: Bool) {
-        setAccessibilityHelp(dragsOut ? "Space previews it, double-click opens it, drag it to copy it."
-                                      : "Space previews it, double-click opens it")
+        setAccessibilityHelp(dragsOut ? "Space previews it, Return or a double-click opens it, drag it to copy it."
+                                      : "Space previews it, Return or a double-click opens it")
     }
 
     override var acceptsFirstResponder: Bool { true }
@@ -228,6 +228,7 @@ final class AttachmentTileView: NSView {
 
     override func keyDown(with event: NSEvent) {
         if event.charactersIgnoringModifiers == " " { quickLook(); return }
+        if event.keyCode == 36 || event.keyCode == 76 { open(); return }
         super.keyDown(with: event)
     }
 
@@ -316,3 +317,5 @@ final class QuickLookItem: NSObject, QLPreviewItem {
     var previewItemURL: URL! { url }
     var previewItemTitle: String! { title }
 }
+
+extension AttachmentTileView: ReturnKeyOwner {}
