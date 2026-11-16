@@ -9,7 +9,7 @@ import Testing
 @Suite struct PromptLibraryTests {
     static let pinned: [String: String] = [
         "ask.inbox@4": "dd748bf2745ac02b56159869fbc52091154ce85c74051a3749a59ecd5b91c7d9",
-        "common.preamble@1": "4d3129f4e9d99c0df5e863bcffb2bdf3a8bdf2544582a4759bcdf0b41904d5e3",
+        "common.preamble@2": "2697828520aeed0e87bf0a70e1b66fcb7327e55db70c5e803a4729afc4218990",
         "common.repair@1": "51c6971fd705409176bfff374c6a1586972d628f5e38eeeb3685f9cbeaa359a5",
         "reply.options@2": "51d718c28414ef02828bec8637b73fc514aa0dc270ace7644cd076550e4b6a5e",
         "rewrite.instruct@3": "e5fc0c8f20ca03b6d1679b30f17025f8b4303d5b40287f7231160f1964ae442d",

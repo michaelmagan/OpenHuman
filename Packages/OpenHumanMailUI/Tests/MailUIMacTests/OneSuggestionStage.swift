@@ -41,9 +41,10 @@ struct OneSuggestionStage {
 
     static func make(busy: Bool = true, ai: Bool = true, composerStrip: Bool = false, theme: SweepTheme? = nil,
                      text: String = proposal, frameName: String,
-                     size: NSSize = NSSize(width: 1100, height: 900)) async throws -> OneSuggestionStage {
+                     size: NSSize = NSSize(width: 1100, height: 900),
+                     provider: (any AIProvider)? = nil) async throws -> OneSuggestionStage {
         let center: AICenter? = ai ? AICenter.make(
-            registry: ProviderRegistry(providers: [ScriptedProvider(displayName: "Apple on-device model")]),
+            registry: ProviderRegistry(providers: [provider ?? ScriptedProvider(displayName: "Apple on-device model")]),
             settings: AISettingsBox(store: InMemoryAISettingsStore(
                 AISettings(draftReplies: .onDeviceAuto, instantReplyStrip: composerStrip)))) : nil
         let calendar = FakeCalendar(events: busy ? [meeting] : [])

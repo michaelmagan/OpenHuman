@@ -75,7 +75,7 @@ extension DefaultAIFeatures {
                 await amendTrace(prepared, finalText: nil, steps: [AITraceStep(.flaggedSuspicious)])
                 return (nil, prepared.traceID)
             }
-            let line = OutputGuard.threadLine(outcome.text)
+            let line = OutputGuard.threadLine(outcome.cleaned)
             await amendTrace(prepared, finalText: line, steps: [])
             return (line, prepared.traceID)
         }

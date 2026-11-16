@@ -73,6 +73,7 @@ public enum AITraceWording {
         case .repairedJSON: String(localized: "Repaired the model's structured answer")
         case .summaryUsedForConversation: String(localized: "Used the saved summary instead of the whole conversation")
         case .conversationShortened: String(localized: "Shortened the conversation to fit the model")
+        case .promptTagsRemoved: String(localized: "Removed prompt tags the model copied into its answer")
         }
         guard let detail = step.detail, !detail.isEmpty else { return text }
         return text + ": " + detail

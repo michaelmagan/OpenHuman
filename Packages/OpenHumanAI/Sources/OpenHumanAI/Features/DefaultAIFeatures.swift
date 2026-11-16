@@ -111,7 +111,10 @@ struct PreparedRequest: Sendable {
 }
 
 struct RunOutcome: Sendable {
+    /// The model's raw answer, kept for the trace and for suspicion checks.
     var text: String
+    /// The answer without the prompt's own tags or nonce: the only text that may reach the user.
+    var cleaned = ""
     var structured: Data?
     var usage: AIUsage?
     var model: String?
@@ -227,6 +230,7 @@ extension DefaultAIFeatures {
             if case .thirdParty = engine.capabilities.dataLocation { return SecretGate(request: request) }
             return nil
         }()
+        var scaffolding = PromptScaffoldingFilter(nonce: request.nonce)
         var stopped = false
         var released = ""
         var steps: [AITraceStep] = []
@@ -243,7 +247,9 @@ extension DefaultAIFeatures {
                     guard outcome.text.utf8.count <= AIPolicy.outputByteCap else {
                         throw AIError.invalidOutput("output too long")
                     }
-                    let ready = try gate?.feed(delta) ?? delta
+                    let clean = scaffolding.feed(delta)
+                    outcome.cleaned += clean
+                    let ready = try gate?.feed(clean) ?? clean
                     released += ready
                     if !ready.isEmpty, !(try onText(ready)) {
                         stopped = true
@@ -258,12 +264,18 @@ extension DefaultAIFeatures {
                     outcome.usage = usage
                 }
             }
-            if !stopped, var finalGate = gate {
-                let rest = try finalGate.finish()
-                gate = finalGate
+            if !stopped {
+                let clean = scaffolding.finish()
+                outcome.cleaned += clean
+                var rest = try gate?.feed(clean) ?? clean
+                if var finalGate = gate {
+                    rest += try finalGate.finish()
+                    gate = finalGate
+                }
                 released += rest
                 if !rest.isEmpty { _ = try onText(rest) }
             }
+            if scaffolding.removedAny { steps.append(AITraceStep(.promptTagsRemoved)) }
             if gate != nil, let structured = outcome.structured {
                 try OutputGuard.requireNoSecrets(String(decoding: structured, as: UTF8.self), request: request)
             }

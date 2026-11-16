@@ -133,17 +133,22 @@ public struct AIComposerPanel: View {
         let shape = RoundedRectangle(cornerRadius: theme.radiusXL, style: .continuous)
         return VStack(alignment: .leading, spacing: theme.space2) {
             HStack(alignment: .center, spacing: theme.space3) {
-                if model.phase == .working {
-                    Text(AIComposerModel.workingText)
-                        .font(theme.typeReader.swiftUIFont)
-                        .foregroundStyle(theme.textTertiary.color)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("composer.ai.working")
-                } else if model.currentVersion != nil {
-                    field(text: $model.editInstruction, placeholder: AIComposerModel.editPlaceholder,
-                          submit: { model.submitEdit() })
-                } else {
-                    field(text: $model.instruction, placeholder: model.placeholder, submit: { model.submit() })
+                // Why: one field for the whole life of the panel. Swapping it for the working text, or for a second
+                // field once the suggestion exists, left the keyboard on a field that was gone, so Return missed Accept
+                ZStack(alignment: .leading) {
+                    field(text: model.currentVersion != nil ? $model.editInstruction : $model.instruction,
+                          placeholder: model.currentVersion != nil ? AIComposerModel.editPlaceholder : model.placeholder,
+                          submit: { send() })
+                        .accessibilityHidden(model.phase == .working)
+                    if model.phase == .working {
+                        Text(AIComposerModel.workingText)
+                            .font(theme.typeReader.swiftUIFont)
+                            .foregroundStyle(theme.textTertiary.color)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(theme.bgElevated.color)
+                            .allowsHitTesting(false)
+                            .accessibilityIdentifier("composer.ai.working")
+                    }
                 }
                 AISendButton(working: model.phase == .working, enabled: canSend,
                              send: { send() }, stop: { model.stop() })
@@ -188,6 +193,7 @@ public struct AIComposerPanel: View {
             .focused($focused)
             .onSubmit(submit)
             .onKeyPress(.return, phases: .down) { press in
+                if model.phase == .working { return .handled }
                 if press.modifiers.contains(.shift) {
                     text.wrappedValue += "\n"
                     return .handled
@@ -200,6 +206,7 @@ public struct AIComposerPanel: View {
                 return .handled
             }
             .onKeyPress(.tab, phases: .down) { press in
+                if model.phase == .working { return .handled }
                 if press.modifiers.contains(.option) {
                     return enterActions()
                 }

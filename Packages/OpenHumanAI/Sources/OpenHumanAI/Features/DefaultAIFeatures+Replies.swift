@@ -54,7 +54,7 @@ extension DefaultAIFeatures {
                                           report: AIOutputReport(traceID: prepared.traceID, model: hit.model))
             }
             let (options, outcome, raw) = try await structuredAnswer(prepared, engine: engine, untrustedTokens: used) {
-                try OutputGuard.replyOptions(from: $0, sources: sources)
+                try OutputGuard.replyOptions(from: $0, sources: sources, nonce: nonce)
             }
             let suspicious =
                 OutputGuard.isSuspicious(raw, nonce: nonce)

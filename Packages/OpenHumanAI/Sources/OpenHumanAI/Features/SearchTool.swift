@@ -124,7 +124,7 @@ extension DefaultAIFeatures {
         let outcome = try await run(prepared, engine: engine, untrustedTokens: used)
         var provenance = engine.provenance
         provenance.model = outcome.model
-        let summary = String(outcome.text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
+        let summary = String(outcome.cleaned.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
         return SearchToolResult(
             hits: session.hits, summary: summary, provenance: provenance,
             report: AIOutputReport(suspicious: OutputGuard.isSuspicious(outcome.text, nonce: nonce), usage: outcome.usage))
