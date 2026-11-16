@@ -48,6 +48,17 @@ import Testing
         #expect(w.content.keyRouter.isInstalled)
     }
 
+    @Test func closingTheWindowWhileTheCalendarShowsStopsTheKeys() async throws {
+        let (w, calendar) = try await make()
+        defer { w.close() }
+        #expect(press("2", in: w))
+        try await until(timeout: .seconds(15)) { calendar.isOpen && w.content.view.isHidden }
+        let keys = w.content.keyRouter
+        #expect(keys.isInstalled)
+        w.window.close()
+        #expect(!keys.isInstalled, "a closed window's router routes no other window's keys")
+    }
+
     @Test func twoTogglesBetweenTheMailAndTheCalendarAgainAndAgain() async throws {
         let (w, calendar) = try await make()
         defer { w.close() }

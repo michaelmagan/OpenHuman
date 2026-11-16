@@ -23,6 +23,7 @@ public final class MainContentViewController: NSViewController {
     private var scrollRetries = 0
     private var scrollObserver: (any NSObjectProtocol)?
     private var wakeObserver: (any NSObjectProtocol)?
+    private var closeObserver: (any NSObjectProtocol)?
     private var seenFieldFocus = 0
     private var seenResultsFocus = 0
     var seenSidebarFocus = 0
@@ -127,15 +128,13 @@ public final class MainContentViewController: NSViewController {
         super.viewDidAppear()
         keyRouter.install()
         observeSidebarKeys()
+        observeWindowClose()
     }
 
     public override func viewWillDisappear() {
         super.viewWillDisappear()
         // Why: AppKit calls this when the Calendar hides the mail too, and the Calendar's keys come through this router
-        if view.window == nil || !view.isHidden {
-            keyRouter.uninstall()
-            firstResponderObservation = nil
-        }
+        if view.window == nil || !view.isHidden { stopKeys() }
         captureScroll(into: boundAccount)
         router.persist()
     }
@@ -143,6 +142,22 @@ public final class MainContentViewController: NSViewController {
     isolated deinit {
         if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver) }
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+    }
+
+    private func stopKeys() {
+        keyRouter.uninstall()
+        firstResponderObservation = nil
+    }
+
+    /// The window can close while the Calendar hides the mail, when `viewWillDisappear` keeps the keys: the router
+    /// stops then, so it never routes another window's keys.
+    private func observeWindowClose() {
+        guard closeObserver == nil, let window = view.window else { return }
+        closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window,
+                                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stopKeys() }
+        }
     }
 
     public func apply(theme newTheme: ThemeTokens) {
