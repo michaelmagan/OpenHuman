@@ -105,7 +105,8 @@ import Testing
         #expect(router.location == tabs[0], "⇥ from a non-tab location goes to the first tab")
         for (action, location) in [(ActionID.goDrafts, MailLocation.system(.drafts)), (.goAllMail, .system(.allMail)),
                                    (.goSnoozed, .system(.snoozed)), (.goReminders, .system(.reminders)),
-                                   (.goScheduled, .system(.scheduled)), (.goReview, .reviewQueue(nil))] {
+                                   (.goScheduled, .system(.scheduled)), (.goReview, .reviewQueue(nil)),
+                                   (.goTrash, .system(.trash)), (.goSpam, .system(.spam))] {
             #expect(router.perform(action))
             #expect(router.location == location)
         }

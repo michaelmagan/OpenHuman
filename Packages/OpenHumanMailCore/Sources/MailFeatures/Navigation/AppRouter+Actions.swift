@@ -102,6 +102,8 @@ extension AppRouter {
         case .goDrafts: .system(.drafts)
         case .goSent: .system(.sent)
         case .goAllMail: .system(.allMail)
+        case .goTrash: .system(.trash)
+        case .goSpam: .system(.spam)
         case .goDone: .system(.done)
         case .goWaiting: .system(.waiting)
         case .goReview: .reviewQueue(nil)

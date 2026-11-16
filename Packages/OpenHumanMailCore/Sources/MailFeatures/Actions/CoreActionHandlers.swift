@@ -32,7 +32,8 @@ public final class ActionFeedback {
 @MainActor
 final class ShellActionHandler: ActionHandler {
     static let ids: [ActionID] = [.nextThread, .previousThread, .openThread, .backToList, .nextSplit, .previousSplit,
-                                  .goInbox, .goStarred, .goDrafts, .goSent, .goAllMail, .goDone, .goWaiting,
+                                  .goInbox, .goStarred, .goDrafts, .goSent, .goAllMail, .goTrash, .goSpam,
+                                  .goDone, .goWaiting,
                                   .toggleLabelSidebar, .focusLabelSidebar]
         + (1...9).map(ActionID.switchToAccount)
     static let moduleIDs: [FeatureModuleID: [ActionID]] = [

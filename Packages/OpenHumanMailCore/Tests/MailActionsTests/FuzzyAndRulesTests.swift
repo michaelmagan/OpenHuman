@@ -187,7 +187,10 @@ import Testing
         let hint = SequenceHint.make(prefix: KeyBinding.Chord(.character("g")), scopes: [.list, .global],
                                      descriptors: ActionCatalog.all)
         #expect(hint.text == "G…")
-        #expect(hint.completions.map { $0.keys[0] } == [";", "A", "D", "E", "H", "I", "L", "M", "R", "S", "T", "U", "W", "Y", "Z"])
+        #expect(hint.completions.map { $0.keys[0] }
+                == ["!", "#", ";", "A", "D", "E", "H", "I", "L", "M", "R", "S", "T", "U", "W", "Y", "Z"])
+        #expect(hint.completions.first { $0.keys == ["#"] }?.title == "Go to Trash")
+        #expect(hint.completions.first { $0.keys == ["!"] }?.title == "Go to Spam")
         #expect(hint.completions.first { $0.keys == ["A"] }?.title == "Go to All mail")
         let withoutModules = ActionCatalog.all.filter { $0.module == nil }
         let core = SequenceHint.make(prefix: KeyBinding.Chord(.character("g")), scopes: [.global],

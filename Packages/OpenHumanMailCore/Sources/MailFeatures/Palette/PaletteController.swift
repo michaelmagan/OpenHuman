@@ -210,6 +210,7 @@ public final class PaletteController {
         .toggleCheck: "checkmark.square", .extendSelectionDown: "checkmark.square", .extendSelectionUp: "checkmark.square",
         .checkFromHere: "checkmark.square", .checkAll: "checklist", .clearChecks: "square",
         .goInbox: "tray", .goStarred: "star", .goDrafts: "doc", .goSent: "paperplane", .goAllMail: "archivebox",
+        .goTrash: "trash", .goSpam: "xmark.octagon",
         .goDone: "checkmark.circle", .goWaiting: "hourglass", .goReview: "doc.badge.ellipsis", .goSnoozed: "clock", .goReminders: "bell",
         .goScheduled: "calendar.badge.clock", .goMuted: "speaker.slash", .goLabel: "tag", .goSavedSearch: "bookmark",
         .goSnippets: "text.insert",

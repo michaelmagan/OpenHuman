@@ -50,8 +50,8 @@ public struct SidebarFolder: Identifiable, Hashable, Sendable {
         SidebarFolder(.system(.sent), symbol: "paperplane", goAction: .goSent),
         SidebarFolder(.system(.done), symbol: "checkmark.circle", goAction: .goDone),
         SidebarFolder(.system(.allMail), symbol: "archivebox", goAction: .goAllMail),
-        SidebarFolder(.system(.spam), symbol: "xmark.octagon", searchTerm: "in:spam"),
-        SidebarFolder(.system(.trash), symbol: "trash", searchTerm: "in:trash"),
+        SidebarFolder(.system(.spam), symbol: "xmark.octagon", goAction: .goSpam, searchTerm: "in:spam"),
+        SidebarFolder(.system(.trash), symbol: "trash", goAction: .goTrash, searchTerm: "in:trash"),
     ]
 
     public static let tokens: Set<String> = Set(all.map(\.token))

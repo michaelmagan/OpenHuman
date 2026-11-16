@@ -178,12 +178,12 @@ import Testing
                                    "done", "allMail", "spam", "trash"])
         #expect(rows.map(\.folder.title) == ["Starred", "Snoozed", "Reminders", "Waiting", "Scheduled", "Muted", "Drafts",
                                              "Sent", "Done", "All mail", "Spam", "Trash"])
-        #expect(rows.map(\.route) == ["G S", "G Z", "G H", "G W", "G Y", "G M", "G D", "G T", "G E", "G A", "in:spam",
-                                      "in:trash"])
+        #expect(rows.map(\.route) == ["G S", "G Z", "G H", "G W", "G Y", "G M", "G D", "G T", "G E", "G A", "G !",
+                                      "G #"])
         let allMail = rows[9]
-        #expect(allMail.keycaps == ["G", "A"] && rows[10].keycaps.isEmpty)
+        #expect(allMail.keycaps == ["G", "A"] && rows[10].keycaps == ["G", "!"] && rows[11].keycaps == ["G", "#"])
         #expect(allMail.spokenHint == "Off hides All mail from the sidebar. G A still opens it.")
-        #expect(rows[10].spokenHint == "Off hides Spam from the sidebar. Searching in:spam still finds it.")
+        #expect(rows[10].spokenHint == "Off hides Spam from the sidebar. G ! still opens it.")
         let page = SettingsShellModel(environment: SettingsFixture().env).pages.first { $0.id == "sidebar" }
         #expect(page?.title == "Sidebar" && page?.symbol == "sidebar.left" && page?.builtIn == .sidebar)
     }

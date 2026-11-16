@@ -24,6 +24,7 @@ import Testing
     #expect(hint(.previousSplit) == "⇧⇥")
     #expect(hint(.goInbox) == "G I")
     #expect(hint(.goAllMail) == "G A")
+    #expect(hint(.goTrash) == "G #" && hint(.goSpam) == "G !", "Superhuman's go-to keys for Trash and Spam")
     #expect(hint(.goReview) == "G R")
     #expect(hint(.goReminders) == "G H" && hint(.goMuted) == "G M", "Superhuman's chords since the keymap fixes")
     #expect(hint(.goScheduled) == "G Y")

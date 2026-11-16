@@ -25,6 +25,8 @@ extension ActionID {
     public static let goDrafts = ActionID("nav.goDrafts")
     public static let goSent = ActionID("nav.goSent")
     public static let goAllMail = ActionID("nav.goAllMail")
+    public static let goTrash = ActionID("nav.goTrash")
+    public static let goSpam = ActionID("nav.goSpam")
     public static let goReview = ActionID("nav.goReview")
     public static let goSnoozed = ActionID("nav.goSnoozed")
     public static let goReminders = ActionID("nav.goReminders")
