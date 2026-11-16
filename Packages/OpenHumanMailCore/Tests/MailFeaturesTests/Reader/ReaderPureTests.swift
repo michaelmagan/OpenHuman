@@ -77,6 +77,8 @@ struct ReaderPureTests {
         let chart = AttachmentInfo(id: 2, filename: "chart.png", mimeType: "image/png", size: 2_100_000, contentID: "<chart-1@x>", isInline: true)
         #expect(formatting.attachmentsSummary([pdf, chart]).hasPrefix("2 attachments · 4.2 MB"))
         #expect(formatting.attachmentsSummary([pdf]).hasPrefix("1 attachment · "))
+        #expect(ReaderFormatting(locale: Locale(identifier: "nl_NL")).attachmentsSummary([pdf, chart]).hasSuffix("4,2 MB"),
+                "the size follows the formatting's locale, not the Mac's")
         #expect(ReaderFormatting.tiles([pdf, chart], shownInline: ["chart-1@x"]) == [pdf], "shown inline: no tile")
         #expect(ReaderFormatting.tiles([pdf, chart], shownInline: []) == [pdf, chart], "not referenced: a tile")
         #expect(ReaderFormatting.safeFilename("../../etc/passwd") == "-..-etc-passwd")

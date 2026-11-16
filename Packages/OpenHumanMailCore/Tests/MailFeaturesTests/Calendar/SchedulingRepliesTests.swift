@@ -203,7 +203,9 @@ private struct SchedulingFixture {
         await free.assistant.analyze(free.thread)
         let freeChips = free.assistant.suggestions(for: free.thread)
         #expect(freeChips.prefix(2).map(\.kind) == [.scheduling(.accept), .createEvent])
-        #expect(freeChips[0].label.hasPrefix("Accept 1:00") && freeChips[0].body?.contains("works for me") == true)
+        // Why: the clock follows the Mac's locale, so "1:00 PM" on a 12-hour Mac is "13:00" on a 24-hour one
+        #expect(freeChips[0].label.hasPrefix("Accept \(free.assistant.clockText(at(13, 13)))")
+                && freeChips[0].body?.contains("works for me") == true)
         #expect(free.assistant.options(for: free.thread).contains(.accept))
     }
 

@@ -93,11 +93,11 @@ public struct ReaderFormatting: Sendable {
     public func attachmentsSummary(_ attachments: [AttachmentInfo]) -> String {
         let count = attachments.count == 1 ? "1 attachment" : "\(attachments.count) attachments"
         let total = attachments.reduce(0) { $0 + max(0, $1.size) }
-        return "\(count) · \(Self.size(total))"
+        return "\(count) · \(Self.size(total, locale: locale))"
     }
 
-    public static func size(_ bytes: Int) -> String {
-        ByteCountFormatter.string(fromByteCount: Int64(max(0, bytes)), countStyle: .file)
+    public static func size(_ bytes: Int, locale: Locale = .autoupdatingCurrent) -> String {
+        Int64(max(0, bytes)).formatted(.byteCount(style: .file).locale(locale))
     }
 
     public static func tiles(_ attachments: [AttachmentInfo], shownInline contentIDs: [String]) -> [AttachmentInfo] {

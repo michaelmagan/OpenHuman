@@ -15,6 +15,8 @@ struct ReaderBodyClipTests {
         let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: -5000, y: -5000), size: size), styleMask: [.borderless],
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        // Why: a snapshot takes the screen's space (Display P3 on a MacBook), where sRGB red reads 0.92, 0.2, 0.14
+        window.colorSpace = .sRGB
         defer { window.close() }
         let root = BandView(.white, frame: NSRect(origin: .zero, size: size))
         window.contentView = root

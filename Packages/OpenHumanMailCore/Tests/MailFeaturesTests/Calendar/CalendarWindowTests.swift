@@ -58,6 +58,8 @@ private struct CalendarWindowFixture {
         env = AppEnvironment.fake(corpus: corpus, options: .init(remoteAck: .immediate),
                                   featureFlags: FeatureFlags(), calendar: self.work, calendarConnections: connections,
                                   calendarCache: cache)
+        // Why: Low Power Mode stretches the store's refresh from a minute to five, so a Mac on battery failed the minute
+        env.calendarEvents.isLowPower = { false }
     }
 
     var workKey: CalendarCacheKey { CalendarEventStore.key(for: work) }

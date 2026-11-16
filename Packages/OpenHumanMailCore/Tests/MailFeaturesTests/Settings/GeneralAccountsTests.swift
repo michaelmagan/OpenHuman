@@ -36,7 +36,8 @@ struct GeneralSettingsTests {
         await model.downloadBodies.set(false)
         #expect(try await f.store.get(AppSettings.bodyMaxMessages) == 5_000)
         #expect(try await f.store.get(AppSettings.downloadBodies) == false)
-        #expect(model.bodyDiskNote.hasPrefix("Up to about") && model.bodyDiskNote.contains("5,000"))
+        #expect(model.bodyDiskNote.hasPrefix("Up to about") && model.bodyDiskNote.contains(5_000.formatted(.number)),
+                "the count follows the Mac's number format")
         #expect(AppSettings.downloadBodies.name == "sync.download_bodies" && AppSettings.bodyMaxMessages.name == "sync.body_max_messages")
         #expect(GeneralSettingsModel.bodyCapChoices == [nil, 5_000, 10_000, 20_000, 50_000])
         #expect(BodyDownloadEstimate.bytes(messages: 10_000) == 10_000 * BodyDownloadEstimate.bytesPerMessage)

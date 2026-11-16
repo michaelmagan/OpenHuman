@@ -64,6 +64,7 @@ import Testing
         #expect(model.focusedMessage == middle && w.reader.messageViews[middle]?.isFocused == true, "the highlight stays")
         #expect(w.reader.visibleDocumentRect.origin == scroll, "nothing scrolled")
         w.window.contentView?.layoutSubtreeIfNeeded()
+        w.window.colorSpace = .sRGB
         let theme = w.reader.theme
         let root = w.reader.view
         let capsule = pill.convert(pill.pillRect, to: root)
@@ -106,6 +107,7 @@ import Testing
         try deliver(to: thread, in: w, minutes: 1)
         try await until { w.onScreenReader?.newMessagesPill.isHidden == false }
         let reader = try #require(w.onScreenReader)
+        w.window.colorSpace = .sRGB
         reader.view.layoutSubtreeIfNeeded()
         let pill = reader.newMessagesPill
         let edge = pill.convert(NSPoint(x: pill.pillRect.minX + 6, y: pill.pillRect.midY), to: reader.view)
@@ -119,6 +121,8 @@ import Testing
         return w.reader.visibleDocumentRect.contains(NSPoint(x: frame.midX, y: frame.minY + 2))
     }
 
+    /// The window must be in sRGB first: a snapshot takes the window's space, Display P3 on a MacBook's own screen,
+    /// and its pixels are then no longer the theme's sRGB components.
     private func snapshot(_ view: NSView) -> NSBitmapImageRep? {
         view.layoutSubtreeIfNeeded()
         guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }

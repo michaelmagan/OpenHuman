@@ -27,6 +27,8 @@ private struct CalendarFixture {
         calendar = info.map { FakeCalendar(events: events, info: $0) } ?? FakeCalendar(events: events)
         env = AppEnvironment.fake(corpus: corpus, options: .init(remoteAck: .immediate),
                                   featureFlags: flags, calendar: provider ? calendar : nil, calendarConnection: connection)
+        // Why: Low Power Mode stretches the store's refresh from a minute to five, so a Mac on battery failed the minute
+        env.calendarEvents.isLowPower = { false }
         thread = corpus.threads[0].row.id
     }
 
