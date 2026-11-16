@@ -184,6 +184,9 @@ import Testing
         let discard = KeyBinding.Chord(.named(.delete), modifiers: .command)
         #expect(KeyBindingConflicts.reserved[discard] == "deleteToBeginningOfLine:")
         #expect(KeyBindingConflicts.reservedExceptions[discard] == .discardDraft)
+        // ⌘⇧. reaches the composer as ⌘> (⇧. is >), which is no text system key, unlike ⌘. (cancelOperation:)
+        #expect(ActionCatalog.descriptor(.discardDraft)?.defaultBindings.map(\.description) == ["⌘⌫", "⌘>"])
+        #expect(KeyBindingConflicts.reserved[KeyBinding.Chord(.character(">"), modifiers: .command)] == nil)
     }
 
     @Test func aComposerKeyOnAnEditingKeyIsFound() {

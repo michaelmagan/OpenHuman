@@ -15,6 +15,10 @@ import Testing
         #expect(remind.count == 1)
         #expect(remind.first?.shortcut.key == KeyEquivalent("h") && remind.first?.shortcut.modifiers == [.command, .shift])
         for id in ActionCatalog.formatIDs { #expect(!items.contains { $0.action == id }, "\(id) is the body's own") }
+        let discard = items.filter { $0.action == .discardDraft }
+        #expect(discard.count == 1, "⌘⇧. discards from the To and Subject fields too; ⌘⌫ stays the body's")
+        #expect(discard.map(\.shortcut.key) == [KeyEquivalent(">")])
+        #expect(discard.allSatisfy { $0.shortcut.modifiers == [.command] })
     }
 }
 #endif

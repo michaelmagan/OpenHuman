@@ -25,6 +25,11 @@ public struct KeyTranslation {
            let symbol = applyingModifiers(event, flags.intersection([.shift, .option])), Self.isSymbol(symbol) {
             result.append(KeyChord(.character(symbol), modifiers: flags.subtracting(.option)))
         }
+        // Why: a layout that reports ⌘⇧. as "." would reach AppKit's ⌘. cancel; the ASCII layout names it ">"
+        if flags.contains(.shift), !flags.intersection([.command, .control]).isEmpty, Self.isSymbol(typed),
+           let shifted = asciiCharacter(event.keyCode, true), shifted != typed, Self.isSymbol(shifted) {
+            result.append(KeyChord(.character(shifted), modifiers: flags))
+        }
         if !typed.unicodeScalars.allSatisfy(\.isASCII),
            let ascii = asciiCharacter(event.keyCode, flags.contains(.shift)), ascii != typed,
            ascii.count == 1, ascii.unicodeScalars.allSatisfy({ $0.isASCII && $0.value > 0x20 && $0.value < 0x7F }) {

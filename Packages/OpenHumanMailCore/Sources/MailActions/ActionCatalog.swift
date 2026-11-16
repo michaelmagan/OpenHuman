@@ -150,8 +150,11 @@ public enum ActionCatalog {
                          module: .sendLater),
         ActionDescriptor(.cancelSendLater, "Cancel send later", category: .compose, scopes: [.composer],
                          changesMail: true, keywords: ["unschedule"], appearsInMenu: false, module: .sendLater),
+        // ⌘⇧. arrives as ⌘> (⇧. is >); ⌘⌫ discards only from the start of the text, where it deletes nothing. No ⌘<:
+        // on ISO layouts < has its own key, so a plain ⌘< (the window cycle there) would discard
         ActionDescriptor(.discardDraft, "Discard draft", shortTitle: "Discard", category: .compose,
-                         bindings: [.named(.delete, .command)], scopes: [.composer], changesMail: true,
+                         bindings: [.named(.delete, .command), .chord(">", .command)],
+                         scopes: [.composer], changesMail: true,
                          isDestructive: true, appearsInMenu: false),
         ActionDescriptor(.chooseFrom, "Change From address…", category: .compose,
                          bindings: [.chord("F", .command), .chord("E", .command)], scopes: [.composer],

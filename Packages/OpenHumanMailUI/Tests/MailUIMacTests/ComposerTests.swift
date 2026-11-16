@@ -169,6 +169,23 @@ import Testing
         #expect(text.document == RichTextDocument(blocks: [.paragraph([.text("word", [])])]))
     }
 
+    @Test func commandShiftPeriodDiscardsTheDraftWhereverTheCaretIs() {
+        let text = editor()
+        var commands: [ActionID] = []
+        text.onCommand = { commands.append($0); return true }
+        var escaped = 0
+        text.onEscape = { escaped += 1 }
+        text.translation = KeyTranslation(applyingModifiers: { _, _ in nil },
+                                          asciiCharacter: { code, shift in code == 47 ? (shift ? ">" : ".") : nil })
+        text.insertText("Hello there", replacementRange: NSRange(location: 0, length: 0))
+        #expect(text.handleCommandKey(key(">", code: 47, modifiers: [.command, .shift])), "⌘⇧. as a US layout reports it")
+        #expect(text.handleCommandKey(key(".", code: 47, modifiers: [.command, .shift])),
+                "a layout that reports the unshifted . is still ⌘⇧., not AppKit's ⌘. cancel")
+        #expect(commands == [.discardDraft, .discardDraft], "mid-sentence too, unlike ⌘⌫; the discard keeps its Undo")
+        #expect(!text.handleCommandKey(key(".", code: 47, modifiers: .command)), "⌘. stays the text system's")
+        #expect(escaped == 0 && text.string == "Hello there")
+    }
+
     @Test func theCommandKeysComeFromTheCatalog() {
         let text = editor()
         var commands: [ActionID] = []

@@ -430,7 +430,9 @@ public final class ComposerTextView: NSTextView {
             return false
         }
         if action == .discardDraft {
-            guard discardsOnCommandDelete, !event.isARepeat else { return false }
+            guard !event.isARepeat else { return chord.key != .named(.delete) }
+            // Why: ⌘⌫ is the text's delete-to-line-start except at the very start; ⌘⇧. is only ever Discard
+            if chord.key == .named(.delete), !discardsOnCommandDelete { return false }
             return onCommand?(.discardDraft) ?? false
         }
         if event.isARepeat { return true }

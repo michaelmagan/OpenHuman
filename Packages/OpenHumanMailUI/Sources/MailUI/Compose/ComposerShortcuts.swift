@@ -29,12 +29,18 @@ struct ComposerShortcuts: View {
         let shortcut: KeyboardShortcut
     }
 
-    static let editorOwned: Set<ActionID> = Set(ActionCatalog.formatIDs + [.discardDraft, .closeComposer])
+    static let editorOwned: Set<ActionID> = Set(ActionCatalog.formatIDs + [.closeComposer])
+
+    /// ⌘⌫ discards only from the start of the body, which only the body knows; ⌘⇧. discards from any field.
+    static func isEditorOwned(_ id: ActionID, _ binding: KeyBinding) -> Bool {
+        editorOwned.contains(id) || (id == .discardDraft && binding.chords.first?.key == .named(.delete))
+    }
 
     static func shortcuts(_ descriptors: [ActionDescriptor]) -> [Item] {
         var items: [Item] = []
-        for descriptor in descriptors where descriptor.scopes.contains(.composer) && !editorOwned.contains(descriptor.id) {
-            for binding in descriptor.defaultBindings where binding.chords.count == 1 {
+        for descriptor in descriptors where descriptor.scopes.contains(.composer) {
+            for binding in descriptor.defaultBindings where binding.chords.count == 1
+                && !isEditorOwned(descriptor.id, binding) {
                 let modifiers = binding.chords[0].modifiers
                 guard modifiers.contains(.command), !modifiers.contains(.control),
                       let shortcut = binding.keyboardShortcut else { continue }
