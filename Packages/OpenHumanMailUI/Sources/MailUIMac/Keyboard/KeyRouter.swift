@@ -104,10 +104,17 @@ public final class KeyRouter {
     public func install() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let consumed = MainActor.assumeIsolated { self?.route(event) == nil }
+            // Why: a router that is gone passes every key on rather than swallowing it
+            let consumed = MainActor.assumeIsolated { self.map { $0.route(event) == nil } ?? false }
             return consumed ? nil : event
         }
     }
+
+    isolated deinit {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+    }
+
+    public var isInstalled: Bool { monitor != nil }
 
     public func uninstall() {
         if let monitor { NSEvent.removeMonitor(monitor) }

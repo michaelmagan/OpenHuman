@@ -117,7 +117,10 @@ public final class MainContentViewController: NSViewController {
 
     public override func viewWillDisappear() {
         super.viewWillDisappear()
-        keyRouter.uninstall()
+        // Why: AppKit calls this when the Calendar hides the mail too, and the Calendar's keys come through this router
+        if view.window == nil || !view.isHidden {
+            keyRouter.uninstall()
+        }
         captureScroll(into: boundAccount)
         router.persist()
     }

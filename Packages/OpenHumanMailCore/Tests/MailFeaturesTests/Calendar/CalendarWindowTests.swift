@@ -1294,12 +1294,12 @@ private final class DidWriteReloadCalendar: CalendarProviding, Sendable {
     @Test func theCalendarKeysAreItsOwnAndTakeNoMenuKeyEquivalent() throws {
         let open = try #require(ActionCatalog.descriptor(.calendarOpen))
         #expect(open.defaultBindings.map(\.chords) == [KeyBinding.key("2").chords])
-        #expect(open.scopes(of: open.defaultBindings[0]) == [.list, .reader])
+        #expect(open.scopes(of: open.defaultBindings[0]) == [.list, .reader, .review], "every mail place")
         #expect(open.appearsInMenu && open.menuKeyEquivalent == nil && open.category == .view && !open.changesMail)
         let inCalendar: [(ActionID, [String])] = [
             (.calendarShowToday, ["t"]), (.calendarPreviousPeriod, ["-", "k"]), (.calendarNextPeriod, ["=", "j"]),
-            (.calendarShowDay, ["d"]), (.calendarShowWeek, ["w", "2"]), (.calendarShowMonth, ["m"]),
-            (.calendarNewEvent, ["n", "b"]), (.calendarCycleView, ["0"]), (.calendarBackToMail, ["1"]),
+            (.calendarShowDay, ["d"]), (.calendarShowWeek, ["w"]), (.calendarShowMonth, ["m"]),
+            (.calendarNewEvent, ["n", "b"]), (.calendarCycleView, ["0"]), (.calendarBackToMail, ["1", "2"]),
         ]
         for (id, keys) in inCalendar {
             let descriptor = try #require(ActionCatalog.descriptor(id))

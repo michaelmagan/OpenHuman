@@ -8,10 +8,12 @@ import Testing
 @Suite struct CalendarWindowKeyTests {
     @Test func theCalendarHasItsOwnKeysAndTheMailKeepsIts() {
         let table = KeyTable.build(ActionCatalog.all)
-        #expect(table.bindings[.list]?[.char("2")] == .calendarOpen && table.bindings[.reader]?[.char("2")] == .calendarOpen)
+        for scope: ActionScope in [.list, .reader, .review] {
+            #expect(table.bindings[scope]?[.char("2")] == .calendarOpen, "2 goes to the Calendar from \(scope)")
+        }
         let calendar = table.bindings[.calendar] ?? [:]
         let expected: [(KeyChord, ActionID)] = [
-            (.char("2"), .calendarShowWeek), (.char("w"), .calendarShowWeek), (.char("d"), .calendarShowDay),
+            (.char("2"), .calendarBackToMail), (.char("w"), .calendarShowWeek), (.char("d"), .calendarShowDay),
             (.char("m"), .calendarShowMonth), (.char("t"), .calendarShowToday), (.char("-"), .calendarPreviousPeriod),
             (.char("k"), .calendarPreviousPeriod), (.char("="), .calendarNextPeriod), (.char("j"), .calendarNextPeriod),
             (.char("n"), .calendarNewEvent), (.char("b"), .calendarNewEvent), (.char("0"), .calendarCycleView),

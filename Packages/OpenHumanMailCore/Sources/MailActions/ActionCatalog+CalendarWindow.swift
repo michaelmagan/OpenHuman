@@ -19,12 +19,17 @@ extension ActionCatalog {
     private static let inCalendar: Set<ActionScope> = [.calendar]
     private static let anywhereAndCalendar: Set<ActionScope> = [.global, .calendar]
 
+    /// Every place of the mail that has keys of its own: 2 goes to the Calendar from each.
+    private static let mailPlaces: Set<ActionScope> = [.list, .reader, .review]
+
+    // 1 is Mail and 2 the Calendar; 2 in the Calendar goes back to the mail as it was (W is the week view)
     static let calendarWindow: [ActionDescriptor] = [
         ActionDescriptor(.calendarOpen, "Go to Calendar", category: .view,
-                         bindings: [.key("2", onlyIn: [.list, .reader])], scopes: [.global, .list, .reader],
+                         bindings: [.key("2", onlyIn: mailPlaces)], scopes: mailPlaces.union([.global]),
                          keywords: ["calendar", "week", "full calendar", "schedule", "events", "agenda", "meetings"],
                          module: .calendar),
-        ActionDescriptor(.calendarBackToMail, "Back to Mail", category: .view, bindings: [.key("1")], scopes: inCalendar,
+        ActionDescriptor(.calendarBackToMail, "Back to Mail", category: .view, bindings: [.key("1"), .key("2")],
+                         scopes: inCalendar,
                          keywords: ["inbox", "mail", "back", "close calendar", "leave calendar"], appearsInMenu: false,
                          module: .calendar),
         ActionDescriptor(.calendarCycleView, "Calendar: Day, then Week, then Mail", category: .view,
@@ -49,7 +54,7 @@ extension ActionCatalog {
         ActionDescriptor(.calendarShowThreeDays, "Calendar: 3-day view", category: .view, scopes: anywhereAndCalendar,
                          keywords: ["calendar", "three days", "3 days"], appearsInMenu: false, module: .calendar),
         ActionDescriptor(.calendarShowWeek, "Calendar: Week view", category: .view,
-                         bindings: [.key("w", onlyIn: [.calendar]), .key("2", onlyIn: [.calendar])],
+                         bindings: [.key("w", onlyIn: [.calendar])],
                          scopes: anywhereAndCalendar, keywords: ["calendar", "week", "this week"], appearsInMenu: false,
                          module: .calendar),
         ActionDescriptor(.calendarShowMonth, "Calendar: Month view", category: .view,
