@@ -396,7 +396,8 @@ public final class ComposerTextView: NSTextView {
     public override func insertBacktab(_ sender: Any?) {
         if suggestionKeys?(.previous) == true { return }
         if autoListTab(outdent: true) { return }
-        super.insertBacktab(sender)
+        // Why: a body that isn't a field editor ignores ⇧⇥, though ⇥ in the field before it leads here
+        window?.selectPreviousKeyView(self)
     }
 
     public override func cancelOperation(_ sender: Any?) {
