@@ -47,9 +47,7 @@ import Testing
         #expect(await f.run(.moveToInbox))
         await f.toast("Moved to Inbox")
         await eventually { f.router.list?.row(for: second) == nil }
-        withKnownIssue("FakeMailStore.untrash does not add INBOX back (the Store does)") {
-            #expect(f.store.labelNames(of: second).contains { $0.uppercased() == "INBOX" })
-        }
+        #expect(f.store.labelNames(of: second).contains { $0.uppercased() == "INBOX" })
     }
 
     @Test func undoCoversQueuedAndAppliedChanges() async throws {
@@ -388,9 +386,7 @@ import Testing
                 "no inbox row from the sender is left")
         #expect(await f.run(.undo))
         #expect(!inTrash(f, older), "one undo restores the swept batch")
-        withKnownIssue("FakeMailStore.untrash does not add INBOX back (the Store does)") {
-            #expect(inInbox(f, older))
-        }
+        #expect(inInbox(f, older))
     }
 
     @Test func aFailedUnsubscribeRequestPutsTheConversationBack() async throws {

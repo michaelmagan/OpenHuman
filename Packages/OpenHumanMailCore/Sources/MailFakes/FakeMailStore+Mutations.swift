@@ -32,7 +32,8 @@ extension State {
             return simple(.visible, add: [FakeLabels.trash], remove: [FakeLabels.inbox, FakeLabels.spam], keys: keys,
                           undo: .untrash(keys))
         case .untrash(let keys):
-            return simple(.trashed, remove: [FakeLabels.trash], keys: keys, undo: .trash(keys))
+            // Why: like the store, which follows Gmail's untrash with adding INBOX, since trash took it off
+            return simple(.trashed, add: [FakeLabels.inbox], remove: [FakeLabels.trash], keys: keys, undo: .trash(keys))
         case .markRead(let keys):
             return simple(.visible, remove: [FakeLabels.unread], keys: keys, undo: .markUnread(keys))
         case .markUnread(let keys):
