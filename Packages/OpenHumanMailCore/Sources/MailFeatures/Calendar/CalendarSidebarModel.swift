@@ -177,9 +177,7 @@ public final class CalendarSidebarModel {
     private func allCalendars() async -> [(key: String, provider: any CalendarProviding)] {
         guard let connections = environment.calendarConnections else { return [] }
         let accounts = await AIThreadLoader.first(environment.data.accounts()) ?? []
-        return accounts.compactMap { owner in
-            connections.calendarProvider(for: owner).map { (owner.email.lowercased(), $0) }
-        }
+        return connections.windowSources(accounts: accounts).map { ($0.key, $0.provider) }
     }
 
     private func shownCalendars() async -> [(key: String, provider: any CalendarProviding)] {
@@ -918,6 +916,16 @@ public final class CalendarSidebarModel {
     }
 
     public var canCreate: Bool { createRefusal == nil && draft?.problem == nil && !isCreating }
+
+    // The new event's editor offers only what the calendar it goes to can keep
+    public var draftRights: CalendarFieldRights {
+        CalendarFieldRights.forNewEvent(refusal: createRefusal)
+            .limited(to: draftCalendar?.formFields ?? Set(CalendarFormField.allCases))
+    }
+
+    public func asksSendUpdates(for draft: CalendarEventDraft) -> Bool {
+        !draft.attendees.isEmpty && draftCalendar?.honoursSendUpdates != false
+    }
 
     @discardableResult
     public func createEvent() async -> Bool {

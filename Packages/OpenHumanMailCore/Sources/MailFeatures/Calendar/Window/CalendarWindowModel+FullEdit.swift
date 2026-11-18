@@ -50,6 +50,8 @@ extension CalendarWindowModel {
     }
 
     public func asksSendUpdates(for card: CalendarEventCard) -> Bool {
+        // Why: a calendar that decides alone whether guests hear of a change has no choice to offer
+        guard provider(for: card.event).provider?.honoursSendUpdates != false else { return false }
         let patch = card.formPatch
         return CalendarSendUpdatesPolicy.needsChoice(hasOtherGuests: !card.event.attendees.isEmpty || !patch.guestsAdded.isEmpty,
                                                      patch: patch)

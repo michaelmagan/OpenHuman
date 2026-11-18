@@ -264,7 +264,8 @@ extension CalendarWindowModel {
             reason = String(localized: "Mail can change this event's time here. Change its details in your calendar.")
         }
         let fullRights = abilities.contains(.editFull)
-            ? CalendarFieldRights.make(for: event, abilities: abilities, refusal: refusal) : nil
+            ? CalendarFieldRights.make(for: event, abilities: abilities, refusal: refusal)
+                .limited(to: found?.formFields ?? Set(CalendarFormField.allCases)) : nil
         if let fullRights { reason = fullRights.summary }
         var opened = CalendarEventCard(event: event, calendarKey: key, title: event.title, location: event.location ?? "",
                                        notes: event.notes ?? "", start: event.start, end: event.end,

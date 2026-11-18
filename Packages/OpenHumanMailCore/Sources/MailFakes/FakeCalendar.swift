@@ -56,14 +56,19 @@ public final class FakeCalendar: CalendarProviding, Sendable {
     public let info: CalendarProviderInfo
     public let abilities: CalendarAbilities
     public let removalScopes: [CalendarRecurrenceScope]
+    public let formFields: Set<CalendarFormField>
+    public let honoursSendUpdates: Bool
 
     public init(events: [CalendarEvent] = [], info: CalendarProviderInfo = CalendarProviderInfo(name: "Sample calendar",
                                                                                                 isSample: true),
                 abilities: CalendarAbilities = [.respond, .editDetails, .remove],
-                removalScopes: [CalendarRecurrenceScope] = CalendarRecurrenceScope.removalOptions) {
+                removalScopes: [CalendarRecurrenceScope] = CalendarRecurrenceScope.removalOptions,
+                formFields: Set<CalendarFormField> = Set(CalendarFormField.allCases), honoursSendUpdates: Bool = true) {
         self.info = info
         self.abilities = abilities
         self.removalScopes = removalScopes
+        self.formFields = formFields
+        self.honoursSendUpdates = honoursSendUpdates
         state = Mutex(State(events: events))
     }
 

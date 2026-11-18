@@ -206,16 +206,15 @@ public final class CalendarWindowModel {
         period = CalendarPeriod.containing(focusDay, kind: newKind, calendar: calendar)
     }
 
-    func calendarSources() async -> [(key: String, title: String, provider: any CalendarProviding)] {
+    func calendarSources() async -> [CalendarSource] {
         if let connections = environment.calendarConnections, connections.routesByAccount {
             let accounts = await AIThreadLoader.first(environment.data.accounts()) ?? []
             eventStore.learnAddresses(of: accounts)
-            return accounts.compactMap { owner in
-                connections.calendarProvider(for: owner).map { (owner.email.lowercased(), owner.email, $0) }
-            }
+            return connections.windowSources(accounts: accounts)
         }
         let provider = sidebar.provider
-        return [((provider.info.account ?? "").lowercased(), provider.info.account ?? provider.info.name, provider)]
+        return [CalendarSource(key: provider.info.account ?? "", title: provider.info.account ?? provider.info.name,
+                               provider: provider)]
     }
 
     public func load(force: Bool) async {

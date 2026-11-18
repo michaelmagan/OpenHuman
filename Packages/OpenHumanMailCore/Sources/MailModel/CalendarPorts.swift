@@ -193,6 +193,8 @@ public protocol CalendarProviding: Sendable {
                      sendUpdates: CalendarSendUpdates) async throws -> CalendarRemovalResult
     func patchEvent(_ event: CalendarEvent, with patch: CalendarEventPatch, scope: CalendarRecurrenceScope,
                     sendUpdates: CalendarSendUpdates) async throws -> CalendarEvent
+    var formFields: Set<CalendarFormField> { get }
+    var honoursSendUpdates: Bool { get }
 }
 
 extension CalendarProviding {
@@ -204,6 +206,12 @@ extension CalendarProviding {
     public func deleteEvent(_ event: CalendarEvent) async throws {
         throw CalendarError.refused("This calendar can't remove events from Mail. Remove it in your calendar.")
     }
+
+    // The editor fields this calendar can keep; one without guests, a video link or a colour lists only the rest
+    public var formFields: Set<CalendarFormField> { Set(CalendarFormField.allCases) }
+
+    // Whether the calendar follows Mail's choice to email the guests or not; one that decides alone is not asked
+    public var honoursSendUpdates: Bool { true }
 }
 
 public protocol CalendarConnecting: Sendable {
@@ -222,17 +230,45 @@ extension CalendarConnecting {
     }
 }
 
+// One calendar the window and the sidebar show. A mail account's own calendar is keyed by the account's address; a
+// calendar that belongs to no inbox (shared, subscribed or local) has no account and a key of its own
+public struct CalendarSource: Sendable {
+    public let key: String
+    public let title: String
+    public let account: AccountID?
+    public let provider: any CalendarProviding
+
+    // Why: the key also tags the calendar's events and is looked up lowercased
+    public init(key: String, title: String, account: AccountID? = nil, provider: any CalendarProviding) {
+        self.key = key.lowercased()
+        self.title = title
+        self.account = account
+        self.provider = provider
+    }
+}
+
 public protocol CalendarConnectionsProviding: Sendable {
     func calendarConnection(for account: Account) -> (any CalendarConnecting)?
     func calendarProvider(for account: Account) -> (any CalendarProviding)?
     var routesByAccount: Bool { get }
     func windowCalendarProvider() -> (any CalendarProviding)?
+    func windowSources(accounts: [Account]) -> [CalendarSource]
 }
 
 extension CalendarConnectionsProviding {
     public func calendarProvider(for account: Account) -> (any CalendarProviding)? { nil }
     public var routesByAccount: Bool { false }
     public func windowCalendarProvider() -> (any CalendarProviding)? { nil }
+    public func windowSources(accounts: [Account]) -> [CalendarSource] { accountSources(accounts) }
+
+    // Each account's own calendar, in account order; an account without a connected calendar is left out
+    public func accountSources(_ accounts: [Account]) -> [CalendarSource] {
+        accounts.compactMap { owner in
+            calendarProvider(for: owner).map {
+                CalendarSource(key: owner.email, title: owner.email, account: owner.id, provider: $0)
+            }
+        }
+    }
 }
 
 public struct CalendarConnectionState: Sendable, Hashable {

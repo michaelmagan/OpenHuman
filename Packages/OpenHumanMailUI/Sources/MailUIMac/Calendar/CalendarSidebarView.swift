@@ -511,10 +511,10 @@ struct CalendarDraftEditor: View {
                                   guard let current = model.draft else { return }
                                   model.draft = form.applying(to: current)
                               }),
-                rights: CalendarFieldRights.forNewEvent(refusal: model.createRefusal),
+                rights: model.draftRights,
                 timeZone: model.timeZone, idPrefix: "calendar.draft", meetLink: nil,
                 titleIsSuggested: model.titleIsSuggested, focusesTitle: model.titleIsSuggested,
-                asksSendUpdates: !(model.draft ?? draft).attendees.isEmpty,
+                asksSendUpdates: model.asksSendUpdates(for: model.draft ?? draft),
                 sendUpdates: Binding(get: { (model.draft ?? draft).sendUpdates },
                                      set: { choice in model.draft?.sendUpdates = choice }),
                 isNewEvent: true,
