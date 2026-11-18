@@ -232,12 +232,10 @@ public final class AppEnvironment {
             var keep: Set<CalendarCacheKey> = [CalendarEventStore.key(for: calendar)]
             var connections: [any CalendarConnecting] = self.calendarConnection.map { [$0] } ?? []
             if let routed = self.calendarConnections, routed.routesByAccount {
-                keep = []
                 let accounts = await AIThreadLoader.first(self.data.accounts()) ?? []
-                for account in accounts {
-                    if let provider = routed.calendarProvider(for: account) { keep.insert(CalendarEventStore.key(for: provider)) }
-                    if let connection = routed.calendarConnection(for: account) { connections.append(connection) }
-                }
+                // Why: the same calendars the window lists, so one with no inbox keeps what it has read
+                keep = Set(routed.windowSources(accounts: accounts).map { CalendarEventStore.key(for: $0.provider) })
+                connections += accounts.compactMap { routed.calendarConnection(for: $0) }
             }
             store.retain(keep)
             self.calendarFollowers = connections.map { store.follow($0.connectionStates()) }

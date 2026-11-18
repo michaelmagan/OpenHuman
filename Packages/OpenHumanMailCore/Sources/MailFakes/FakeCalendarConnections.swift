@@ -13,15 +13,18 @@ public final class FakeCalendarConnections: CalendarConnectionsProviding, Sendab
     private let providers: [String: any CalendarProviding]?
     private let followsConnection: Bool
     private let windowAccount: String?
+    private let otherSources: [CalendarSource]
 
+    // `otherSources` are calendars that belong to no account; the window lists them after the accounts' own
     public init(connected: Set<String> = [], grantsWrites: Bool = true,
                 providers: [String: any CalendarProviding]? = nil, followsConnection: Bool = false,
-                windowAccount: String? = nil) {
+                windowAccount: String? = nil, otherSources: [CalendarSource] = []) {
         self.connected = Set(connected.map { $0.lowercased() })
         self.grantsWrites = grantsWrites
         self.providers = providers.map { Dictionary(uniqueKeysWithValues: $0.map { ($0.key.lowercased(), $0.value) }) }
         self.followsConnection = followsConnection
         self.windowAccount = windowAccount?.lowercased()
+        self.otherSources = otherSources
     }
 
     public func calendarProvider(for account: Account) -> (any CalendarProviding)? {
@@ -29,6 +32,8 @@ public final class FakeCalendarConnections: CalendarConnectionsProviding, Sendab
     }
 
     public var routesByAccount: Bool { providers != nil }
+
+    public func windowSources(accounts: [Account]) -> [CalendarSource] { accountSources(accounts) + otherSources }
 
     public func windowCalendarProvider() -> (any CalendarProviding)? {
         if let windowAccount, let own = provider(windowAccount) { return own }

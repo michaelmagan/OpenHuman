@@ -411,6 +411,64 @@ private actor LegacyRemovalSpy: CalendarProviding {
         let rights = CalendarFieldRights.make(for: event(recurring: true), abilities: full, refusal: nil)
         #expect(rights.access(.repeats).reason == "Change how this series repeats from its first event.")
     }
+
+    @Test func aCalendarThatKeepsEveryFieldLeavesTheRightsAsTheyWere() {
+        let every = Set(CalendarFormField.allCases)
+        let guest = event(organizer: false, guests: [sam], response: .needsAction)
+        let examples: [CalendarFieldRights] = [
+            .make(for: event(), abilities: full, refusal: nil), .make(for: guest, abilities: full, refusal: nil),
+            .make(for: event(), abilities: full, refusal: "Read only"), .forNewEvent(refusal: nil), .all,
+        ]
+        for rights in examples {
+            #expect(rights.limited(to: every) == rights)
+            #expect(rights.hidden.isEmpty && CalendarFormField.allCases.allSatisfy(rights.shows))
+        }
+    }
+
+    @Test func fieldsTheCalendarCannotKeepAreHiddenAndAChangeToOneIsRefused() {
+        let missing: Set<CalendarFormField> = [.guests, .guestPermissions, .meet, .visibility, .color]
+        let e = event()
+        let rights = CalendarFieldRights.make(for: e, abilities: full, refusal: nil)
+            .limited(to: Set(CalendarFormField.allCases).subtracting(missing))
+        #expect(rights.hidden == missing && !rights.shows(.meet) && rights.shows(.title) && rights.shows(.reminders))
+        for field in missing { #expect(rights.access(field) == .readOnly(CalendarFieldRights.unsupported), "\(field)") }
+        #expect(rights.access(.title) == .editable && rights.access(.repeats) == .editable && rights.hasAnyEditable)
+        var titled = form(e)
+        titled.title = "Retitled"
+        #expect(rights.firstViolation(of: titled.patch(from: e, defaultZone: la.identifier)) == nil)
+        var invited = form(e)
+        invited.addGuest(robin)
+        #expect(rights.firstViolation(of: invited.patch(from: e, defaultZone: la.identifier)) == CalendarFieldRights.unsupported)
+        var linked = form(e)
+        linked.wantsMeet = true
+        #expect(rights.firstViolation(of: linked.patch(from: e, defaultZone: la.identifier)) == CalendarFieldRights.unsupported)
+    }
+
+    @Test func aReasonAFieldAlreadyHasStaysWhenTheCalendarCannotKeepIt() {
+        let why = "Reconnect Google Calendar to change events."
+        let locked = CalendarFieldRights.make(for: event(), abilities: full, refusal: why).limited(to: [.title, .time])
+        #expect(locked.access(.meet) == .readOnly(why) && !locked.shows(.meet) && locked.shows(.title))
+        let e = event(organizer: false, guests: [sam], permissions: CalendarGuestPermissions(canModify: false, canInviteOthers: true),
+                      response: .needsAction)
+        let rights = CalendarFieldRights.make(for: e, abilities: full, refusal: nil)
+        #expect(rights.access(.guests) == .addOnly && rights.hasAnyEditable)
+        let limited = rights.limited(to: Set(CalendarFormField.allCases).subtracting([.guests, .reminders, .busy, .color]))
+        #expect(limited.access(.guests) == .readOnly(CalendarFieldRights.unsupported), "adding guests goes too")
+        #expect(limited.access(.title) == rights.access(.title), "only the organizer's reason, unchanged")
+        #expect(!limited.hasAnyEditable, "nothing is left to edit, so the card offers no Edit")
+    }
+
+    @Test func aCalendarThatSaysNothingKeepsEveryFieldAndFollowsTheGuestChoice() {
+        let plain: any CalendarProviding = QuietCalendar()
+        #expect(plain.formFields == Set(CalendarFormField.allCases) && plain.honoursSendUpdates)
+    }
+}
+
+private struct QuietCalendar: CalendarProviding {
+    var info: CalendarProviderInfo { CalendarProviderInfo(name: "Quiet") }
+    func events(from: Date, to: Date) async throws -> [CalendarEvent] { [] }
+    func freeBusy(from: Date, to: Date) async throws -> CalendarFreeBusy { CalendarFreeBusy(busy: []) }
+    func createEvent(_ draft: CalendarEventDraft) async throws -> CalendarEvent { throw CalendarError.notConfigured }
 }
 
 

@@ -28,6 +28,10 @@ struct RoutedCalendarProvider: CalendarProviding {
     }
 
     var abilities: CalendarAbilities { connections.windowCalendarProvider()?.abilities ?? [] }
+    var formFields: Set<CalendarFormField> {
+        connections.windowCalendarProvider()?.formFields ?? Set(CalendarFormField.allCases)
+    }
+    var honoursSendUpdates: Bool { connections.windowCalendarProvider()?.honoursSendUpdates ?? true }
     var removalScopes: [CalendarRecurrenceScope] { connections.windowCalendarProvider()?.removalScopes ?? [] }
     var removalIdentity: ObjectIdentifier? {
         connections.windowCalendarProvider()?.removalIdentity

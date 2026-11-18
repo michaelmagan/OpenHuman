@@ -447,10 +447,30 @@ public struct CalendarFieldRights: Sendable, Hashable {
     public var access: [CalendarFormField: CalendarFieldAccess]
     public var delete: CalendarDeleteRight
     public var summary: String?
+    // Fields the event's calendar can't keep at all: the editor leaves them out, and a change to one is refused
+    public var hidden: Set<CalendarFormField> = []
 
     public func access(_ field: CalendarFormField) -> CalendarFieldAccess { access[field] ?? .editable }
 
+    public func shows(_ field: CalendarFormField) -> Bool { !hidden.contains(field) }
+
     public static let all = CalendarFieldRights(access: [:], delete: .delete, summary: nil)
+
+    public static var unsupported: String {
+        String(localized: "Mail can't change this on this calendar. Change it in your calendar.")
+    }
+
+    // The same rights on a calendar that keeps only these fields; a reason a field already has is kept
+    public func limited(to supported: Set<CalendarFormField>) -> CalendarFieldRights {
+        let missing = Set(CalendarFormField.allCases).subtracting(supported)
+        guard !missing.isEmpty else { return self }
+        var limited = self
+        limited.hidden.formUnion(missing)
+        for field in missing where limited.access(field).reason == nil {
+            limited.access[field] = .readOnly(Self.unsupported)
+        }
+        return limited
+    }
 
     public static func locked(_ reason: String) -> CalendarFieldRights {
         CalendarFieldRights(access: Dictionary(uniqueKeysWithValues: CalendarFormField.allCases.map { ($0, .readOnly(reason)) }),

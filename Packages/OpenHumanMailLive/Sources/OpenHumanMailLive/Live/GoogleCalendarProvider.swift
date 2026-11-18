@@ -167,6 +167,9 @@ final class GoogleCalendarProvider: CalendarProviding {
     }
 
     var abilities: CalendarAbilities { [.respond, .remove, .editFull, .removeMeet, .removeInvite] }
+    // Google keeps every field of the editor and emails the guests only when Mail asks it to
+    var formFields: Set<CalendarFormField> { Set(CalendarFormField.allCases) }
+    var honoursSendUpdates: Bool { true }
     var removalScopes: [CalendarRecurrenceScope] { CalendarRecurrenceScope.removalOptions }
 
     func removeEvent(_ event: CalendarEvent, scope: CalendarRecurrenceScope,

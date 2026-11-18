@@ -88,6 +88,7 @@ private struct OwnershipFixture: Sendable {
     @Test func realGoogleJSONSelectsCardMenuAndActionRights() async throws {
         for fixture in OwnershipFixture.cases {
             let provider = GoogleCalendarProvider(client: fixture.client(), account: fixture.calendar, createRefusal: nil)
+            #expect(provider.formFields == Set(CalendarFormField.allCases) && provider.honoursSendUpdates, "\(fixture.id)")
             let event = try #require(try await provider.events(from: start, to: start.addingTimeInterval(86_400)).first)
             #expect(event.organizerIsMe == fixture.organizes, "\(fixture.id)")
             #expect(event.isInvitationCopy == (fixture.removal == .invitation), "\(fixture.id)")
@@ -98,6 +99,7 @@ private struct OwnershipFixture: Sendable {
             let window = try #require(environment.calendarWindow)
             window.openEvent(event)
             let card = try #require(window.card)
+            #expect(card.rights == rights, "\(fixture.id): Google keeps every field, so the card leaves none out")
             switch fixture.removal {
             case .invitation:
                 #expect(rights.delete == .removeInvite, "\(fixture.id)")
