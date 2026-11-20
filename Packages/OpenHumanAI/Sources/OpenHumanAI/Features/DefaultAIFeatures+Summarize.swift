@@ -21,9 +21,22 @@ extension DefaultAIFeatures {
             if thread.trigger == .automatic, thread.messages.count < AIPolicy.autoSummarizeMinimumMessages {
                 throw AIError.unavailable(.other("Threads this short are not summarized automatically"))
             }
-            let engine = try await self.resolveModel(
-                .summarize, trigger: thread.trigger, accountKeys: [thread.accountKey], threadKey: thread.threadKey)
-            _ = try await self.produceSummary(thread, engine: engine) { continuation.yield($0) }
+            var emitted = false
+            _ = try await self.withWritingModel(.summarize, thread: thread, trigger: thread.trigger, emittedText: { emitted }) { engine in
+                var pendingStart: SummaryEvent?
+                return try await self.produceSummary(thread, engine: engine) { event in
+                    if case .started = event, AIModelDefaults.writingModels.contains(engine.provider.id) {
+                        pendingStart = event
+                        return
+                    }
+                    if let start = pendingStart {
+                        continuation.yield(start)
+                        pendingStart = nil
+                    }
+                    if case .textDelta(let text) = event, !text.isEmpty { emitted = true }
+                    continuation.yield(event)
+                }
+            }
         }
     }
 

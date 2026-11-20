@@ -167,6 +167,54 @@ import Testing
         #expect(provider.requests.count == 2)
     }
 
+    @Test func repairedReplyTextUsesOneGeneration() async throws {
+        for text in [replyJSON, "```json\n" + replyJSON + "\n```", "Suggestions follow. " + replyJSON + " {}",
+                     replyJSON.replacingOccurrences(of: "}]}", with: "},],}"), String(replyJSON.dropLast())] {
+            let provider = ScriptedProvider(responses: [.text(text)])
+            let options = try await makeFeatures([provider]).replyOptions(SyntheticThreads.short(), userName: "Sam")
+            #expect(options.map(\.label) == ["Yes", "No", "Question"])
+            #expect(provider.requests.count == 1)
+        }
+    }
+
+    @Test func quotedBracesCommasAndEscapesSurviveRepair() throws {
+        let answer = #"{"body":"A }, comma,] and \"quotes\".",}"#
+        let data = try #require(OutputGuard.replyJSON(from: "Answer: " + answer + " {}"))
+        let value = try JSONDecoder().decode([String: String].self, from: data)
+        #expect(value["body"] == #"A }, comma,] and "quotes"."#)
+    }
+
+    @Test func ambiguousTruncationAndGarbageEndInCleanFailure() async {
+        let provider = ScriptedProvider(responses: [.text(#"{"options":[{"body":"unfinished"#), .text("garbage")])
+        let features = makeFeatures([provider])
+        let error = await aiError { _ = try await features.replyOptions(SyntheticThreads.short(), userName: "Sam") }
+        #expect(error == .invalidOutput("the model did not return valid JSON"))
+        #expect(provider.requests.count == 2)
+        #expect(provider.requests.last?.system.contains("Your previous answer was not valid") == true)
+    }
+
+    @Test func defaultGemmaLoadFailureUsesAppleAndReportsItsProvenance() async throws {
+        let gemma = ScriptedProvider(id: .local(AIModelDefaults.gemmaE4BID), responses: [.fail(.providerFailed("load"))])
+        let apple = ScriptedProvider(id: .appleSystem, responses: [.text(replyJSON)])
+        let result = try await makeFeatures([gemma, apple]).replyOptionsResult(SyntheticThreads.short(), userName: "Sam")
+        #expect(gemma.requests.count == 1 && apple.requests.count == 1)
+        #expect(result.provenance.providerID == .appleSystem)
+    }
+
+    @Test func gemmaBudgetsTheLatestMessageIncludingReplySpace() async throws {
+        let caps = AICapabilities.fake(contextTokens: 8_192)
+        let provider = ScriptedProvider(id: .local(AIModelDefaults.gemmaE4BID), capabilities: caps,
+                                        responses: [.text(replyJSON)])
+        var thread = SyntheticThreads.short()
+        thread.messages[2].bodyText = String(repeating: "project ", count: 12_000)
+        _ = try await makeFeatures([provider]).replyOptions(thread, userName: "Sam")
+        let request = try #require(provider.requests.first)
+        #expect(request.untrusted.map(\.kind) == [.subject, .sender, .emailBody])
+        #expect(request.untrusted.last?.id == "m3")
+        #expect(request.untrusted.last?.text.hasSuffix(AIPolicy.truncationMarker) == true)
+        #expect(untrustedTokens(request) + fixedTokens(request) + request.output.maxTokens < 8_192)
+    }
+
     @Test func oneRepairAttemptThenInvalidOutput() async throws {
         let repaired = ScriptedProvider(capabilities: .fake(contextTokens: 8_192)) { _, index in
             index == 0 ? .text("Here are some replies: yes, no, maybe") : .text(replyJSON)

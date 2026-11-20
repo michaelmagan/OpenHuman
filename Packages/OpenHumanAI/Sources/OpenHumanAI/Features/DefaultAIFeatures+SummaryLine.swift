@@ -43,8 +43,12 @@ extension OutputGuard {
 extension DefaultAIFeatures {
     public func summarizeLine(_ thread: AIThreadInput) async throws -> ThreadLineSummary {
         guard let newest = thread.messages.last else { throw AIError.unavailable(.other("The thread has no messages")) }
-        let engine = try await resolveModel(.summarize, trigger: .automatic, accountKeys: [thread.accountKey],
-                                            threadKey: thread.threadKey)
+        return try await withWritingModel(.summarize, thread: thread, trigger: .automatic) { engine in
+            try await summarizeLine(thread, newest: newest, engine: engine)
+        }
+    }
+
+    private func summarizeLine(_ thread: AIThreadInput, newest: AIMessageInput, engine: Engine) async throws -> ThreadLineSummary {
         guard engine.capabilities.dataLocation == .onDevice else { throw AIError.unavailable(.onDeviceOnly) }
         let key = threadLineKey(thread, newest: newest, engine: engine)
         if let key, let hit = await cache.get(key), case .text(let text) = hit.payload {

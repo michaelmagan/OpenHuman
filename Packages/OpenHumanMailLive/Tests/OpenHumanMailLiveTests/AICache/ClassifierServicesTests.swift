@@ -20,6 +20,8 @@ import Testing
         let settings = AISettingsBox(store: InMemoryAISettingsStore(AISettings(modelsDirectory: root.path)))
         let registry = ProviderRegistry()
         let services = ClassifierServices(registry: registry, settings: settings)
+        #expect(registry.providers.map(\.id) == AIModelDefaults.writingModels)
+        #expect(services.writingModels.map(\.modelName) == ["Gemma 4 E4B (4-bit)", "Gemma 4 E2B (4-bit)"])
         #expect(services.modelName == "Qwen3.5 9B OptiQ (4-bit)")
         #expect(services.sizeBytes == 7_120_910_361 && services.memoryBytes == 7_973_397_524)
         #expect(services.classifierID == "local.qwen3.5-9b-optiq-4bit.classifier")

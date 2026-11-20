@@ -5,8 +5,14 @@ extension DefaultAIFeatures {
         guard let last = thread.messages.last else {
             throw AIError.unavailable(.other("The thread has no message to reply to"))
         }
-        let engine = try await resolveModel(
-            .replyOptions, trigger: thread.trigger, accountKeys: [thread.accountKey], threadKey: thread.threadKey)
+        return try await withWritingModel(.replyOptions, thread: thread, trigger: thread.trigger) { engine in
+            try await replyOptions(thread, answering: last, userName: userName, engine: engine)
+        }
+    }
+
+    private func replyOptions(_ thread: AIThreadInput, answering last: AIMessageInput, userName: String, engine: Engine)
+        async throws -> ReplyOptionsResult
+    {
         let trusted = [
             TrustedPart(kind: .userName, text: String(userName.prefix(AIPolicy.userNameCharacterCap))),
             TrustedPart(kind: .today, text: today()),
@@ -17,9 +23,24 @@ extension DefaultAIFeatures {
             var prepared = try await prepare(
                 .replyOptions, engine: engine, nonce: nonce, trusted: trusted, untrusted: [], output: output,
                 shrink: shrink)
+            if AIModelDefaults.writingModels.contains(engine.provider.id),
+               let schema = output.schema, let reminder = try? prompts.repairSuffix(schema: schema),
+               let window = engine.capabilities.contextTokens {
+                // Leave room for both the chat template and the longer system turn on a repair request.
+                let fixed = await engine.count(prepared.request.system + "\n\n" + reminder)
+                    + (await engine.count(Untrusted.renderTrusted(trusted, nonce: nonce)))
+                let available = window - fixed - output.maxTokens - 32
+                guard available > 0 else { throw AIError.contextOverflow(counted: fixed + output.maxTokens + 32, limit: window) }
+                prepared.budget = Int(Double(available) * shrink)
+            }
             let whole = threadParts(thread)
             if await engine.tokens(of: whole, nonce: nonce) <= prepared.budget {
                 prepared.request.untrusted = whole
+            } else if AIModelDefaults.writingModels.contains(engine.provider.id) {
+                let budget = prepared.budget
+                prepared.request.untrusted = try await recentReplyParts(thread, last: last) { parts in
+                    await engine.tokens(of: parts, nonce: nonce) <= budget
+                }
             } else {
                 let summary = try await produceSummary(thread, engine: engine)
                 let head = [
@@ -75,6 +96,23 @@ extension DefaultAIFeatures {
         }
     }
 
+    /// Keep the newest complete turns, shortening the message being answered only when it alone exceeds the budget.
+    private func recentReplyParts(_ thread: AIThreadInput, last: AIMessageInput,
+                                  fits: ([UntrustedPart]) async -> Bool) async throws -> [UntrustedPart] {
+        let subject = subjectPart(thread)
+        let sender = senderPart(last)
+        let body = try await Chunker.truncate(cappedBody(last)) { text in
+            await fits([subject, sender, self.bodyPart(last, text: text)])
+        }
+        var kept = [sender, bodyPart(last, text: body)]
+        for message in thread.messages.dropLast().reversed() {
+            let candidate = [senderPart(message), bodyPart(message, text: cappedBody(message))] + kept
+            guard await fits([subject] + candidate) else { break }
+            kept = candidate
+        }
+        return [subject] + kept
+    }
+
     static func replyKeyComponents(answering message: AIMessageInput) -> [String] {
         ["replyTo", message.messageKey]
     }
@@ -83,8 +121,9 @@ extension DefaultAIFeatures {
         _ prepared: PreparedRequest, engine: Engine, untrustedTokens: Int, parse: (Data) throws -> T
     ) async throws -> (T, RunOutcome, String) {
         guard let schema = prepared.request.output.schema else { throw AIError.invalidOutput("no schema") }
+        let extract = prepared.request.task == .replyOptions ? OutputGuard.replyJSON(from:) : OutputGuard.extractJSON(from:)
         let first = try await run(prepared, engine: engine, untrustedTokens: untrustedTokens)
-        if let value = Self.parse(first, parse: parse) { return value }
+        if let value = Self.parse(first, extract: extract, parse: parse) { return value }
 
         var repaired = prepared
         repaired.traceID = makeTraceID()
@@ -94,14 +133,23 @@ extension DefaultAIFeatures {
         } catch {
             throw AIError.invalidOutput("repair prompt unavailable")
         }
-        let second = try await run(repaired, engine: engine, untrustedTokens: untrustedTokens)
+        let second: RunOutcome
+        do {
+            second = try await run(repaired, engine: engine, untrustedTokens: untrustedTokens)
+        } catch let error as AIError where prepared.request.task == .replyOptions && AIModelDefaults.writingModels.contains(engine.provider.id) {
+            switch error {
+            case .contextOverflow, .providerFailed, .unavailable:
+                throw AIError.invalidOutput("the model could not repair its reply")
+            default: throw error
+            }
+        }
         await amendTrace(repaired, finalText: nil, steps: [AITraceStep(.repairedJSON)])
-        if let value = Self.parse(second, parse: parse) { return value }
+        if let value = Self.parse(second, extract: extract, parse: parse) { return value }
         throw AIError.invalidOutput("the model did not return valid JSON")
     }
 
-    private static func parse<T>(_ outcome: RunOutcome, parse: (Data) throws -> T) -> (T, RunOutcome, String)? {
-        guard let data = outcome.structured ?? OutputGuard.extractJSON(from: outcome.text),
+    private static func parse<T>(_ outcome: RunOutcome, extract: (String) -> Data?, parse: (Data) throws -> T) -> (T, RunOutcome, String)? {
+        guard let data = outcome.structured ?? extract(outcome.text),
             let value = try? parse(data)
         else { return nil }
         return (value, outcome, String(decoding: data, as: UTF8.self))

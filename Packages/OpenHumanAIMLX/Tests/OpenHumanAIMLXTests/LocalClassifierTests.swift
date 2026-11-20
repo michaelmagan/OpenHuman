@@ -165,6 +165,19 @@ func sampleClassificationInput(subject: String = "Spring sale", body: String = "
         #expect(needs.memoryBytes == 7_973_397_524 && needs.machineMemoryBytes == 16 * 1_073_741_824)
     }
 
+    @Test func writingDownloadsUsePinnedRevisionsAndFitTheStoreLimit() throws {
+        for (manifest, gib) in [(LocalWritingModels.e4b, 16), (LocalWritingModels.e2b, 8)] {
+            try manifest.validate()
+            #expect(manifest.declaredContextTokens == 8_192)
+            #expect(manifest.revision.count == 40)
+            #expect(manifest.totalBytes < ModelStore.defaultMaxModelBytes)
+            #expect(manifest.files.allSatisfy { $0.url.pathComponents.contains(manifest.revision) })
+            #expect(LocalClassifierModels.requirements(for: manifest).machineMemoryBytes == UInt64(gib) << 30)
+        }
+        #expect(LocalClassifierModels.sizeText(LocalWritingModels.e4b.totalBytes) == "about 5.2 GB")
+        #expect(LocalClassifierModels.sizeText(LocalWritingModels.e2b.totalBytes) == "about 3.6 GB")
+    }
+
     @Test func onlyTheLargeModelIsOfferedAndTheSmallOnesAreGone() {
         #expect(LocalClassifierModels.all.map(\.id) == ["qwen3.5-9b-optiq-4bit"])
         #expect(LocalClassifierModels.offered == LocalClassifierModels.qwen3_5_9b_optiq_4bit)

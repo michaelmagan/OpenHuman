@@ -13,7 +13,10 @@ public final class ClassifierServices: LocalClassifierModelPort, Sendable {
     private let settings: AISettingsBox
     private let service: Mutex<LocalClassifierService>
 
-    static let manifest = LocalClassifierModels.offered
+    private let manifest: ModelManifest
+    private let isWritingModel: Bool
+    private let writingServices: [ClassifierServices]
+    public var writingModels: [any LocalClassifierModelPort] { writingServices }
 
     @MainActor @discardableResult
     static func install(registry: ProviderRegistry, settings: AISettingsBox) -> ClassifierServices {
@@ -22,33 +25,49 @@ public final class ClassifierServices: LocalClassifierModelPort, Sendable {
         return services
     }
 
-    init(registry: ProviderRegistry, settings: AISettingsBox) {
+    init(registry: ProviderRegistry, settings: AISettingsBox, manifest: ModelManifest = LocalClassifierModels.offered) {
         self.registry = registry
         self.settings = settings
-        let made = Self.makeService(settings: settings)
-        self.service = Mutex(made)
-        registry.register(classifier: made.classifier)
+        self.manifest = manifest
+        isWritingModel = LocalWritingModels.all.contains { $0.id == manifest.id }
+        writingServices = isWritingModel ? [] : LocalWritingModels.all.map {
+            ClassifierServices(registry: registry, settings: settings, manifest: $0)
+        }
+        let made = Self.makeService(settings: settings, manifest: manifest, writing: isWritingModel)
+        service = Mutex(made)
+        register(made)
+    }
+
+    private func register(_ made: LocalClassifierService) {
+        if isWritingModel {
+            registry.register(made.provider)
+        } else {
+            registry.register(classifier: made.classifier)
+        }
         made.provider.startMonitoringMemoryPressure()
     }
 
-    private static func makeService(settings: AISettingsBox) -> LocalClassifierService {
+    private static func makeService(settings: AISettingsBox, manifest: ModelManifest, writing: Bool) -> LocalClassifierService {
         let root = settings.current.modelsDirectory.map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? ModelStore.defaultRoot
+        let gate = LocalClassifierGate(
+            requiredMemoryBytes: LocalClassifierModels.requirements(for: manifest).machineMemoryBytes,
+            allowsLowPowerMode: { settings.current.localClassifierInLowPowerMode })
         return LocalClassifierService(
             manifest: manifest, rootDirectory: root, runtime: MLXLocalModelRuntime(),
-            allowsLoading: { settings.current.enabled && settings.current.classifier != .appleModel },
-            gate: LocalClassifierGate(
-                requiredMemoryBytes: LocalClassifierModels.requirements(for: manifest).machineMemoryBytes,
-                allowsLowPowerMode: { settings.current.localClassifierInLowPowerMode }))
+            allowsLoading: {
+                settings.current.enabled && (writing ? gate.memoryShortfall == nil : settings.current.classifier != .appleModel)
+            }, gate: gate)
     }
 
     private var currentService: LocalClassifierService { service.withLock { $0 } }
 
-    public var modelName: String { Self.manifest.displayName }
+    public var modelName: String { manifest.displayName }
+    public var isWritingDownload: Bool { isWritingModel }
     public var classifierID: AIProviderID { currentService.classifier.id }
-    public var sizeBytes: Int64 { Self.manifest.totalBytes }
-    public var memoryBytes: Int64 { LocalClassifierModels.requirements(for: Self.manifest).memoryBytes }
-    public var licence: String { Self.manifest.license }
+    public var sizeBytes: Int64 { manifest.totalBytes }
+    public var memoryBytes: Int64 { LocalClassifierModels.requirements(for: manifest).memoryBytes }
+    public var licence: String { manifest.license }
     public var unsupportedReason: String? { currentService.gate.memoryShortfall }
 
     public func directoryPath() async -> String { currentService.rootDirectory.path }
@@ -75,7 +94,8 @@ public final class ClassifierServices: LocalClassifierModelPort, Sendable {
     public func delete() async throws { try await currentService.delete() }
 
     public func leftoverModels() async -> [LeftoverLocalModel] {
-        await currentService.leftovers().map {
+        guard !isWritingModel else { return [] }
+        return await currentService.leftovers().map {
             LeftoverLocalModel(id: $0.manifest.id, name: $0.manifest.displayName, bytes: $0.bytesOnDisk)
         }
     }
@@ -93,13 +113,23 @@ public final class ClassifierServices: LocalClassifierModelPort, Sendable {
                 throw ModelStoreError.transport("folder")
             }
         }
+        for model in writingServices {
+            switch await model.status() {
+            case .downloading, .verifying: throw ModelStoreError.alreadyDownloading
+            default: break
+            }
+        }
+        try settings.update { $0.modelsDirectory = path }
+        await reloadDirectory()
+        for model in writingServices { await model.reloadDirectory() }
+    }
+
+    private func reloadDirectory() async {
         let old = currentService
         await old.provider.unload()
-        _ = try? settings.update { $0.modelsDirectory = path }
-        let made = Self.makeService(settings: settings)
+        let made = Self.makeService(settings: settings, manifest: manifest, writing: isWritingModel)
         service.withLock { $0 = made }
-        registry.register(classifier: made.classifier)
-        made.provider.startMonitoringMemoryPressure()
+        register(made)
     }
 
     static func status(_ state: LocalClassifierService.State) -> LocalModelStatus {

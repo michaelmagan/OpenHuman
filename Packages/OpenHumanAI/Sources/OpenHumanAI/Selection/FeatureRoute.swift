@@ -1,6 +1,10 @@
 import Foundation
 
 public enum AIModelDefaults {
+    public static let gemmaE4BID = "gemma-4-e4b-it-4bit"
+    public static let gemmaE2BID = "gemma-4-e2b-it-4bit"
+    public static let writingModels: [AIProviderID] = [.local(gemmaE4BID), .local(gemmaE2BID)]
+
     public static let pins: [AIFeature: AIProviderID] = [
         .summarize: .appleSystem,
         .replyOptions: .appleSystem,
@@ -24,9 +28,14 @@ public enum AIModelDefaults {
             $0.kind == kind && $0.dataLocation == .onDevice && $0.autoSelectable
                 && (kind == .languageModel || !$0.id.isLocalModel)
         }
+        if feature == .summarize || feature == .replyOptions {
+            for id in writingModels where onDevice.contains(where: { $0.id == id && $0.availability.isAvailable }) {
+                return id
+            }
+        }
         if onDevice.contains(where: { $0.id == pinned }) { return pinned }
         // Builds without Apple's model (fake data, tests) stand in their own on-device model.
-        return onDevice.first?.id
+        return onDevice.first { !writingModels.contains($0.id) }?.id
     }
 }
 
