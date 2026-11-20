@@ -128,12 +128,14 @@ struct RunOutcome: Sendable {
 }
 
 extension DefaultAIFeatures {
-    func resolve(_ feature: AIFeature, trigger: AITrigger, accountKeys: [String?], threadKey: String?) async throws
+    func resolve(_ feature: AIFeature, trigger: AITrigger, accountKeys: [String?], threadKey: String?,
+                 appleOnly: Bool = false) async throws
         -> Resolution
     {
         let settings = await settingsSource()
         let workload = ProviderSelectionPolicy.workload(for: feature, trigger: trigger)
-        let candidates = await registry.candidates(for: feature, settings: settings)
+        let offered = await registry.candidates(for: feature, settings: settings)
+        let candidates = appleOnly ? offered.filter { $0.id == .appleSystem } : offered
         let selection = ProviderSelectionPolicy.select(
             feature: feature, workload: workload, accountKeys: accountKeys, candidates: candidates, settings: settings)
         guard case .selected(let candidate) = selection else {
@@ -168,6 +170,25 @@ extension DefaultAIFeatures {
         switch try await resolve(feature, trigger: trigger, accountKeys: accountKeys, threadKey: threadKey) {
         case .model(let engine): return engine
         case .classifier: throw AIError.unavailable(.other("not a language model"))
+        }
+    }
+
+    func withWritingModel<T>(_ feature: AIFeature, thread: AIThreadInput, trigger: AITrigger,
+                             emittedText: () -> Bool = { false }, _ generate: (Engine) async throws -> T) async throws -> T {
+        let engine = try await resolveModel(feature, trigger: trigger, accountKeys: [thread.accountKey], threadKey: thread.threadKey)
+        do {
+            return try await generate(engine)
+        } catch let error as AIError {
+            guard AIModelDefaults.writingModels.contains(engine.provider.id), engine.settings.featurePins[feature] == nil,
+                  !emittedText(), !Task.isCancelled else { throw error }
+            switch error {
+            case .unavailable, .providerFailed: break
+            default: throw error
+            }
+            guard case .model(let apple)? = try? await resolve(
+                feature, trigger: trigger, accountKeys: [thread.accountKey], threadKey: thread.threadKey, appleOnly: true)
+            else { throw error }
+            return try await generate(apple)
         }
     }
 

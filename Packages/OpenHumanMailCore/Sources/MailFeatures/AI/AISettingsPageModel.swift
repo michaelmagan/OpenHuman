@@ -78,7 +78,12 @@ public final class AISettingsPageModel {
         return onDeviceReady == false ? Self.prepareNeedsModel : nil
     }
 
-    public private(set) var onDeviceReady: Bool?
+    public var onDeviceReady: Bool? {
+        guard hasCheckedProviders else { return nil }
+        return center.providers.contains { $0.isReady && !$0.badge.leavesMac }
+    }
+
+    private var hasCheckedProviders = false
 
     public static let prepareTitle = String(localized: "Prepare replies and summaries in advance")
     public static let prepareDetail = String(localized: "Runs on this Mac only. Uses a little battery.")
@@ -200,7 +205,7 @@ public final class AISettingsPageModel {
                         badge: AIProviderBadge(providerName: model.displayName, location: model.dataLocation),
                         warning: Self.sendsText, action: .allow)
         }
-        onDeviceReady = await center.onDeviceStatus().available
+        hasCheckedProviders = true
     }
 
     public func allow(_ id: String) async {

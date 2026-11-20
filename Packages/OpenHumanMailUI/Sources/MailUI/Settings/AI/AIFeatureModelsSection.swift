@@ -88,5 +88,5 @@ public struct AIFeatureModelsSection: View {
         return text
     }
 
-    static let footnote = String(localized: "Each feature uses only the model chosen here; if it isn't ready, Mail says why and doesn't try another. Work Mail does in the background, like triage and one-line summaries, stays on this Mac. A model that needs your OK can be allowed under Models.")
+    static let footnote = String(localized: "Your model choices take priority. With Mail’s default for summaries and replies, Apple’s model can take over if Gemma is unavailable. Work Mail does in the background, like triage and one-line summaries, stays on this Mac. A model that needs your OK can be allowed under Models.")
 }

@@ -48,6 +48,10 @@ public enum LocalClassifierModels {
 
     public static func requirements(for manifest: ModelManifest) -> Requirements {
         switch manifest.id {
+        case LocalWritingModels.e4b.id:
+            Requirements(memoryBytes: 5_368_709_120, machineMemoryBytes: 16 * 1_073_741_824)
+        case LocalWritingModels.e2b.id:
+            Requirements(memoryBytes: 3_865_470_566, machineMemoryBytes: 8 * 1_073_741_824)
         case qwen3_5_9b_optiq_4bit.id:
             Requirements(memoryBytes: 7_973_397_524, machineMemoryBytes: 16 * 1_073_741_824)
         default:
@@ -64,7 +68,8 @@ public enum LocalClassifierModels {
         return String(format: "about %.0f MB", Double(bytes) / 1_000_000)
     }
 
-    private static func huggingFace(id: String, displayName: String, repository: String, revision: String,
+    static func huggingFace(id: String, displayName: String, repository: String, revision: String,
+                                    context: Int = 40_960, license: String = "Apache-2.0",
                                     files: [(path: String, size: Int64, sha256: String)]) -> ModelManifest {
         ModelManifest(
             id: id, displayName: displayName, sourceURL: URL(string: "https://huggingface.co/\(repository)")!,
@@ -75,6 +80,6 @@ public enum LocalClassifierModels {
                     url: URL(string: "https://huggingface.co/\(repository)/resolve/\(revision)/\(file.path)")!,
                     sizeBytes: file.size, sha256: file.sha256)
             },
-            license: "Apache-2.0", format: .mlx, declaredContextTokens: 40_960)
+            license: license, format: .mlx, declaredContextTokens: context)
     }
 }

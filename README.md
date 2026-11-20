@@ -81,6 +81,8 @@ This is a very early alpha, so expect bugs. It runs on Apple silicon Macs with m
 - **Themes.** Six built-in themes, and [your own](docs/themes.md) as plain JSON files.
 - **A CLI for agents.** `openhuman` reads the same local mail, writes drafts for you to review, and never sends. It includes an MCP server. See the [CLI documentation](docs/cli/README.md).
 
+In Settings › AI, you can download **Gemma 4 E4B** for summaries and quick replies on Macs with at least 16 GB of memory. The download is about 5.2 GB and the model uses about 5 GiB of memory. **Gemma 4 E2B** is a lighter option for Macs with at least 8 GB (3.6 GB download, about 3.6 GiB of memory). Mail prefers E4B when both are installed. You can choose either model per feature or use Apple’s system model without downloading either one.
+
 ## Download and install
 
 [Download version 0.1.3](https://github.com/michaelmagan/OpenHuman/releases/tag/v0.1.3) (`OpenHuman-Mail-0.1.3.dmg`).

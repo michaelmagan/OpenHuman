@@ -24,6 +24,24 @@ import Testing
         #expect(Set(AIModelDefaults.pins.keys) == Set(AIFeature.allCases))
     }
 
+    @Test func readyGemmaModelsArePreferredForWritingAndExplicitChoicesWin() {
+        var large = Self.local, small = Self.local
+        large.id = .local(AIModelDefaults.gemmaE4BID)
+        small.id = .local(AIModelDefaults.gemmaE2BID)
+        for feature in [AIFeature.summarize, .replyOptions] {
+            let choices = [Self.system, small, large]
+            #expect(route(feature, choices).choice == large.id)
+            var settings = AISettings()
+            settings.featurePins[feature] = small.id
+            #expect(route(feature, choices, settings).choice == small.id)
+            var missing = large
+            missing.availability = .unavailable(reason: .modelNotDownloaded(sizeBytes: 100))
+            #expect(route(feature, [missing, small, Self.system]).choice == small.id)
+            #expect(route(feature, [missing, Self.system]).choice == .appleSystem)
+        }
+        #expect(route(.rewrite, [small, large, Self.system]).choice == .appleSystem)
+    }
+
     @Test func theDefaultIsUsedAndNamedAsTheDefault() {
         let chosen = route(.rewrite, [Self.claude, Self.local, Self.system])
         #expect(chosen.origin == .mailDefault && chosen.choice == .appleSystem && chosen.defaultModel == .appleSystem)

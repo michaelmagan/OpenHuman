@@ -23,6 +23,8 @@ public struct LeftoverLocalModel: Sendable, Hashable, Identifiable {
 }
 
 public protocol LocalClassifierModelPort: AnyObject, Sendable {
+    var writingModels: [any LocalClassifierModelPort] { get }
+    var isWritingDownload: Bool { get }
     var modelName: String { get }
     var classifierID: AIProviderID { get }
     var sizeBytes: Int64 { get }
@@ -37,6 +39,11 @@ public protocol LocalClassifierModelPort: AnyObject, Sendable {
     func useDirectory(_ path: String?) async throws
     func leftoverModels() async -> [LeftoverLocalModel]
     func deleteLeftover(id: String) async throws
+}
+
+extension LocalClassifierModelPort {
+    public var writingModels: [any LocalClassifierModelPort] { [] }
+    public var isWritingDownload: Bool { false }
 }
 
 @MainActor @Observable
@@ -60,6 +67,12 @@ public final class ClassifierSettingsModel {
     public init(center: AICenter, port: (any LocalClassifierModelPort)?) {
         self.center = center
         self.port = port
+        if port?.isWritingDownload == true {
+            onChange = { [weak center] in
+                await center?.refreshProviders()
+                center?.preparation.settingsChanged()
+            }
+        }
     }
 
     isolated deinit { downloadTask?.cancel() }
@@ -81,11 +94,16 @@ public final class ClassifierSettingsModel {
 
     public var downloadTitle: String {
         guard let port else { return "Download classifier model" }
+        if port.isWritingDownload { return "Download (\(Self.sizeText(port.sizeBytes)))" }
         return "Download classifier model (\(Self.sizeText(port.sizeBytes)))"
     }
 
     public var requirementsText: String? {
         guard let port else { return nil }
+        if port.isWritingDownload {
+            let memory = String(format: "%.1f GiB", Double(port.memoryBytes) / 1_073_741_824)
+            return "\(Self.sizeText(port.sizeBytes)) of disk space and about \(memory) of memory during use."
+        }
         return "Needs \(Self.sizeText(port.sizeBytes)) of disk space and \(Self.memoryText(port.memoryBytes)) of "
             + "memory while it works, so other apps can slow down. It takes over a minute to load, then a few "
             + "seconds for each email."
@@ -123,6 +141,7 @@ public final class ClassifierSettingsModel {
             let percent = total > 0 ? Int((Double(done) / Double(total) * 100).rounded(.down)) : 0
             return "Downloading… \(percent)%"
         case .verifying: return "Checking the download…"
+        case .ready where port.isWritingDownload: return "Downloaded. Available for summaries and quick replies."
         case .ready: return preference == .localModel ? "Downloaded. Used for triage and auto labels."
             : "Downloaded. Not used until you choose it for Triage and auto labels."
         case .failed(let why): return why
@@ -192,6 +211,8 @@ public final class ClassifierSettingsModel {
         do {
             try await port.useDirectory(path)
             change { $0.modelsDirectory = path }
+            await center.refreshProviders()
+            center.preparation.settingsChanged()
         } catch {
             self.error = "That folder can't be used."
         }

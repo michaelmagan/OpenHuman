@@ -71,6 +71,7 @@ public final class ProviderRegistry: Sendable {
         let snapshot = state.withLock { $0 }
         var entries: [(candidate: ProviderCandidate, rank: Int, position: Int)] = []
         for (position, provider) in snapshot.providers.enumerated() {
+            if AIModelDefaults.writingModels.contains(provider.id), feature != .summarize, feature != .replyOptions { continue }
             let capabilities = await provider.capabilities()
             let location = capabilities.dataLocation
             let consented = location.leavesDevice
