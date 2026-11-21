@@ -1144,14 +1144,14 @@ struct ComposerActionBar: View {
     private var sendHelp: String {
         guard manager.canSendInThisProcess else { return String(localized: "Sending isn't available here") }
         let seconds = manager.undoSendSeconds
-        return seconds > 0 ? String(localized: "Send  ⌘↵. Undo is there for \(seconds) s after sending.")
+        return seconds > 0 ? String(localized: "Send  ⌘↵. Undo for \(seconds) s after sending.")
                            : String(localized: "Send  ⌘↵")
     }
 
     private var sendTipHint: String? {
         guard manager.canSendInThisProcess else { return sendHelp }
         let seconds = manager.undoSendSeconds
-        return seconds > 0 ? String(localized: "Undo is there for \(seconds) s after sending.") : nil
+        return seconds > 0 ? String(localized: "Undo for \(seconds) s after sending.") : nil
     }
 }
 

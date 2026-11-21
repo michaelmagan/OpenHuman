@@ -41,7 +41,7 @@ public final class VIPSettingsModel {
     public static let suggestTitle = "Suggest VIPs"
     public static let suggestDetail = "Mail suggests people you reply to often (at least 3 replies in 30 days), from the mail "
         + "on this Mac. Nothing changes until you say yes; a VIP's mail is always important."
-    public static let emptyText = "No suggestions right now."
+    public static let emptyText = "No suggestions."
     public static let resetDetail = "People you answered Not now for can be suggested again. VIPs stay."
     public static let cantMarkText = "VIPs need importance rules, which aren't available here."
 

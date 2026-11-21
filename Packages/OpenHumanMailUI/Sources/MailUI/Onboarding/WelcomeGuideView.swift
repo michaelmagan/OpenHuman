@@ -84,7 +84,7 @@ public struct WelcomeGuideView: View {
             if let calendar = model.setupCalendar, calendar.canConnect, !calendar.isConnected {
                 Button("Not now") { Task { await model.skipCalendar() } }
                     .ohLinkButtonStyle()
-                    .help("Skip this inbox's calendar. You can connect it later in Settings › Calendar.")
+                    .help("Skip this inbox's calendar. Connect it later in Settings › Calendar.")
                 Button(calendar.needsReconnect ? "Connect again" : "Connect calendar") {
                     Task { await model.connectCalendar() }
                 }
@@ -146,7 +146,7 @@ public struct WelcomeGuideView: View {
             Button("Add another inbox") { Task { await model.addAnotherInbox() } }
                 .ohLinkButtonStyle()
                 .disabled(!model.canAddAccount)
-                .help("Each inbox gets its email first, then its calendar. You can add inboxes any time in Settings › "
+                .help("Each inbox gets its email first, then its calendar. Add inboxes any time in Settings › "
                     + "Accounts.")
         }
     }

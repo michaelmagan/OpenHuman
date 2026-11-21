@@ -24,8 +24,8 @@ public final class ArchiveSuggestionModel {
             let n = count.formatted()
             switch kind {
             case .promotions:
-                return count == 1 ? "You have 1 promotion older than \(ageDays) days. Archive it?"
-                                  : "You have \(n) promotions older than \(ageDays) days. Archive them?"
+                return count == 1 ? "1 promotion is older than \(ageDays) days. Archive it?"
+                                  : "\(n) promotions are older than \(ageDays) days. Archive them?"
             case .oldConversations:
                 return "Your inbox holds \(inboxCount.formatted()) conversations; \(n) are older than \(ageDays) days "
                     + "and need nothing from you. Archive them?"
@@ -74,7 +74,7 @@ public final class ArchiveSuggestionModel {
         await check(byUser: true)
         if suggestion == nil {
             lastCheckFoundNothing = true
-            environment?.notices.post("Nothing to clean up: no old conversations Mail would suggest archiving.",
+            environment?.notices.post("Nothing to clean up: no old conversations to archive.",
                                       style: .info, duration: NoticeCenter.infoDuration)
         }
     }

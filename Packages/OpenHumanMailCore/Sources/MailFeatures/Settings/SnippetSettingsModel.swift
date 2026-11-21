@@ -170,7 +170,7 @@ public final class SnippetSettingsModel {
                 break
             }
             guard size <= SnippetAttachmentRules.maxFileBytes else {
-                errorMessage = "\(name) is over 10 MB. Each file of a snippet can be at most 10 MB."
+                errorMessage = "\(name) is over the 10 MB limit for a snippet file."
                 continue
             }
             guard attachmentBytes + size <= SnippetAttachmentRules.maxTotalBytes else {

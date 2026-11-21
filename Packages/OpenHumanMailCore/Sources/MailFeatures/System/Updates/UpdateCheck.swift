@@ -170,12 +170,12 @@ public enum UpdateCheck {
         return "Last checked " + formatter.localizedString(for: min(date, now), relativeTo: now) + "."
     }
 
-    static let notPublishedDetail = "There's no published release to compare with yet. Try again later."
+    static let notPublishedDetail = "No published release yet. Try again later."
 
     static func detail(_ problem: UpdateCheckProblem, now: Date) -> String {
         switch problem {
         case .offline:
-            return "Mail couldn't reach GitHub. Check your internet connection, then try again."
+            return "Mail couldn't reach GitHub. Check your connection and try again."
         case .rateLimited(let retryAt):
             return "GitHub is answering too many checks from this network right now. " + wait(until: retryAt, now: now)
         case .unreadable:

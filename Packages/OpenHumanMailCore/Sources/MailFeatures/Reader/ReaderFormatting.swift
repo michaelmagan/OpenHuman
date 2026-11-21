@@ -184,9 +184,9 @@ public struct ReaderFormatting: Sendable {
 
     public static func imagesHiddenText(blockedCount: Int) -> String {
         switch blockedCount {
-        case ...0: "Remote images are hidden to keep your reading private."
-        case 1: "1 remote image hidden to keep your reading private."
-        default: "\(blockedCount) remote images hidden to keep your reading private."
+        case ...0: "Remote images hidden for privacy."
+        case 1: "1 remote image hidden for privacy."
+        default: "\(blockedCount) remote images hidden for privacy."
         }
     }
 

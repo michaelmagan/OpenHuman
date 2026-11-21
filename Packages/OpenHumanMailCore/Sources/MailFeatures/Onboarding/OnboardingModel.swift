@@ -116,7 +116,7 @@ public final class OnboardingModel {
     public var readingLine: String {
         firstMailArrived ? Self.canStartReadingText : Self.waitingForFirstMailText
     }
-    public static let canStartReadingText = "You can start reading now; older mail keeps arriving while Mail is open."
+    public static let canStartReadingText = "Start reading now; older mail keeps arriving while Mail is open."
     public static let waitingForFirstMailText = "Your newest mail shows up first."
     public var isFirst: Bool { step == .welcome }
     public var isLast: Bool { step == .ready }

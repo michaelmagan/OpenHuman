@@ -78,7 +78,7 @@ public enum AskWording {
     }
 
     public static let searchingGmail = String(localized: "Searching Gmail…")
-    public static let offline = String(localized: "You're offline, so only mail on this Mac was searched.")
+    public static let offline = String(localized: "Offline: only mail on this Mac was searched.")
     public static let gmailFailed = String(localized: "Couldn't search Gmail. ↵ to try again.")
 
     public static let suspicious = String(localized: "This email may contain instructions aimed at AI tools. Check the sources.")

@@ -116,9 +116,9 @@ struct ReaderPureTests {
     }
 
     @Test func bannerAndWarningText() throws {
-        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 0) == "Remote images are hidden to keep your reading private.")
-        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 1) == "1 remote image hidden to keep your reading private.")
-        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 3) == "3 remote images hidden to keep your reading private.")
+        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 0) == "Remote images hidden for privacy.")
+        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 1) == "1 remote image hidden for privacy.")
+        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 3) == "3 remote images hidden for privacy.")
         #expect(ReaderFormatting.imagesShownText(source: .once, trackerCount: 2) == "Images shown · 2 trackers blocked")
         #expect(ReaderFormatting.imagesShownText(source: .allowlist("@example.com"), trackerCount: 0)
             == "Images always shown for example.com")

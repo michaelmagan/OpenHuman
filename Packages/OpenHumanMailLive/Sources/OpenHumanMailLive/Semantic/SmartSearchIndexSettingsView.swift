@@ -9,7 +9,7 @@ public struct SmartSearchIndexSettingsView: View {
     @State private var working = false
 
     static let detail = "Finds mail by meaning, not just matching words. Builds an index of your mail on this Mac. Nothing leaves this Mac."
-    static let deleteNote = "Search keeps working without it. You can rebuild it any time."
+    static let deleteNote = "Search keeps working without it. Rebuild it any time."
 
     public init(services: SemanticServices) {
         self.services = services

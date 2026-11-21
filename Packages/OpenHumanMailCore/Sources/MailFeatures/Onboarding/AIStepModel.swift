@@ -45,7 +45,7 @@ public struct SampleSummary: Hashable, Sendable {
 public final class AIStepModel {
     public static let explanation = "On-device models draft replies without your email leaving this Mac; Claude Code and "
         + "Codex send it to another company, so they are never turned on unless you do it yourself in Settings."
-    public static let footnote = "You can change this any time in Settings › AI. Agent CLIs (Claude Code, Codex) are off, and "
+    public static let footnote = "Change this any time in Settings › AI. Agent CLIs (Claude Code, Codex) are off, and "
         + "quick replies are never auto-generated with them unless you opt in."
     public static let badge = "On this Mac"
     public static let unavailableTitle = "Apple's on-device model isn't available on this Mac."
@@ -135,7 +135,7 @@ public final class AIStepModel {
             try await port.setDraftReplies(selected)
             saved = selected
         } catch {
-            errorMessage = "Couldn't save that choice. You can set it in Settings › AI."
+            errorMessage = "Couldn't save that choice. Set it in Settings › AI."
             return
         }
         guard selected != .off else {

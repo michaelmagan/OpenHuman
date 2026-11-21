@@ -238,7 +238,7 @@ final class FakeUpdateFeed: Sendable {
                 == "You have version 0.3.0 (5). The newest release is 0.1.0.")
         let notYet = UpdateCheck.message(for: .notPublishedYet, current: earlyBuild, now: updateNow)
         #expect(notYet == UpdateCheckMessage(headline: "Couldn't check yet",
-                                             detail: "There's no published release to compare with yet. Try again later.", tone: .neutral))
+                                             detail: "No published release yet. Try again later.", tone: .neutral))
         for word in ["error", "fail", "private", "404", "denied", "not found"] {
             #expect(!(notYet.headline + " " + notYet.detail).lowercased().contains(word), "\(word)")
         }
@@ -250,11 +250,11 @@ final class FakeUpdateFeed: Sendable {
         #expect(UpdateCheck.wait(until: updateNow.addingTimeInterval(-5), now: updateNow) == "Try again in a minute.")
         #expect(UpdateCheck.wait(until: nil, now: updateNow) == "Try again later.")
         #expect(UpdateCheck.message(for: .couldNotCheck(.offline), current: earlyBuild, now: updateNow).detail
-                == "Mail couldn't reach GitHub. Check your internet connection, then try again.")
+                == "Mail couldn't reach GitHub. Check your connection and try again.")
         #expect(UpdateCheck.summary(for: .available(next), now: updateNow) == "Version 0.2.0 is available.")
         #expect(UpdateCheck.summary(for: .upToDate(newest: current), now: updateNow) == "Up to date. The newest release is 0.1.0.")
         #expect(UpdateCheck.summary(for: .notPublishedYet, now: updateNow)
-                == "Couldn't check yet. There's no published release to compare with yet. Try again later.")
+                == "Couldn't check yet. No published release yet. Try again later.")
         #expect(UpdateCheck.summary(for: .couldNotCheck(.unreadable), now: updateNow)
                 == "Couldn't check. GitHub's answer couldn't be read. Try again later.")
     }

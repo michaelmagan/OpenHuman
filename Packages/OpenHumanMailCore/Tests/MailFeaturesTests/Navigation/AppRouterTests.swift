@@ -225,7 +225,7 @@ import Testing
         store.setOffline(true)
         await eventually { router.banner()?.kind == .offline }
         #expect(router.banner()?.tone == .neutral)
-        #expect(router.banner()?.message == "Offline. Your changes are saved and will sync when you're back.")
+        #expect(router.banner()?.message == "Offline. Changes are saved and sync when you're back.")
 
         store.expireAuth(AccountID(1))
         await eventually { router.banner()?.kind == .auth }

@@ -431,7 +431,7 @@ import Testing
         f.source.olderMailMissing(searchedBack: nil)
         await f.ask("zebra quokka")
         #expect(f.model.olderMail == .offline && !f.model.olderMailEnabled)
-        #expect(f.model.olderMailText == "You're offline, so only mail on this Mac was searched.")
+        #expect(f.model.olderMailText == "Offline: only mail on this Mac was searched.")
         f.model.searchOlderMail()
         #expect(f.source.gmailCalls.isEmpty)
     }

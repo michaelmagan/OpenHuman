@@ -256,7 +256,7 @@ public struct AppearanceSettingsView: View {
                 .disabled(store.folder == nil)
             }
         }
-        SettingsRow("Reset", detail: "Puts every choice on this page back to its default.") {
+        SettingsRow("Reset", detail: "Resets every choice on this page.") {
             Button("Reset") { store.resetPreferences() }
         }
     }

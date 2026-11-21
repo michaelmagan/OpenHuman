@@ -28,7 +28,7 @@ public struct StatusBarView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .layoutPriority(-1)
-                    .help("Smart search is indexing your mail on this Mac. Nothing leaves this Mac.")
+                    .help("Smart search is indexing your mail. Nothing leaves this Mac.")
             }
             if let preparing = model.preparingLine {
                 Text(preparing)
@@ -36,7 +36,7 @@ public struct StatusBarView: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .layoutPriority(-1)
-                    .help("Mail is preparing replies and summaries on this Mac. Nothing leaves this Mac.")
+                    .help("Mail is preparing replies and summaries. Nothing leaves this Mac.")
                     .accessibilityIdentifier("status.aiPreparing")
             }
             if let pending = model.pendingLine {

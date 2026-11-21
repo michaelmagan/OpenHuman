@@ -38,7 +38,7 @@ struct GeneralSettingsPage: View {
     var body: some View {
         SettingsPageScaffold(title: "General") {
             SettingsSection("Sending") {
-                SettingsRow("Undo send", detail: "How long a sent message can still be taken back.",
+                SettingsRow("Undo send", detail: "How long you can undo a send.",
                             selection: binding(model.undoSend)) {
                     ForEach(GeneralSettingsModel.undoSendChoices, id: \.self) { Text(GeneralSettingsModel.undoSendTitle($0)).tag($0) }
                 }
@@ -75,7 +75,7 @@ struct GeneralSettingsPage: View {
                 switchRow("Show shortcut hints", model.showShortcutHints,
                           detail: "A strip along the bottom with the keys that matter where you are.")
                 switchRow("Show sync progress in the footer", model.showPendingSync,
-                          detail: "Says how many of your changes are still on their way to Gmail.")
+                          detail: "How many changes are still on their way to Gmail.")
                 SettingsRow("Tab counts", detail: GeneralSettingsModel.tabCountsNote, selection: binding(model.tabCounts)) {
                     ForEach(TabCountMode.allCases, id: \.self) { Text(GeneralSettingsModel.tabCountTitle($0)).tag($0) }
                 }

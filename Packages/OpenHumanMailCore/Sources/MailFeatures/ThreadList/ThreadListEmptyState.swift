@@ -32,7 +32,7 @@ public struct ThreadListEmptyState: Sendable, Equatable {
                             day: Int, relatedResults: Bool = false) -> ThreadListEmptyState? {
         if hasRows { return nil }
         let offline: Bool = if case .offline = connectivity { true } else { false }
-        let offlineDetail = offline ? String(localized: "You're offline. New mail shows up when you're back online.") : nil
+        let offlineDetail = offline ? String(localized: "You're offline. New mail shows up when you're back.") : nil
         switch state {
         case .failed:
             return ThreadListEmptyState(style: .failure, title: String(localized: "Couldn't load conversations."),
@@ -82,7 +82,7 @@ public struct ThreadListEmptyState: Sendable, Equatable {
         case .reviewQueue:
             result = ThreadListEmptyState(
                 style: .message, title: String(localized: "No drafts waiting."),
-                subtitle: String(localized: "When an agent drafts mail for you, it shows up here."))
+                subtitle: String(localized: "Agent drafts show up here."))
         case .search(let query):
             let tips = String(localized: "Check the spelling, or try fewer words.")
             result = ThreadListEmptyState(style: .message, title: String(localized: "No mail matches “\(query)”."),
