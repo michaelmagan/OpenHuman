@@ -42,6 +42,7 @@ public actor OperationDrainer {
     private var loopTask: Task<Void, Never>?
     private var sleeper: Task<Void, Error>?
     private var poked = false
+    private var loops = false
     public private(set) var state: State = .idle
     public private(set) var passes = 0
 
@@ -63,15 +64,34 @@ public actor OperationDrainer {
 
     public func start() {
         guard loopTask == nil else { return }
+        loops = true
         state = .running
         loopTask = Task { await self.loop() }
     }
 
     public func stop() {
+        loops = false
         loopTask?.cancel()
         sleeper?.cancel()
         loopTask = nil
         state = .stopped
+    }
+
+    // Ends the pause a refused write began. The caller knows the account's sign-in works again.
+    @discardableResult
+    public func resumeAfterReauth() -> Bool {
+        guard state == .pausedNeedsReauth else { return false }
+        guard loops else {
+            state = .idle
+            return true
+        }
+        state = .running
+        if loopTask == nil {
+            loopTask = Task { await self.loop() }
+        } else {
+            poke()
+        }
+        return true
     }
 
     public func poke() {
