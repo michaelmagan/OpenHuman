@@ -229,7 +229,7 @@ struct SearchTokenPill: View {
     var body: some View {
         let showsRemove = remove != nil && (hovering || isSelected)
         // The value gives way when the field is short of room; the operator's name always shows
-        HStack(spacing: 2) {
+        HStack(spacing: theme.space1) {
             Text(token.displayName)
                 .fontWeight(.semibold)
                 .foregroundStyle(isSelected ? theme.accentOnFill.color : theme.accentText.color)
@@ -250,7 +250,7 @@ struct SearchTokenPill: View {
                 }
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, theme.space3)
         .frame(height: 20)
         .overlay(alignment: .trailing) {
             if let remove, showsRemove {

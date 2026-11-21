@@ -103,7 +103,7 @@ public struct QuickReplyMessageRow: View {
             }
             if row.isSuspicious, items.contains(where: { $0.kind == .quickReply }) {
                 Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 12))
+                    .font(.system(size: InstantReplyMetrics.suspiciousGlyph))
                     .foregroundStyle(theme.textWarning.color)
                     .help(AIWording.suspicious)
                     .accessibilityLabel(AIWording.suspicious)

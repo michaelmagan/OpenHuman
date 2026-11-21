@@ -102,7 +102,7 @@ public struct WelcomeGuideView: View {
     }
 
     private var dots: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: theme.space3) {
             ForEach(model.steps, id: \.self) { step in
                 Circle().fill(step == model.step ? theme.accentRing.color : theme.borderControl.color).frame(width: 6, height: 6)
             }
@@ -437,7 +437,7 @@ private struct LookStep: View {
                                                appearance: store.resolved.appearance)
                     let isSelected = store.resolved.accentID == id
                     Button { store.preferences.accentID = id } label: {
-                        VStack(spacing: 4) {
+                        VStack(spacing: theme.space2) {
                             Circle().fill(accent.accentFill.color).frame(width: 24, height: 24)
                                 .overlay(Circle().stroke(isSelected ? theme.accentRing.color : .clear, lineWidth: 2).padding(-3))
                             Text(id.prefix(1).uppercased() + id.dropFirst()).themeFont(theme.typeMeta)
@@ -516,7 +516,7 @@ private struct AIStep: View {
                     HStack(alignment: .top, spacing: theme.space3) {
                         Image(systemName: model.selected == option.choice ? "largecircle.fill.circle" : "circle")
                             .foregroundStyle(option.isEnabled ? theme.accentFill.color : theme.textTertiary.color)
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: theme.space1) {
                             Text(option.title).themeFont(theme.typeBodyStrong)
                                 .foregroundStyle(option.isEnabled ? theme.textPrimary.color : theme.textTertiary.color)
                             Text(option.detail).themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)
@@ -554,7 +554,7 @@ private struct AIStep: View {
 
     private func fallbacks(reason: String) -> some View {
         VStack(alignment: .leading, spacing: theme.space3) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: theme.space1) {
                 Text(AIStepModel.unavailableTitle).themeFont(theme.typeBodyStrong).foregroundStyle(theme.textPrimary.color)
                 Text(reason).themeFont(theme.typeMeta).foregroundStyle(theme.textWarning.color)
             }
@@ -580,7 +580,7 @@ private struct AIStep: View {
                 .foregroundStyle((option.isEnabled ? theme.textSecondary : theme.textTertiary).color)
                 .frame(width: 16)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: theme.space1) {
                 Text(option.title).themeFont(theme.typeBodyStrong)
                     .foregroundStyle((option.isEnabled ? theme.textPrimary : theme.textTertiary).color)
                 Text(option.detail).themeFont(theme.typeMeta).foregroundStyle(theme.textSecondary.color)

@@ -82,7 +82,7 @@ final class ThreadSummaryLineView: NSView {
         oneLine.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         let bar = NSView()
         bar.wantsLayer = true
-        bar.layer?.cornerRadius = 4
+        bar.layer?.cornerRadius = theme.radiusSM
         bar.layer?.backgroundColor = theme.bgRowHover.nsColor.cgColor
         bar.translatesAutoresizingMaskIntoConstraints = false
         oneLinePlaceholder.addSubview(bar)

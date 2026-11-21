@@ -122,13 +122,13 @@ struct DateCaretTipView: View {
                 HStack(spacing: theme.space4) {
                     Text(row.title).themeFont(theme.typeMeta).foregroundStyle(theme.textOnToast.color)
                     Spacer(minLength: theme.space3)
-                    HStack(spacing: 2) {
+                    HStack(spacing: theme.space1) {
                         ForEach(row.keys, id: \.self) { key in
                             Text(verbatim: key)
                                 .themeFont(theme.typeCaption)
                                 .foregroundStyle(theme.textOnToast.color)
                                 .frame(minWidth: 16, minHeight: 16)
-                                .background(RoundedRectangle(cornerRadius: 3).fill(theme.textOnToast.color.opacity(0.14)))
+                                .background(RoundedRectangle(cornerRadius: theme.radiusXS).fill(theme.textOnToast.color.opacity(0.14)))
                         }
                     }
                 }

@@ -22,7 +22,7 @@ struct FromLine: View {
                 address
                     .layoutPriority(1)
                 if session.from.needsVerification {
-                    Label("Not verified in Gmail", systemImage: "exclamationmark.triangle.fill")
+                    Label("Not verified in Gmail", systemImage: "exclamationmark.triangle")
                         .font(theme.typeCaption.swiftUIFont)
                         .foregroundStyle(Self.color(.warning, theme: theme).color)
                         .symbolRenderingMode(.hierarchical)
@@ -775,7 +775,7 @@ struct Banner: View {
 
     var body: some View {
         HStack(spacing: theme.space3) {
-            Image(systemName: symbol).font(.system(size: 14))
+            Image(systemName: symbol).font(.system(size: ShellMetrics.rowIconSize))
             Text(text).font(theme.typeBody.swiftUIFont).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
@@ -984,7 +984,8 @@ struct NoticeLine: View {
 
     var body: some View {
         HStack(spacing: theme.space3) {
-            Image(systemName: notice.kind == .info ? "info.circle" : "exclamationmark.triangle").font(.system(size: 13))
+            Image(systemName: notice.kind == .info ? "info.circle" : "exclamationmark.triangle")
+                .font(.system(size: ShellMetrics.rowIconSize))
             Text(notice.text).font(theme.typeBody.swiftUIFont).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             if notice.offersSendAgain, let sendAgain {
