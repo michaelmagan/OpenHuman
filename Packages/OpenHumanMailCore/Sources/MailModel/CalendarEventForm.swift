@@ -313,7 +313,9 @@ public struct CalendarEventForm: Sendable, Hashable {
     }
 
     public mutating func setEnd(_ new: Date) {
-        end = isAllDay ? max(new, start.addingTimeInterval(86_400)) : max(new, start.addingTimeInterval(60))
+        // Why: a day is not always 86,400 seconds, so the shortest all-day event ends at the next midnight
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        end = isAllDay ? max(new, nextDay) : max(new, start.addingTimeInterval(60))
     }
 
     public var lastDay: Date {

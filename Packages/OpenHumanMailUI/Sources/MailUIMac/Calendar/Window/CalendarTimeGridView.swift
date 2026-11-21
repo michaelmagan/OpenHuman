@@ -102,7 +102,7 @@ struct CalendarTimeGridView: View {
                 Button {
                     if model.kind != .day { Task { await model.show(day: day, as: .day) } }
                 } label: {
-                    VStack(spacing: 2) {
+                    VStack(spacing: theme.space1) {
                         Text(verbatim: header.weekday).themeFont(theme.typeCaption)
                             .foregroundStyle((today ? theme.accentText : theme.textTertiary).color)
                         Text(verbatim: header.number).themeFont(theme.typeHeadline)

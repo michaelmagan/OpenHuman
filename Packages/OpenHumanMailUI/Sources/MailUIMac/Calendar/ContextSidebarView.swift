@@ -60,7 +60,7 @@ public struct ContextSidebarView: View {
                 .frame(width: 36, height: 36)
                 .background(Circle().fill(theme.bgSunken.color))
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: theme.space1) {
                 Button { model.searchPerson() } label: {
                     Text(person.displayName).themeFont(theme.typeBodyStrong).foregroundStyle(theme.textPrimary.color)
                         .lineLimit(2)

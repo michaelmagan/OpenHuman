@@ -51,7 +51,7 @@ struct CalendarMonthView: View {
     }
 
     private func cellView(_ cell: CalendarMonthGrid.Cell) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: theme.space1) {
             HStack {
                 Button { Task { await model.show(day: cell.day, as: .day) } } label: {
                     Text(verbatim: model.dayHeader(cell.day).number)

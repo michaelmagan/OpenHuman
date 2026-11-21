@@ -64,6 +64,20 @@ struct CalendarNativeEditorTests {
         }
     }
 
+    @Test func aFieldTheCalendarCannotKeepIsLeftOutUnlessTheEventHasIt() {
+        let limited = CalendarFieldRights.all.limited(to: [.title, .time, .notes])
+        var form = CalendarEventForm(start: start, end: start.addingTimeInterval(3_600), timeZone: "UTC")
+        func shows(_ field: CalendarFormField, _ rights: CalendarFieldRights) -> Bool {
+            CalendarEventFormView.shows(field, rights: rights, form: form, meetLink: nil)
+        }
+        #expect(shows(.title, limited) && shows(.time, limited) && shows(.notes, limited))
+        #expect(!shows(.meet, limited) && !shows(.location, limited) && !shows(.color, limited))
+        #expect(!shows(.repeats, limited) && !shows(.guests, limited) && !shows(.timeZone, limited))
+        form.location = "Room 4"
+        #expect(shows(.location, limited), "what the event already has stays in view")
+        #expect(CalendarFormField.allCases.allSatisfy { shows($0, .all) }, "a calendar that keeps every field hides none")
+    }
+
     @Test func thePopoverOpensBesideTheEventAndKeepsAwayFromItWhenNeitherSideFits() {
         let bounds = CGSize(width: 900, height: 700)
         let size = CGSize(width: 400, height: 500)

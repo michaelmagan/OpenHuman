@@ -642,6 +642,38 @@ private final class DidWriteReloadCalendar: CalendarProviding, Sendable {
     }
 }
 
+// Moves an event and then refuses its details, like a calendar that fails between the two writes of one save
+private final class DetailsFailCalendar: CalendarProviding, Sendable {
+    let inner: FakeCalendar
+
+    init(_ inner: FakeCalendar) { self.inner = inner }
+
+    var info: CalendarProviderInfo { inner.info }
+    var abilities: CalendarAbilities { inner.abilities }
+
+    func events(from: Date, to: Date) async throws -> [CalendarEvent] { try await inner.events(from: from, to: to) }
+
+    func eventWindow(from: Date, to: Date) async throws -> CalendarEventWindow {
+        try await inner.eventWindow(from: from, to: to)
+    }
+
+    func eventDelta(since token: String) async throws -> CalendarEventDelta { try await inner.eventDelta(since: token) }
+
+    func freeBusy(from: Date, to: Date) async throws -> CalendarFreeBusy { try await inner.freeBusy(from: from, to: to) }
+
+    func createEvent(_ draft: CalendarEventDraft) async throws -> CalendarEvent { try await inner.createEvent(draft) }
+
+    func moveEvent(_ event: CalendarEvent, to start: Date, end: Date,
+                   sendUpdates: CalendarSendUpdates) async throws -> CalendarEvent {
+        try await inner.moveEvent(event, to: start, end: end, sendUpdates: sendUpdates)
+    }
+
+    func updateEvent(_ event: CalendarEvent, with changes: CalendarEventChanges,
+                     sendUpdates: CalendarSendUpdates) async throws -> CalendarEvent {
+        throw CalendarError.failed("Down")
+    }
+}
+
 @MainActor
 @Suite struct CalendarWindowModelTests {
     @Test func anOwnerGoneBeforeAHeldAnswerDispatchesLeavesTheCalendarUnchanged() async throws {
@@ -1723,5 +1755,80 @@ private final class StoreChanges {
         gate.release()
         await eventually { f.work.calls.contains(.respond(id: "theirs", response: .declined, sendUpdates: .all)) }
         #expect(!f.work.calls.contains { if case .scopedRemove = $0 { true } else { false } }, "Mail never deletes what others organize")
+    }
+
+    @Test func anAnswerThatIsUndoneOrFailsLeavesTheCardOnTheCalendarsAnswer() async throws {
+        let invite = event("inv", la(10, 15, 9), la(10, 15, 10), attendees: [sam, FakeCorpus.me], organizerIsMe: false,
+                           response: .needsAction)
+        let f = CalendarWindowFixture(work: [invite])
+        let model = f.window()
+        let gate = TestGate()
+        model.sleep = { _ in await gate.wait() }
+        await model.open()
+        model.openEvent(try #require(model.events.first))
+        await model.respond(.accepted)
+        #expect(model.card?.response == .accepted)
+        await f.env.undo?.undoLast()
+        #expect(model.heldCount == 0 && model.card?.response == .needsAction, "the answer was never sent")
+        #expect(model.shownEvents.first?.myResponse == .needsAction)
+
+        await model.respond(.declined)
+        let task = try #require(model.held.values.first)
+        f.work.failure = "Down"
+        gate.release()
+        await task.value
+        #expect(model.card?.response == .needsAction, "the calendar refused the answer")
+        #expect(model.shownEvents.first?.myResponse == .needsAction)
+    }
+
+    @Test func aCardWhoseCalendarWentAwayKeepsItsChangesAndNeverSavesToAnotherCalendar() async throws {
+        let corpus = FakeCorpus.rich(threadCount: 12, now: fixedNow)
+        let workEmail = corpus.accounts[0].email
+        let homeEmail = corpus.accounts[1].email
+        let work = FakeCalendar(info: CalendarProviderInfo(name: "Google Calendar", account: workEmail),
+                                abilities: fullAbilities)
+        let home = FakeCalendar(events: [event("h1", la(10, 13, 9), la(10, 13, 10), organizerIsMe: true)],
+                                info: CalendarProviderInfo(name: "Google Calendar", account: homeEmail),
+                                abilities: fullAbilities)
+        let connections = FakeCalendarConnections(connected: [workEmail, homeEmail],
+                                                  providers: [workEmail: work, homeEmail: home], followsConnection: true)
+        let env = AppEnvironment.fake(corpus: corpus, options: .init(remoteAck: .immediate), featureFlags: FeatureFlags(),
+                                      calendar: work, calendarConnections: connections)
+        let model = try #require(env.calendarWindow)
+        model.timeZone = losAngeles
+        model.now = { la(10, 12, 11) }
+        await model.open()
+        model.openEvent(try #require(model.events.first { $0.id == "h1" }))
+        model.card?.form?.title = "Renamed"
+        try await connections.connection(homeEmail).disconnect()
+        await model.refresh()
+        #expect(model.sources.map(\.key) == [workEmail.lowercased()])
+        await model.saveCard()
+        #expect(model.card?.form?.title == "Renamed" && model.card?.note == CalendarWindowModel.calendarGone)
+        #expect(!work.calls.contains { if case .patch = $0 { true } else { false } },
+                "never sent to another account's calendar")
+        #expect(!home.calls.contains { if case .patch = $0 { true } else { false } })
+    }
+
+    @Test func aSaveThatMovesTheEventButFailsOnItsDetailsStillShowsTheNewTime() async throws {
+        let corpus = FakeCorpus.rich(threadCount: 12, now: fixedNow)
+        let email = corpus.accounts[0].email
+        let inner = FakeCalendar(events: [event("own", la(10, 13, 9), la(10, 13, 10))],
+                                 info: CalendarProviderInfo(name: "Google Calendar", account: email))
+        let connections = FakeCalendarConnections(providers: [email: DetailsFailCalendar(inner)])
+        let env = AppEnvironment.fake(corpus: corpus, options: .init(remoteAck: .immediate), featureFlags: FeatureFlags(),
+                                      calendar: inner, calendarConnections: connections)
+        let model = try #require(env.calendarWindow)
+        model.timeZone = losAngeles
+        model.now = { la(10, 12, 11) }
+        await model.open()
+        model.openEvent(try #require(model.events.first))
+        model.card?.start = la(10, 13, 14)
+        model.card?.end = la(10, 13, 15)
+        model.card?.title = "Renamed"
+        await model.saveCard()
+        #expect(inner.moveCalls == 1)
+        #expect(model.shownEvents.first?.start == la(10, 13, 14), "the calendar did move it")
+        #expect(model.shownEvents.first?.title == "Event own")
     }
 }

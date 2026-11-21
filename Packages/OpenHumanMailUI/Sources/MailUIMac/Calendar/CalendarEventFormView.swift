@@ -53,15 +53,15 @@ struct CalendarEventFormView: View {
             CalendarFormSection(identifier: "\(idPrefix).section.when") { whenRows }
             CalendarFormSection(identifier: "\(idPrefix).section.people") { peopleRows }
             CalendarFormSection(identifier: "\(idPrefix).section.details") {
-                locationRow
-                notesRow
+                if shows(.location) { locationRow }
+                if shows(.notes) { notesRow }
             }
             CalendarFormSection(identifier: "\(idPrefix).section.more") {
-                calendarRow
-                remindersRow
-                busyRow
-                visibilityRow
-                colourRow
+                if shows(.calendar) { calendarRow }
+                if shows(.reminders) { remindersRow }
+                if shows(.busy) { busyRow }
+                if shows(.visibility) { visibilityRow }
+                if shows(.color) { colourRow }
             }
             if asksSendUpdates, let sendUpdates {
                 CalendarFormSection(identifier: "\(idPrefix).section.updates") { sendUpdatesRow(sendUpdates) }
@@ -83,6 +83,25 @@ struct CalendarEventFormView: View {
 
     private func fieldAccess(_ field: CalendarFormField) -> CalendarFieldAccess { rights.access(field) }
 
+    private func shows(_ field: CalendarFormField) -> Bool {
+        Self.shows(field, rights: rights, form: form, meetLink: meetLink)
+    }
+
+    // A field the event's calendar can't keep is left out, unless the event already has something in it
+    static func shows(_ field: CalendarFormField, rights: CalendarFieldRights, form: CalendarEventForm,
+                      meetLink: URL?) -> Bool {
+        if rights.shows(field) { return true }
+        switch field {
+        case .title, .time: return true
+        case .guests: return !form.guests.isEmpty
+        case .meet: return meetLink != nil || form.wantsMeet
+        case .location: return !form.location.isEmpty
+        case .notes: return !form.notes.isEmpty
+        case .repeats: return !form.recurrence.isEmpty
+        case .timeZone, .guestPermissions, .calendar, .reminders, .busy, .visibility, .color: return false
+        }
+    }
+
 
     @ViewBuilder
     private var titleRow: some View {
@@ -99,7 +118,7 @@ struct CalendarEventFormView: View {
                     .help(titleIsSuggested ? String(localized: "Suggested from the conversation") : "")
                     .accessibilityIdentifier("\(idPrefix).title")
                 if titleIsSuggested {
-                    Image(systemName: "sparkles")
+                    Image(systemName: "sparkle")
                         .foregroundStyle(theme.textAI.color)
                         .help("Suggested from the conversation")
                         .accessibilityLabel("Suggested from the conversation")
@@ -131,7 +150,7 @@ struct CalendarEventFormView: View {
         }
         .calendarLocked(time)
         CalendarFormRow(title: String(localized: "Starts")) {
-            HStack(spacing: 4) {
+            HStack(spacing: theme.space2) {
                 CalendarDateFieldView(date: form.start, zone: timeZone, idPrefix: "\(idPrefix).startDate") { form.setStart($0) }
                 if !form.isAllDay {
                     timePicker("Starts", Binding(get: { form.start }, set: { form.setStart($0) }), id: "startTime")
@@ -140,7 +159,7 @@ struct CalendarEventFormView: View {
         }
         .calendarLocked(time)
         CalendarFormRow(title: String(localized: "Ends"), detail: durationText) {
-            HStack(spacing: 4) {
+            HStack(spacing: theme.space2) {
                 CalendarDateFieldView(date: form.isAllDay ? form.lastDay : form.end, zone: timeZone,
                                       idPrefix: "\(idPrefix).endDate") { day in
                     if form.isAllDay { form.setLastDay(day) } else { form.setEnd(day) }
@@ -151,7 +170,7 @@ struct CalendarEventFormView: View {
             }
         }
         .calendarLocked(time)
-        if !form.isAllDay {
+        if !form.isAllDay, shows(.timeZone) {
             CalendarFormRow(title: String(localized: "Time zone")) {
                 // Why: a menu as wide as its longest zone name is wider than the panel; it shortens the zone instead.
                 // One menu at every width, so no copy of it is measured and made again on each layout pass
@@ -159,8 +178,10 @@ struct CalendarEventFormView: View {
             }
             .calendarLocked(fieldAccess(.timeZone))
         }
-        CalendarFormRow(title: String(localized: "Repeat")) { repeatMenu }
-            .calendarLocked(fieldAccess(.repeats))
+        if shows(.repeats) {
+            CalendarFormRow(title: String(localized: "Repeat")) { repeatMenu }
+                .calendarLocked(fieldAccess(.repeats))
+        }
     }
 
     private func timePicker(_ title: LocalizedStringKey, _ selection: Binding<Date>, id: String) -> some View {
@@ -263,8 +284,10 @@ struct CalendarEventFormView: View {
     @ViewBuilder
     private var peopleRows: some View {
         let guests = fieldAccess(.guests)
-        CalendarFormWideRow(symbol: "person.badge.plus") { guestInput }
-            .calendarLocked(guests)
+        if rights.shows(.guests) {
+            CalendarFormWideRow(symbol: "person.badge.plus") { guestInput }
+                .calendarLocked(guests)
+        }
         if let note = shownGuestNote {
             Label(note, systemImage: "exclamationmark.triangle")
                 .font(.subheadline).foregroundStyle(theme.textWarning.color)
@@ -274,10 +297,10 @@ struct CalendarEventFormView: View {
         ForEach(form.guests) { guest in
             guestRow(guest, access: guests)
         }
-        if !form.guests.isEmpty {
+        if !form.guests.isEmpty, shows(.guestPermissions) {
             guestPermissionsRow
         }
-        meetRow
+        if shows(.meet) { meetRow }
     }
 
     private var shownGuestNote: String? { pendingGuestNote ?? guestNote }
@@ -321,7 +344,7 @@ struct CalendarEventFormView: View {
                     focused = .guest
                     AccessibilityNotification.Announcement(note).post()
                 }
-                .help("Type a name or an email address; Return adds the guest")
+                .help("Type a name or email address; Return adds the guest")
                 .accessibilityLabel("Add guests")
                 .accessibilityHint(shownGuestNote ?? "")
                 .accessibilityIdentifier("\(idPrefix).addGuest")
@@ -341,7 +364,7 @@ struct CalendarEventFormView: View {
                         .lineLimit(1).truncationMode(.middle)
                 }
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: theme.space2)
             Toggle("Optional", isOn: Binding(get: { guest.isOptional }, set: { form.setOptional(guest.email, $0) }))
                 .toggleStyle(.checkbox).controlSize(.small).font(.subheadline)
                 .foregroundStyle(theme.textSecondary.color)
@@ -402,7 +425,7 @@ struct CalendarEventFormView: View {
     }
 
     private var meetRow: some View {
-        let detail: String? = form.wantsMeet && meetLink == nil ? String(localized: "Link will be added when saved") : nil
+        let detail: String? = form.wantsMeet && meetLink == nil ? String(localized: "Link added when saved") : nil
         return CalendarFormRow(title: String(localized: "Google Meet"), symbol: "video", detail: detail) {
             HStack(spacing: CalendarFormMetrics.iconGap) {
                 if form.wantsMeet, let meetLink {
