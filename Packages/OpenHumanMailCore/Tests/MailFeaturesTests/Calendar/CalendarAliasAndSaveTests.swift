@@ -113,6 +113,7 @@ private struct WindowSetup {
         sidebar.now = { at(12, 9) }
         model = env.calendarWindow!
         model.timeZone = utc
+        model.firstWeekday = 1
         model.now = { at(12, 9) }
         model.confirmsMovesOverride = false
     }

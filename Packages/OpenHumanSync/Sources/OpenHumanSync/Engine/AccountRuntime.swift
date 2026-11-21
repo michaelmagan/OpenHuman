@@ -267,10 +267,12 @@ actor AccountRuntime {
 
     private func afterSuccess(backfill: Bool) async {
         let status = try? env.store.syncStatus(account: account)
-        if pollState == .stoppedNeedsReauth {
+        let pollWasStopped = pollState == .stoppedNeedsReauth
+        if pollWasStopped {
             pollState = .running
             if pollTask == nil { pollTask = Task { await self.pollLoop() } }
         }
+        if writable { await resumeWrites(pollWasStopped: pollWasStopped) }
         let online = AccountConnectivity.online(syncing: false, lastSyncAt: status?.lastSuccessAt ?? env.clock.now)
         let reachability = env.reachability
         env.connectivity.update { states in
@@ -280,6 +282,16 @@ actor AccountRuntime {
         reportPhase(status)
         warnAboutScheduleLabels()
         if backfill { await syncer.startBackfill() }
+    }
+
+    // Why: a sync that succeeds shows the sign-in works, so writes held after a refused one go out again
+    private func resumeWrites(pollWasStopped: Bool) async {
+        let resumed = await drainer?.resumeAfterReauth() ?? false
+        guard resumed || pollWasStopped else { return }
+        let stored = try? env.store.accounts().first { $0.id == account }
+        guard stored?.status == .needsReauth else { return }
+        try? env.store.setAccountStatus(account, .active)
+        log.notice("account \(account.rawValue): signed in again, writes resumed")
     }
 
     private func afterFailure(_ error: Error) async {

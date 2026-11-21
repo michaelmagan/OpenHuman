@@ -48,6 +48,7 @@ extension RenderSweepTests {
         let sidebar = try #require(environment.calendarSidebar)
         let now = EventCardSweep.now
         model.timeZone = SweepClock.timeZone
+        model.firstWeekday = 1
         model.now = { now }
         sidebar.now = { now }
 

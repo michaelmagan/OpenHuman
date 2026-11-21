@@ -2,8 +2,6 @@ import Foundation
 import MailModel
 
 public struct CalendarPeriod: Sendable, Hashable {
-    public static let firstWeekday = 1
-
     public let kind: CalendarViewKind
     public let start: Date
     public let end: Date
@@ -62,7 +60,7 @@ public struct CalendarPeriod: Sendable, Hashable {
 
     public static func weekStart(of day: Date, calendar: Calendar) -> Date {
         let weekday = calendar.component(.weekday, from: day)
-        let back = (weekday - firstWeekday + 7) % 7
+        let back = (weekday - calendar.firstWeekday + 7) % 7
         return calendar.startOfDay(for: calendar.date(byAdding: .day, value: -back, to: day) ?? day)
     }
 
@@ -274,8 +272,7 @@ public struct CalendarMiniMonth: Sendable, Hashable {
     public let month: Date
     public let weeks: [[Date]]
 
-    public init(containing date: Date, timeZone: TimeZone) {
-        let calendar = CalendarDateMentions.calendar(timeZone)
+    public init(containing date: Date, calendar: Calendar) {
         let period = CalendarPeriod.containing(date, kind: .month, calendar: calendar)
         month = period.month ?? period.start
         var days = period.days

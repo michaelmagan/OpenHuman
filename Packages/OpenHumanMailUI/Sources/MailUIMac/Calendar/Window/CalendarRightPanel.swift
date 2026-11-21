@@ -40,7 +40,7 @@ struct CalendarRightPanel: View {
 
     private var miniMonth: some View {
         let mini = model.miniMonth
-        let calendar = CalendarDateMentions.calendar(model.timeZone)
+        let calendar = model.calendar
         let names = Self.weekdayInitials(calendar)
         return VStack(alignment: .leading, spacing: theme.space2) {
             HStack {
@@ -111,8 +111,8 @@ struct CalendarRightPanel: View {
 
     static func weekdayInitials(_ calendar: Calendar) -> [String] {
         let symbols = calendar.veryShortStandaloneWeekdaySymbols
-        guard symbols.count == 7 else { return ["S", "M", "T", "W", "T", "F", "S"] }
-        let first = CalendarPeriod.firstWeekday - 1
+        let first = calendar.firstWeekday - 1
+        guard symbols.count == 7, symbols.indices.contains(first) else { return ["S", "M", "T", "W", "T", "F", "S"] }
         return Array(symbols[first...] + symbols[..<first])
     }
 

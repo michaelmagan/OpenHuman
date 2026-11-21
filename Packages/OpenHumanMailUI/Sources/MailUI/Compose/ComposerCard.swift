@@ -163,9 +163,18 @@ public struct ComposerCard<Editor: View>: View {
     // A notice floats just above the Send bar, so showing or dismissing it moves neither the text nor the bar
     @ViewBuilder
     private var floatingNotice: some View {
-        if let notice = session.notice {
-            NoticeLine(notice: notice, floating: true, sendAgain: { manager.perform(.send, in: session) }) {
-                session.notice = nil
+        if session.offersConflictChoice || session.notice != nil {
+            VStack(spacing: theme.space2) {
+                if session.offersConflictChoice {
+                    NoticeLine(notice: ComposeSession.Notice(.warning, ComposeSession.conflictText), floating: true,
+                               conflictChoice: NoticeLine.ConflictChoice(keepMine: { Task { await session.keepMine() } },
+                                                                         takeTheirs: { Task { await session.takeTheirs() } })) {}
+                }
+                if let notice = session.notice {
+                    NoticeLine(notice: notice, floating: true, sendAgain: { manager.perform(.send, in: session) }) {
+                        session.notice = nil
+                    }
+                }
             }
             .alignmentGuide(.top) { $0[.bottom] + theme.space2 }
             .transition(.opacity)

@@ -91,10 +91,18 @@ private final class Recorder {
     }
 
     @Test func monthGridStartsOnMondayAndHasSixWeeks() {
-        let grid = MonthGrid(month: utc("2026-10-14T10:00:00Z"), timeZone: zone)
+        let grid = MonthGrid(month: utc("2026-10-14T10:00:00Z"), timeZone: zone, firstWeekday: 2)
         #expect(grid.days.count == 42)
         #expect(grid.days[0].start == utc("2026-09-28T00:00:00Z"), "October 2026 starts on a Thursday; the grid on Monday 28 Sep")
         #expect(grid.days.filter(\.isInMonth).count == 31)
+    }
+
+    @Test func monthGridStartsOnTheGivenFirstWeekday() {
+        let month = utc("2026-10-14T10:00:00Z")
+        #expect(MonthGrid(month: month, timeZone: zone, firstWeekday: 1).days[0].start == utc("2026-09-27T00:00:00Z"), "Sunday")
+        #expect(MonthGrid(month: month, timeZone: zone, firstWeekday: 7).days[0].start == utc("2026-09-26T00:00:00Z"), "Saturday")
+        #expect(MonthGrid(month: utc("2026-11-10T10:00:00Z"), timeZone: zone, firstWeekday: 1).days[0].start
+                == utc("2026-11-01T00:00:00Z"), "November 2026 starts on a Sunday: no leading days")
     }
 }
 
@@ -350,6 +358,20 @@ private final class Recorder {
         #expect(model.hint == nil)
         model.confirm()
         #expect(out.values == [.at(at(17), .ifNoReply)])
+    }
+
+    @Test func thePickersGridAndInitialsFollowItsFirstWeekday() {
+        func model(_ firstWeekday: Int) -> TimePickerModel {
+            let model = TimePickerModel(kind: .remind, targets: [], presets: TimePresets(timeZone: zone), locale: english,
+                                        firstWeekday: firstWeekday, now: { wednesday }) { _ in }
+            model.openDatePick()
+            return model
+        }
+        #expect(model(1).weekdayInitials == ["S", "M", "T", "W", "T", "F", "S"])
+        #expect(model(2).weekdayInitials == ["M", "T", "W", "T", "F", "S", "S"])
+        #expect(model(7).weekdayInitials.prefix(2) == ["S", "S"])
+        #expect(model(1).monthGrid?.days.first?.start == utc("2026-09-27T00:00:00Z"))
+        #expect(model(2).monthGrid?.days.first?.start == utc("2026-09-28T00:00:00Z"))
     }
 
     @Test func gridKnowsToday() {

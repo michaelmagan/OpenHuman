@@ -49,6 +49,7 @@ private struct QuitFixture {
         _ = sidebar()
         let model = env.calendarWindow!
         model.timeZone = losAngeles
+        model.firstWeekday = 1
         model.now = { la(10, 12, 11) }
         model.confirmsMovesOverride = false
         model.sleep = untilCancelled

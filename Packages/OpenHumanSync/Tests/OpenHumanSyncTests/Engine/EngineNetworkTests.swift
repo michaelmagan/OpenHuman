@@ -82,6 +82,46 @@ import Testing
         await engine.stop()
     }
 
+    @Test func aSuccessfulSyncResumesAnOutboxPausedByARefusedWrite() async throws {
+        let h = try await EngineHarness()
+        let engine = h.engine()
+        await engine.start()
+        try await h.waitForSyncs(engine)
+        let drainer = try #require(await engine.drainer(for: h.account))
+        await h.gmail.failNext(.batchModify, with: .unauthorized)
+        let receipt = try await engine.perform(.archive([try h.ref(h.threads[0])]), origin: .app)
+        try await eventually("the outbox pauses") { await drainer.state == .pausedNeedsReauth }
+        #expect(try h.store.accounts().first?.status == .needsReauth)
+        #expect(try h.store.operation(receipt.operationIDs[0])?.status == .pending)
+
+        _ = try await engine.syncNow(h.account, reason: "test")
+        try await eventually("the held write goes out") {
+            try h.store.operation(receipt.operationIDs[0])?.status == .succeeded
+        }
+        #expect(await drainer.state == .running)
+        #expect(try h.store.accounts().first?.status == .active)
+        #expect(!(await h.serverLabels(ofThread: h.threads[0])).contains("INBOX"))
+        await engine.stop()
+    }
+
+    @Test func aFailedSyncLeavesAPausedOutboxPaused() async throws {
+        let h = try await EngineHarness()
+        let engine = h.engine()
+        await engine.start()
+        try await h.waitForSyncs(engine)
+        let drainer = try #require(await engine.drainer(for: h.account))
+        await h.gmail.failNext(.batchModify, with: .unauthorized)
+        let receipt = try await engine.perform(.archive([try h.ref(h.threads[0])]), origin: .app)
+        try await eventually("the outbox pauses") { await drainer.state == .pausedNeedsReauth }
+
+        await h.gmail.failNext(.listHistory, with: .server(status: 500, message: "synthetic"))
+        _ = try? await engine.syncNow(h.account, reason: "test")
+        #expect(await drainer.state == .pausedNeedsReauth)
+        #expect(try h.store.accounts().first?.status == .needsReauth)
+        #expect(try h.store.operation(receipt.operationIDs[0])?.status == .pending)
+        await engine.stop()
+    }
+
     @Test func wakeForegroundRequestsAndForeignOpsMoveThePoll() async throws {
         let h = try await EngineHarness()
         let system = TestSystemEvents()

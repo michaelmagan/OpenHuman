@@ -976,9 +976,16 @@ struct AttachmentTile: View {
 }
 
 struct NoticeLine: View {
+    struct ConflictChoice {
+        let keepMine: () -> Void
+        let takeTheirs: () -> Void
+    }
+
     let notice: ComposeSession.Notice
     var floating = false
     var sendAgain: (() -> Void)? = nil
+    // A line that asks which version to keep has the two answers and no Dismiss
+    var conflictChoice: ConflictChoice? = nil
     let dismiss: () -> Void
     @Environment(\.theme) private var theme
 
@@ -993,14 +1000,23 @@ struct NoticeLine: View {
                            tipTitle: "Send it again", action: sendAgain)
                     .accessibilityIdentifier("composer.notice.sendAgain")
             }
-            Button(action: dismiss) {
-                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
+            if let conflictChoice {
+                TextButton(title: "Keep mine", help: "Keep what is written here", strong: true, compact: true,
+                           action: conflictChoice.keepMine)
+                    .accessibilityIdentifier("composer.notice.keepMine")
+                TextButton(title: "Take theirs", help: "Replace this text with the other version", compact: true,
+                           action: conflictChoice.takeTheirs)
+                    .accessibilityIdentifier("composer.notice.takeTheirs")
+            } else {
+                Button(action: dismiss) {
+                    Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss")
+                .accessibilityLabel("Dismiss")
             }
-            .buttonStyle(.plain)
-            .help("Dismiss")
-            .accessibilityLabel("Dismiss")
         }
         .foregroundStyle(color.color)
         .padding(.horizontal, theme.space4)
@@ -1015,7 +1031,7 @@ struct NoticeLine: View {
             shape.fill((notice.kind == .error ? theme.bgDangerSubtle : theme.bgWarningSubtle).color)
         }
         .padding(.vertical, floating ? 0 : theme.space2)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: conflictChoice == nil ? .combine : .contain)
         .accessibilityAddTraits(.updatesFrequently)
     }
 

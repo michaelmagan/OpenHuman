@@ -72,6 +72,7 @@ private struct SourceFixture {
         sidebar.now = { at(10, 12, 11) }
         let model = env.calendarWindow!
         model.timeZone = newYork
+        model.firstWeekday = 1
         model.now = { at(10, 12, 11) }
         model.confirmsMovesOverride = false
         return model

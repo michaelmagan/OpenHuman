@@ -235,6 +235,38 @@ import Testing
         #expect(events.all.contains { if case .accountNeedsReauth(h.account) = $0 { return true } else { return false } })
     }
 
+    @Test func aPausedDrainerSendsWhatItHeldOnceResumed() async throws {
+        let h = try await WriteHarness()
+        await h.gmail.failNext(.batchModify, with: .unauthorized)
+        let id = try h.store.apply(.archive([try h.ref(h.threads[0])]), origin: .app).operationIDs[0]
+        let drainer = h.drainer(api: h.gmail)
+        #expect(await drainer.resumeAfterReauth() == false, "nothing is paused yet")
+        #expect(await drainer.drainOnce().released == 1)
+        #expect(await drainer.state == .pausedNeedsReauth)
+        #expect(await drainer.drainOnce().claimed == 0, "a paused drainer claims nothing")
+        #expect(await drainer.resumeAfterReauth())
+        #expect(await drainer.state == .idle, "it had no loop, so it only stops being paused")
+        #expect(await drainer.drainOnce().succeeded == 1)
+        #expect(try h.store.operation(id)?.status == .succeeded)
+        #expect(!(await h.serverLabels(ofThread: h.threads[0])).contains("INBOX"))
+    }
+
+    @Test func aLoopingDrainerRunsItsLoopAgainOnceResumed() async throws {
+        let h = try await WriteHarness()
+        await h.gmail.failNext(.batchModify, with: .unauthorized)
+        let id = try h.store.apply(.archive([try h.ref(h.threads[0])]), origin: .app).operationIDs[0]
+        let drainer = h.drainer(api: h.gmail)
+        await drainer.start()
+        try await eventually("paused") { await drainer.state == .pausedNeedsReauth }
+        #expect(try h.store.operation(id)?.status == .pending)
+        #expect(await drainer.resumeAfterReauth())
+        try await eventually("sent") { try h.store.operation(id)?.status == .succeeded }
+        #expect(await drainer.state == .running)
+        await drainer.stop()
+        #expect(await drainer.resumeAfterReauth() == false, "a stopped drainer stays stopped")
+        #expect(await drainer.state == .stopped)
+    }
+
     @Test func missingIDsAreBisectedAwayAndTheRestApplied() async throws {
         let h = try await WriteHarness(threads: 6)
         await h.gmail.setBatchModifyRejectsMissingIDs(true)
