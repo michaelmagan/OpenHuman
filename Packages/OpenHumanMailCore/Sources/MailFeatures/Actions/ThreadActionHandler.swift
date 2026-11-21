@@ -264,7 +264,9 @@ public final class ThreadActionHandler: ActionHandler {
         let state = router?.accounts.first { $0.id == request.context.account } ?? router?.active
         let fromIntent = request.source == .intent
         var checked: [ThreadKey] = []
-        if consumesChecks, !fromIntent, let state {
+        // Checks the command leaves alone stay: done on the open conversation is not an action on the checked rows
+        if consumesChecks, !fromIntent, let state,
+           state.selection.checked.isEmpty || !state.selection.checked.isDisjoint(with: command.threads) {
             checked = state.selection.targets(cursor: nil, order: state.list?.rows.map(\.id) ?? [])
             state.selection.clearChecked()
         }

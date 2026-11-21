@@ -737,7 +737,7 @@ public final class ThreadListViewController: NSViewController, NSTableViewDataSo
     func handleKey(_ event: NSEvent) -> Bool {
         guard let model else { return false }
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-        let characters = event.charactersIgnoringModifiers ?? ""
+        let characters = KeyChord.withoutCapsLock(event.charactersIgnoringModifiers ?? "", event.modifierFlags)
         switch (event.keyCode, characters, modifiers) {
         case (_, "x", []):
             guard model.toggleCheck() else { return false }

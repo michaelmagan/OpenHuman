@@ -760,7 +760,10 @@ public final class ReaderViewController: NSViewController {
 
     func handleKey(_ event: NSEvent) -> Bool {
         guard let model, !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control),
-              !event.modifierFlags.contains(.option), let chars = event.charactersIgnoringModifiers else { return false }
+              !event.modifierFlags.contains(.option),
+              let chars = event.charactersIgnoringModifiers.map({ KeyChord.withoutCapsLock($0, event.modifierFlags) }) else {
+            return false
+        }
         switch event.keyCode {
         case 125 where !event.modifierFlags.contains(.shift): return model.focusNext()
         case 126 where !event.modifierFlags.contains(.shift): return model.focusPrevious()

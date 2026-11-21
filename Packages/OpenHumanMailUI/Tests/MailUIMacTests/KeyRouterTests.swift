@@ -198,6 +198,16 @@ struct KeyRouterTests {
         #expect(performed.map(\.0) == [.commandPalette, .commandPalette])
     }
 
+    @Test func capsLockDoesNotTurnAKeyIntoItsShiftedBinding() {
+        router.bindings[.list, default: [:]][.char("J")] = .extendSelectionDown
+        let commandK = KeyChord(.character("k"), modifiers: .command)
+        router.bindings[.global, default: [:]][commandK] = .commandPalette
+        #expect(router.route(key("J", code: 38, modifiers: .capsLock)) == nil, "Caps Lock reports J for the J key")
+        #expect(router.route(key("J", code: 38, modifiers: [.capsLock, .shift])) == nil, "⇧ still makes it ⇧J")
+        #expect(router.route(key("K", code: 40, modifiers: [.capsLock, .command])) == nil)
+        #expect(performed.map(\.0) == [.nextThread, .extendSelectionDown, .commandPalette])
+    }
+
     @Test func optionSymbolsAndOtherScriptsFindTheirBinding() {
         router.bindings[.list, default: [:]][.char("#")] = .trash
         router.bindings[.list, default: [:]][.char("e")] = .markDone
