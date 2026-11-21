@@ -72,12 +72,15 @@ public final class ThreadSummaryModel {
         isSuspicious = false
         let thread = self.thread
         task = Task { [weak self] in
-            guard let context = await center.context(for: thread, trigger: trigger) else {
+            let loaded = await center.context(for: thread, trigger: trigger)
+            // Why: a cancelled load comes back empty too, and that is not a conversation that went away
+            guard !Task.isCancelled else { return }
+            guard let context = loaded else {
                 self?.finish(failure: String(localized: "This conversation is no longer here."), trigger: trigger)
                 return
             }
-            guard !Task.isCancelled else { return }
             var text = ""
+            var scaffolding = PromptScaffoldingFilter(nonce: nil)
             do {
                 for try await event in center.features.summarize(context.input) {
                     guard !Task.isCancelled, let self else { return }
@@ -85,14 +88,19 @@ public final class ThreadSummaryModel {
                     case .started(let provenance):
                         self.badge = AIProviderBadge(provenance: provenance)
                     case .textDelta(let delta):
-                        text += delta
-                        self.text = text
+                        text += scaffolding.feed(delta)
+                        // Why: held whitespace shows with its chunk, so the end of the stream adds no text
+                        let shown = text + scaffolding.pendingWhitespace
+                        guard !shown.isEmpty else { continue }
+                        if self.text != shown { self.text = shown }
                         self.phase = .streaming
                     case .completed(let report):
                         self.isSuspicious = report.suspicious
                     }
                 }
                 guard let self, !Task.isCancelled else { return }
+                text += scaffolding.finish()
+                if self.text != text { self.text = text }
                 self.summarizedCount = messageCount ?? context.messageKeys.count
                 self.phase = text.isEmpty ? .failed(String(localized: "The model returned no summary")) : .done
             } catch {
@@ -114,8 +122,11 @@ public final class ThreadSummaryModel {
 
     public func cancel() {
         task?.cancel()
-        task = nil
         if phase == .loading || phase == .streaming { phase = .idle }
+    }
+
+    func settled() async {
+        await task?.value
     }
 
     func reset() {

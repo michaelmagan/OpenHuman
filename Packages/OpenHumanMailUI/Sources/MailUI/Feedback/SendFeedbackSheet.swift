@@ -92,7 +92,7 @@ public struct SendFeedbackSheet: View {
     @ViewBuilder private var destination: some View {
         switch model.deviceState {
         case .noCLI:
-            Text(verbatim: "Tailscale isn't installed on this Mac, so it can't send the file. You can save it or share it instead.")
+            Text(verbatim: "Tailscale isn't installed on this Mac. Save or share the file instead.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         case .loading:
             HStack(spacing: 8) { ProgressView().controlSize(.small); Text(verbatim: "Looking for your devices…").foregroundStyle(.secondary) }

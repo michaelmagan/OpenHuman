@@ -279,7 +279,7 @@ struct InterpretationWaitingRow: View {
     var body: some View {
         HStack(spacing: theme.space4) {
             Image(systemName: "sparkle")
-                .font(.system(size: 14))
+                .font(.system(size: ShellMetrics.rowIconSize))
                 .frame(width: 18)
                 .foregroundStyle(theme.textAI.color)
             Text("Understanding your search…")
@@ -313,16 +313,16 @@ struct InterpretationRow: View {
         Button(action: use) {
             HStack(spacing: theme.space4) {
                 Image(systemName: "sparkle")
-                    .font(.system(size: 14))
+                    .font(.system(size: ShellMetrics.rowIconSize))
                     .frame(width: 18)
                     .foregroundStyle(theme.textAI.color)
-                HStack(spacing: 4) {
+                HStack(spacing: theme.space2) {
                     ForEach(Array(plan.chips.enumerated()), id: \.offset) { _, chip in
                         Text(chip.title)
                             .font(theme.typeLabel.swiftUIFont)
                             .foregroundStyle(chip.kind == .note ? theme.textWarning.color : theme.textPrimary.color)
                             .lineLimit(1)
-                            .padding(.horizontal, 8)
+                            .padding(.horizontal, theme.space3)
                             .frame(height: 20)
                             .background(RoundedRectangle(cornerRadius: theme.radiusPill)
                                 .fill(chip.kind == .note ? theme.bgWarningSubtle.color : theme.bgAISubtle.color))

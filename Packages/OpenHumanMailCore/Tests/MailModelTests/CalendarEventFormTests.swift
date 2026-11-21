@@ -217,6 +217,12 @@ private actor LegacyRemovalSpy: CalendarProviding {
         #expect(f.start == at(12, 10, 9) && f.end == at(12, 12, 10), "back to timed: 9:00 on the first day to 10:00 on the last")
     }
 
+    @Test func theShortestAllDayEventEndsAtTheNextMidnightOnADayThatLosesAnHour() {
+        var f = CalendarEventForm(isAllDay: true, start: at(3, 8), end: at(3, 10), timeZone: la.identifier)
+        f.setEnd(at(3, 8, 12))
+        #expect(f.end == at(3, 9), "March 8, 2026 has 23 hours in Los Angeles")
+    }
+
     @Test func aTimeZoneChangeKeepsTheInstantsAndStillResendsTheTimes() {
         let e = event()
         var f = form(e)

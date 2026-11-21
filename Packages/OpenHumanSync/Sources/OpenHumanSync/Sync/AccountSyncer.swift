@@ -350,7 +350,8 @@ public actor AccountSyncer {
                 counts += try await fetchMessagesFull(Array(unknown[start..<min(start + chunkSize, unknown.count)]),
                                                       generation: generation, tombstone: pageNewest, fetched: &fetched)
             }
-            let applicable = batch.labelDeltas.filter { known.contains($0.gmailMessageID) }
+            // Why: a message stored before this run is not fetched again, so label changes after its arrival apply as deltas
+            let applicable = (batch.labelDeltas + batch.addedLabelDeltas).filter { known.contains($0.gmailMessageID) }
             if !applicable.isEmpty {
                 counts.changed += try store.applyLabelDeltas(applicable, account: account).updated
             }

@@ -365,7 +365,7 @@ struct SnippetSettingsPage: View {
                             .accessibilityLabel("Body")
                     }
                     if draft.hadFormatting {
-                        SettingsFootnote("This snippet has formatting. Saving it here keeps the text and drops the formatting.",
+                        SettingsFootnote("Saving here keeps the text and drops the formatting.",
                                          tone: .warning)
                     }
                     variablesTable

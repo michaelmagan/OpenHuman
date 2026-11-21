@@ -100,7 +100,7 @@ private func model(sleeper: DebounceGate = DebounceGate()) -> (StatusModel, Debo
     _ = await asked.next()
     sleeper.release()
     await status.pendingDebounceFinished()
-    #expect(status.pendingHelp == "Your changes are saved on this Mac and are sent to Gmail in the background.")
+    #expect(status.pendingHelp == "Changes are saved on this Mac and sent to Gmail in the background.")
     status.setPending([one: 2, two: 1, AccountID(3): 0])
     #expect(status.pendingLine == "Syncing 3 changes to Gmail")
     #expect(status.pendingHelp.hasSuffix("Account 1: 2, Account 2: 1."))

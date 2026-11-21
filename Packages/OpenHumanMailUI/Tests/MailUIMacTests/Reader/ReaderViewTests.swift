@@ -128,7 +128,7 @@ struct ReaderViewTests {
         let blockedView = try await h.shownWebView(key)
         #expect(blockedView.mode == .blocked)
         let banner = try #require(h.container(key)?.banner as? RemoteImagesBannerView)
-        #expect(banner.text == "2 remote images hidden to keep your reading private.")
+        #expect(banner.text == "2 remote images hidden for privacy.")
         #expect(banner.alwaysButton?.title == "Always from dana@news.example.com")
         #expect(banner.alwaysButton?.toolTip?.contains(RemoteContentPolicy.unverifiedSenderNote) == true)
 

@@ -27,7 +27,7 @@ struct LabelPickerView: View {
                 }
                 Divider()
                 if model.rows.isEmpty {
-                    Text("No labels")
+                    Text(Self.emptyText(query: model.query))
                         .font(.system(size: NativeMetrics.Text.body))
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: Self.emptyHeight)
@@ -55,6 +55,11 @@ struct LabelPickerView: View {
     }
 
     static let emptyHeight: CGFloat = 64
+
+    static func emptyText(query: String) -> String {
+        let typed = query.trimmingCharacters(in: .whitespaces)
+        return typed.isEmpty ? "No labels" : "Nothing matches “\(typed)”"
+    }
 
     private var listHeight: CGFloat {
         min(CGFloat(model.rows.count) * OverlayMetrics.rowHeight
@@ -143,7 +148,7 @@ struct LabelPickerView: View {
                 Spacer(minLength: 0)
             }
         }
-        .accessibilityLabel(row.title)
+        .accessibilityLabel((row.parentPath ?? "") + row.title)
         .accessibilityValue(accessibilityValue(row.check))
     }
 

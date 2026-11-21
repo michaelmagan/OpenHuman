@@ -62,7 +62,7 @@ public final class ComposeTextSettings {
     public static let autoListsKey = "compose.auto_lists"
     public static let pastedImageSizeKey = "compose.pasted_image_size"
 
-    public static let replacementsNote = "Uses the text replacements you set up in macOS."
+    public static let replacementsNote = "Uses your macOS text replacements."
     public static let autoListsNote = "Typing 1. or - or * and a space at the start of a line starts a list. "
         + "Return adds the next item; Return on an empty item ends the list."
     public static let pastedImageSizeNote = "Pictures you paste or drop into a message start at this size, never larger "

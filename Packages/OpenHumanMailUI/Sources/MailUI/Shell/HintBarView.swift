@@ -12,7 +12,7 @@ struct HintBarView: View {
             row(hints)
             row(Array(hints.prefix(ShellMetrics.narrowHintCount)))
         }
-        .help("Shortcut hints for where you are. Turn them off in Settings › General, or right-click here.")
+        .help("Shortcut hints. Turn them off in Settings › General, or right-click here.")
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Shortcut hints")
     }

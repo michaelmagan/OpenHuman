@@ -42,7 +42,6 @@ public final class AppRouter {
     @ObservationIgnored private var trackingStarted = false
     @ObservationIgnored private var started = false
     @ObservationIgnored var undoTargets: [UUID: (account: AccountID, threads: [ThreadKey])] = [:]
-    @ObservationIgnored var blockedToast: Toast.ID?
 
     public init(environment: AppEnvironment, location: MailLocation? = .system(.inbox),
                 restoring: (any NavigationStateStoring)? = nil,

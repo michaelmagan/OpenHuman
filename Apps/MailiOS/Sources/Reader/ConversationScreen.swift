@@ -51,9 +51,9 @@ struct ConversationContent: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, theme.tokens.space8)
                 case .missing:
-                    ReaderNotice(text: "This conversation is no longer here.")
-                case .failed(let reason):
-                    ReaderNotice(text: "Couldn't open this conversation. \(reason)")
+                    ReaderNotice(text: ReaderFormatting.missingConversationText)
+                case .failed where reader.messages.isEmpty:
+                    ReaderNotice(text: ReaderFormatting.failedConversationText)
                 default:
                     EmptyView()
                 }

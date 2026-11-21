@@ -161,12 +161,12 @@ struct BodyCollector {
                 if d.html != nil || d.text != nil { result = d; haveBody = true }
                 continue
             }
-            if let h = d.html { result.html = (result.html ?? result.text.map(Self.htmlEscape) ?? "") + "<hr>" + h }
+            if let h = d.html { result.html = (result.html ?? result.text.map(Self.htmlBlock) ?? "") + "<hr>" + h }
             if let t = d.text {
                 if result.text != nil, result.textFormat != d.textFormat { result.textFormat = .fixed }
                 if result.text == nil { result.textFormat = d.textFormat }
-                result.text = (result.text ?? "") + "\n\n" + t
-                if d.html == nil, let existing = result.html { result.html = existing + "<hr>" + Self.htmlEscape(t) }
+                result.text = result.text.map { $0 + "\n\n" + t } ?? t
+                if d.html == nil, let existing = result.html { result.html = existing + "<hr>" + Self.htmlBlock(t) }
             }
         }
         return result
@@ -247,6 +247,11 @@ struct BodyCollector {
 
     private func contentType(_ part: GmailPayloadPart) -> (type: String, params: [String: String])? {
         header(part, "Content-Type").map(ContentType.parse)
+    }
+
+    // A text part joined to an HTML body keeps its line breaks
+    static func htmlBlock(_ text: String) -> String {
+        "<div style=\"white-space:pre-wrap\">" + htmlEscape(text) + "</div>"
     }
 
     static func htmlEscape(_ s: String) -> String {

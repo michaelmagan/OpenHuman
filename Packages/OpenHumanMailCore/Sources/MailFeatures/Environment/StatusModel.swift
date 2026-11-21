@@ -121,7 +121,7 @@ public final class StatusModel {
     }
 
     public var pendingHelp: String {
-        var text = "Your changes are saved on this Mac and are sent to Gmail in the background."
+        var text = "Changes are saved on this Mac and sent to Gmail in the background."
         if pendingCounts.count > 1 {
             let parts = pendingCounts.sorted { $0.key.rawValue < $1.key.rawValue }.enumerated()
                 .map { "Account \($0.offset + 1): \($0.element.value)" }

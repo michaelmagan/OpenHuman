@@ -86,8 +86,10 @@ final class AIActionHandler: ActionHandler {
                 guard let center else { return }
                 let status = await center.features.status(for: .summarize, accountKey: nil)
                 if let location = status.dataLocation, location != .onDevice {
-                    environment?.notices.post("Summarize would use \(status.providerName ?? "a provider off this Mac"). Use the Summarize link or the command palette.",
-                                              style: .info, duration: NoticeCenter.infoDuration)
+                    let provider = status.providerName ?? String(localized: "a provider off this Mac")
+                    environment?.notices.post(
+                        String(localized: "Summarize would use \(provider). Use the Summarize link or the command palette."),
+                        style: .info, duration: NoticeCenter.infoDuration)
                     return
                 }
                 model.summarize(trigger: .user)

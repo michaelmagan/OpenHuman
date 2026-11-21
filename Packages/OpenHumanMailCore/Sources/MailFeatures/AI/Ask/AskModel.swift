@@ -703,7 +703,11 @@ public final class AskModel {
         guard askedAt != nil || phase != .idle else { return }
         let expired = askedAt.map { clock.now.timeIntervalSince($0) > Self.memoryLifetime.timeInterval } ?? false
         let switched = memoryAccount != nil && memoryAccount != router?.activeAccountID
-        if expired || switched { forget() }
+        // Why: "This conversation" must mean the one on screen, never the one an earlier answer was about
+        let leftConversation: Bool = if case .conversation(let thread) = scope {
+            router?.mode != .reader || router?.reader?.thread != thread
+        } else { false }
+        if expired || switched || leftConversation { forget() }
     }
 
     private func forget() {

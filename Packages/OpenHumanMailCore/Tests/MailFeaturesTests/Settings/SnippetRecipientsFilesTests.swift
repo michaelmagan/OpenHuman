@@ -107,7 +107,7 @@ import Testing
         let big = try tempFile("big.bin", bytes: SnippetAttachmentRules.maxFileBytes + 1)
         await model.addFiles([big])
         #expect(model.draft?.attachments.isEmpty == true)
-        #expect(model.errorMessage?.contains("over 10 MB") == true)
+        #expect(model.errorMessage?.contains("over the 10 MB limit for a snippet file.") == true)
         #expect(model.canSave)
     }
 

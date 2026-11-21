@@ -88,7 +88,7 @@ private struct CleanupSource: MailDataSource {
         let suggestion = try #require(found)
         #expect(suggestion.kind == .promotions)
         #expect(suggestion.threads.map(\.rowID) == [1])
-        #expect(suggestion.text == "You have 1 promotion older than 14 days. Archive it?")
+        #expect(suggestion.text == "1 promotion is older than 14 days. Archive it?")
     }
 
     @Test func overTheThresholdOldConversationsAreSuggestedToo() async throws {

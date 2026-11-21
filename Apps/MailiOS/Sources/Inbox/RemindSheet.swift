@@ -22,7 +22,7 @@ struct RemindSheet: View {
                     Spacer()
                 }
             }
-            Text("The conversation leaves the list now and comes back at the time you pick.")
+            Text("The conversation leaves the list and comes back at the time you pick.")
                 .font(theme.snippet)
                 .foregroundStyle(theme.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)

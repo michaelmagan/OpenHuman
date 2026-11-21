@@ -64,7 +64,7 @@ public final class FeaturesSettingsModel {
     static func info(_ id: FeatureModuleID) -> (title: String, detail: String) {
         switch id {
         case .snooze: ("Snooze", "Snooze a conversation until later.")
-        case .sendLater: ("Send later", "Schedule a message to go out at a time you choose.")
+        case .sendLater: ("Send later", "Schedule a message to send later.")
         case .reminders: ("Reminders", "Remind yourself to follow up on a conversation.")
         case .importance: ("Importance rules", "Always or never important, per sender, domain, Gmail label or keyword.")
         case .notifications: ("Notifications", "New important mail, reminders and snoozes as system notifications.")

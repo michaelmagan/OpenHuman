@@ -122,6 +122,15 @@ import Testing
         #expect(!parsed.attachments[1].isInline && parsed.attachments[1].gmailAttachmentID == "ATT2")
     }
 
+    @Test func aTextPartAfterAnHTMLBodyKeepsItsLineBreaks() throws {
+        let root = GmailPayloadPart(partID: "", mimeType: "multipart/mixed", headers: top,
+                                    parts: [leaf("0", "text/html", "<p>Rich</p>"), leaf("1", "text/plain", "List footer\n<unsubscribe>")])
+        let parsed = try MIMEParser.parse(gmailPayload: root)
+        #expect(parsed.htmlBody
+            == "<p>Rich</p><hr><div style=\"white-space:pre-wrap\">List footer\n&lt;unsubscribe&gt;</div>")
+        #expect(parsed.textBody == "List footer\n<unsubscribe>")
+    }
+
     @Test func latin1BodyAndCalendarPart() throws {
         var body = leaf("0", "text/plain", "", charset: "iso-8859-1")
         body.data = Base64URL.encode(Data([0x63, 0x61, 0x66, 0xE9]))

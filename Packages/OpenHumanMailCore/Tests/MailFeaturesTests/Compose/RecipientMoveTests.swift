@@ -66,6 +66,41 @@ private let cy = person("cy@example.test", "Cy")
         #expect(session.to.tokens == [ben] && session.cc.tokens == [ana] && session.showsCc)
     }
 
+    @Test func undoingAMoveKeepsRecipientsAddedAfterIt() async throws {
+        let f = ComposeFixture()
+        await f.loaded()
+        let session = try #require(f.compose.openNew(placement: .modal))
+        let dee = person("dee@example.test")
+        session.to.setTokens([ana, ben])
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        undo.beginUndoGrouping()
+        #expect(session.moveRecipient(ana, from: .to, to: .cc, undoManager: undo))
+        undo.endUndoGrouping()
+        session.to.accept(cy)
+        session.cc.accept(dee)
+        undo.undo()
+        #expect(session.to.tokens == [ana, ben, cy], "back in its place, with the later recipient kept")
+        #expect(session.cc.tokens == [dee] && session.showsCc, "the row stays while it has someone")
+        undo.redo()
+        #expect(session.to.tokens == [ben, cy] && session.cc.tokens == [dee, ana])
+    }
+
+    @Test func undoingAMoveDoesNotBringBackARecipientRemovedSince() async throws {
+        let f = ComposeFixture()
+        await f.loaded()
+        let session = try #require(f.compose.openNew(placement: .modal))
+        session.to.setTokens([ana, ben])
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        undo.beginUndoGrouping()
+        #expect(session.moveRecipient(ana, from: .to, to: .cc, undoManager: undo))
+        undo.endUndoGrouping()
+        session.cc.remove(ana)
+        undo.undo()
+        #expect(session.to.tokens == [ben] && session.cc.tokens.isEmpty)
+    }
+
     @Test func movingIntoAFieldThatHasTheAddressOnlyTakesItOutOfTheSource() async throws {
         let f = ComposeFixture()
         await f.loaded()

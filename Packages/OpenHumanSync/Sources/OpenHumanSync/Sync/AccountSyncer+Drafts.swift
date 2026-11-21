@@ -9,6 +9,7 @@ extension AccountSyncer {
     public func refreshDrafts() async throws -> Int {
         let started = clock.now
         let generation = try store.syncStatus(account: account).generation
+        let uploadedBefore = try uploadedDrafts()
         var listed: [GmailDraft] = []
         var token: String?
         var calls = 0, units = 0
@@ -59,6 +60,15 @@ extension AccountSyncer {
             let result = try store.upsertMessages(messages, account: account, generation: generation)
             if !result.unknownLabelIDs.isEmpty { try await refreshLabels() }
         }
+        // Why: a draft uploaded after the listing was read is missing from it or older there, not deleted or edited
+        // elsewhere; the next refresh decides
+        let listedMessages = Dictionary(listed.map { ($0.id, $0.message?.id ?? "") }, uniquingKeysWith: { first, _ in first })
+        let raced = Set(try uploadedDrafts()
+            .filter { uploadedBefore[$0.key] != $0.value && listedMessages[$0.key] != $0.value }.keys)
+        if !raced.isEmpty {
+            complete = false
+            drafts.removeAll { raced.contains($0.gmailDraftID.rawValue) }
+        }
         try store.reconcileRemoteDrafts(drafts, account: account, complete: complete)
         draftCache = cache
         let finished = clock.now
@@ -68,5 +78,13 @@ extension AccountSyncer {
                   Counts(added: 0, changed: drafts.count, deleted: 0), errorCode: nil)
         log.info("account \(account.rawValue): drafts refreshed (\(listed.count) listed, \(complete ? "complete" : "partial"))")
         return drafts.count
+    }
+
+    private func uploadedDrafts() throws -> [String: String] {
+        var messages: [String: String] = [:]
+        for draft in try store.drafts(account: account, states: [.editing, .scheduled, .failed], limit: Int.max / 2) {
+            if let id = draft.gmailDraftID?.rawValue { messages[id] = draft.gmailMessageID?.rawValue ?? "" }
+        }
+        return messages
     }
 }

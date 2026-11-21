@@ -374,8 +374,6 @@ struct SettingsErrorLine: View {
     }
 }
 
-typealias SettingsNote = SettingsFootnote
-
 extension View {
     func settingsSectionLabel(_ theme: ResolvedTheme) -> some View {
         font(.system(size: NativeMetrics.Text.caption, weight: .semibold))

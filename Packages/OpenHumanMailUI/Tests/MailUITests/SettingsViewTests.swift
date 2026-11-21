@@ -76,6 +76,14 @@ private func environment() -> AppEnvironment {
 }
 
 @MainActor
+@Test func theSearchPageLaysOutWithAndWithoutTheMailRows() throws {
+    let env = environment()
+    #expect(SettingsShellModel(environment: env).pages.contains { $0.id == "search" })
+    _ = try host(SearchSettingsPage(environment: env), name: "settings-search")
+    _ = try host(SearchSettingsPage(model: env.searchRanking), name: "settings-search-ranking-only")
+}
+
+@MainActor
 @Test func confirmBeforeSendingIsOfferedOnALiveAccountOnly() throws {
     let store = FakeMailStore(corpus: .rich(threadCount: 20, now: fixedNow), options: .init(remoteAck: .immediate))
     let live = AppEnvironment(data: store, commands: store, accounts: store, settings: store, isFake: true,

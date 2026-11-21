@@ -203,3 +203,8 @@ import Testing
     #expect(ActionCatalog.descriptor(.findInConversation)?.scopes == [.reader])
     #expect(ActionCatalog.descriptor(.reviewLeave)?.scopes == [.review] && ActionCatalog.descriptor(.reviewLeave)?.module == .review)
 }
+
+@Test func undoingGetMeToZeroIsNamedForWhatItUndoes() throws {
+    let undo = try #require(ActionCatalog.descriptor(.undoBulkArchive))
+    #expect(undo.title == "Undo Get me to zero" && undo.paletteKeywords.contains("bulk actions"))
+}

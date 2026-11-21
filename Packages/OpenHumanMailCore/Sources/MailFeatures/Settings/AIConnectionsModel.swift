@@ -117,6 +117,6 @@ public final class AIConnectionsModel {
             headline: "Mail will send email text to \(who) whenever an AI feature uses it.",
             leaves: leaves,
             stays: ["Nothing is sent until you use an AI feature that picks this connection.",
-                    "Your API key stays in the Keychain on this Mac.", "You can turn it off here at any time."])
+                    "Your API key stays in the Keychain on this Mac.", "Turn it off here at any time."])
     }
 }

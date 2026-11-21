@@ -143,6 +143,80 @@ import Testing
         replies.cancel()
     }
 
+    @Test func aRunCancelledWhileItsConversationLoadsLeavesNoFailureBehind() async throws {
+        let f = AskFixture(settings: AISettings(draftReplies: .onDeviceAuto))
+        await f.loaded()
+        let thread = try await f.conversation(matching: "hiring loop").id
+        let summary = f.center.summary(for: thread)
+        let replies = f.center.quickReplies(for: thread)
+        f.source.holdDetails()
+        summary.summarize(trigger: .automatic, messageCount: 3)
+        replies.request(trigger: .automatic)
+        #expect(summary.phase == .loading && replies.phase == .loading)
+        summary.cancelAutomatic()
+        replies.cancelAutomatic()
+        await summary.settled()
+        await replies.settled()
+        #expect(summary.phase == .idle, "a cancelled load is not a conversation that went away")
+        #expect(replies.phase == .idle && replies.isOffered)
+    }
+
+    @Test func aSummaryNeverShowsThePromptsOwnTags() async throws {
+        let provider = ScriptedProvider { request, _ in
+            request.task == .summarize
+                ? .text("<email_data nonce=\"\(request.nonce)\" kind=\"summary\">\nDana asks for the budget by Friday.\n</email_data>",
+                        chunkSize: 4)
+                : FakeAIProvider.cannedScript(request)
+        }
+        let f = AIFixture(providers: [provider])
+        await f.loaded()
+        let summary = f.center.summary(for: try await f.thread(minimumMessages: 3))
+        summary.summarize(trigger: .user)
+        await eventually { summary.phase == .done }
+        #expect(summary.text == "Dana asks for the budget by Friday.")
+        #expect(summary.isSuspicious)
+    }
+
+    @Test func aFinishedSummaryIsTheWholeFilteredTextHoweverItIsChunked() async throws {
+        let answer = "Dana asks for the budget. <email_data>\nShe needs it by Friday. "
+        let whole = "Dana asks for the budget.\nShe needs it by Friday. "
+        #expect(PromptScaffoldingFilter.strip(answer, nonce: nil) == whole)
+        for chunkSize in [1, 5, 26, 31, answer.count] {
+            let provider = ScriptedProvider { request, _ in
+                request.task == .summarize ? .text(answer, chunkSize: chunkSize) : FakeAIProvider.cannedScript(request)
+            }
+            let f = AIFixture(providers: [provider])
+            await f.loaded()
+            let summary = f.center.summary(for: try await f.thread(minimumMessages: 3))
+            summary.summarize(trigger: .user)
+            await summary.settled()
+            #expect(summary.phase == .done && summary.text == whole, "in chunks of \(chunkSize)")
+        }
+    }
+
+    @Test func aStreamedSummaryIsCompleteBeforeItsStreamEnds() async throws {
+        let provider = HeldSummaryProvider()
+        let f = AIFixture(providers: [provider])
+        await f.loaded()
+        let summary = f.center.summary(for: try await f.thread(minimumMessages: 3))
+        summary.summarize(trigger: .user)
+        await eventually { provider.isWaiting }
+
+        provider.write("Dana asks for the budget. ")
+        await eventually { summary.phase == .streaming }
+        #expect(summary.text == "Dana asks for the budget. ", "whitespace at the end of a chunk shows with it")
+        provider.write("<email")
+        await eventually { summary.text == "Dana asks for the budget." }
+        let whole = "Dana asks for the budget.\nShe needs it by Friday. "
+        provider.write("_data>\nShe needs it by Friday. ")
+        await eventually { summary.text == whole }
+        #expect(summary.phase == .streaming, "all of it shows while the stream is still open")
+
+        provider.finish()
+        await summary.settled()
+        #expect(summary.phase == .done && summary.text == whole, "the end of the stream changes no text")
+    }
+
     @Test func noQuickRepliesWhenTheNewestMessageIsTheUsers() async throws {
         let provider = ScriptedProvider()
         let f = AIFixture(providers: [provider])
@@ -403,5 +477,41 @@ import Testing
         let work = try #require(page.accounts.first)
         page.setOnDeviceOnly(true, account: work.id)
         #expect(page.accounts.first?.onDeviceOnly == true)
+    }
+}
+
+private final class HeldSummaryProvider: AIProvider, Sendable {
+    let id: AIProviderID = .fake
+    let displayName = "Held model"
+    private let open = Mutex<[AsyncThrowingStream<AIEvent, Error>.Continuation]>([])
+
+    func capabilities() async -> AICapabilities { .fake() }
+    func availability() async -> AIAvailability { .available }
+    func countTokens(_ text: String) async -> Int { TokenHeuristic.count(text) }
+    func modelVersion() async -> String? { nil }
+    func consentFingerprint() async -> String? { nil }
+
+    func run(_ request: AIRequest) -> AsyncThrowingStream<AIEvent, Error> {
+        guard request.task == .summarize, request.promptID.name == PromptName.summarizeThread.rawValue else {
+            return FakeAIProvider.stream(FakeAIProvider.cannedScript(request), providerID: id)
+        }
+        let (stream, continuation) = AsyncThrowingStream<AIEvent, Error>.makeStream()
+        continuation.yield(.started(providerID: id, model: "held"))
+        open.withLock { $0.append(continuation) }
+        return stream
+    }
+
+    var isWaiting: Bool { open.withLock { !$0.isEmpty } }
+
+    func write(_ text: String) {
+        open.withLock { $0.last?.yield(.textDelta(text)) }
+    }
+
+    func finish() {
+        open.withLock { runs in
+            runs.last?.yield(.finished(usage: nil))
+            runs.last?.finish()
+            runs.removeAll()
+        }
     }
 }

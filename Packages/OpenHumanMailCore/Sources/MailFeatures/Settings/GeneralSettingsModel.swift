@@ -146,7 +146,7 @@ public final class GeneralSettingsModel {
     public static let sendLaterNote = "Scheduled messages wait as drafts in Gmail and go out from the first Mac running "
         + "Mail after their time, or when you next open Mail (a day or more late, Mail asks first). Turning this off "
         + "stops this Mac sending them."
-    public static let remindersNote = "Reminders stay on this Mac. They are not shared with your other Mac."
+    public static let remindersNote = "Reminders stay on this Mac only."
 
     public var errorMessage: String? {
         [undoSend.errorMessage, snooze.errorMessage, sendLater.errorMessage, reminders.errorMessage,

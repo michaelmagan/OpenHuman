@@ -101,6 +101,23 @@ import Testing
         #expect(await f.run(.clearChecks) == false, "Esc passes on when nothing is checked")
     }
 
+    @Test func anActionOnTheOpenConversationKeepsTheChecks() async throws {
+        let f = ActionFixture()
+        await f.loaded(10)
+        let rows = f.rows.map(\.id)
+        #expect(await f.run(.toggleCheck))
+        #expect(await f.run(.extendSelectionDown))
+        let state = try #require(f.router.active)
+        #expect(state.selection.checked == Set(rows[0...1]))
+
+        f.router.open(rows[5])
+        #expect(f.router.actionContext().selection == [rows[5]])
+        #expect(await f.run(.markDone))
+        await f.toast("Marked done")
+        #expect(f.router.reader?.thread == rows[6])
+        #expect(state.selection.checked == Set(rows[0...1]), "done on the open conversation is not an action on the checks")
+    }
+
     @Test(arguments: BatchAction.allCases)
     func everyBatchActionIsOneEntryAndOneUndoRestoresTheBatch(_ action: BatchAction) async throws {
         let f = ActionFixture(corpus: .rich(threadCount: 60, now: fixedNow), options: .init(remoteAck: .manual))

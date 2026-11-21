@@ -168,7 +168,7 @@ public final class MailStoreAdapter: MailDataSource, Sendable {
                         }
                         let state = try store.message(account: key.account, gmailMessageID: key.gmailMessageID)?.bodyState
                         if state == .failed {
-                            continuation.yield(.failed("The message body could not be downloaded."))
+                            continuation.yield(.failed("Couldn't download the message body."))
                             continue
                         }
                         continuation.yield(.fetching)
@@ -179,7 +179,7 @@ public final class MailStoreAdapter: MailDataSource, Sendable {
                             } catch is CancellationError {
                                 throw CancellationError()
                             } catch {
-                                continuation.yield(.failed("The message body could not be downloaded."))
+                                continuation.yield(.failed("Couldn't download the message body."))
                             }
                         }
                     }

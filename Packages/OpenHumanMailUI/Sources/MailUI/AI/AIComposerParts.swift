@@ -146,7 +146,7 @@ struct AIEditActions: View {
                     .help(model.isDisabled(preset) ? (model.voiceRefusal ?? "") : "")
             }
         } label: {
-            HStack(spacing: 2) {
+            HStack(spacing: theme.space1) {
                 Text("Rewrite").font(theme.typeBody.swiftUIFont)
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
             }

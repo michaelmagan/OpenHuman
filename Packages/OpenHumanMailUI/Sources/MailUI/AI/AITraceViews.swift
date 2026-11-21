@@ -280,7 +280,7 @@ public struct AIWhyThisPopover: View {
         .accessibilityIdentifier("ai.whyThis")
     }
 
-    static let missingText = String(localized: "No trace was kept for this answer. Traces can be turned on in Settings › AI › Activity.")
+    static let missingText = String(localized: "No trace was kept for this answer. Turn traces on in Settings › AI › Activity.")
 
     private func load() async {
         guard let trace = try? await center.traces?.trace(traceID) else {

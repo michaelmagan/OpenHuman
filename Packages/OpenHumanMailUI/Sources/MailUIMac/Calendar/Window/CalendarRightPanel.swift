@@ -50,7 +50,7 @@ struct CalendarRightPanel: View {
                 monthChevron("chevron.left", label: "Previous month", month: mini.month, delta: -1, calendar: calendar)
                 monthChevron("chevron.right", label: "Next month", month: mini.month, delta: 1, calendar: calendar)
             }
-            VStack(spacing: 2) {
+            VStack(spacing: theme.space1) {
                 HStack(spacing: 0) {
                     ForEach(Array(names.enumerated()), id: \.offset) { _, name in
                         Text(verbatim: name).themeFont(theme.typeCaption).foregroundStyle(theme.textTertiary.color)
@@ -196,7 +196,7 @@ struct CalendarRightPanel: View {
 
     @ViewBuilder
     private var status: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: theme.space1) {
             if let progress = model.progress {
                 Text(progress.text).themeFont(theme.typeCaption).foregroundStyle(theme.textTertiary.color)
             }

@@ -88,6 +88,27 @@ import Testing
         #expect(try h.message(old)?.bodyState == .stored)
     }
 
+    @Test func labelChangesToAnAddedMessageThatIsAlreadyStoredAreApplied() async throws {
+        let h = try SyncHarness()
+        await h.gmail.seedInbox(count: 2)
+        try await h.syncer.sync(reason: "launch")
+        let (message, thread) = await h.gmail.deliver(subject: "Stored before the poll")
+        let fetched = try await h.gmail.getMessage(id: message, format: .full, metadataHeaders: [], priority: .interactive)
+        _ = try h.store.upsertMessages([try GmailMapper.messageUpsert(fetched, includeBody: true)], account: h.account,
+                                       generation: try h.status().generation)
+        #expect(try h.thread(thread)?.thread.unreadCount == 1)
+        #expect(try h.inbox().contains(thread))
+
+        await h.gmail.simulateWebRead(threadID: thread)
+        await h.gmail.simulateWebArchive(threadID: thread)
+        try await h.syncer.sync(reason: "poll")
+
+        #expect(try h.thread(thread)?.thread.unreadCount == 0)
+        #expect(!(try h.inbox().contains(thread)))
+        #expect(try h.inbox() == (try await h.serverInbox()))
+        #expect(try h.status().historyID == (await h.gmail.currentHistoryID))
+    }
+
     @Test func aThreadFirstSeenThroughHistoryIsStoredWholeSoMarkDoneCoversIt() async throws {
         let (h, thread) = try await threadFirstSeenThroughHistory()
         #expect(try h.thread(thread)?.messages.count == 3)

@@ -68,13 +68,14 @@ public enum OutputGuard {
         ],
         required: ["category", "priority", "reason"])
 
-    public static func replyOptions(from data: Data, sources: [String]) throws -> [ReplyOption] {
+    public static func replyOptions(from data: Data, sources: [String], nonce: String? = nil) throws -> [ReplyOption] {
         let value = try validate(data, schema: replyOptionsSchema)
         guard case .array(let items)? = value["options"] else { throw AIError.invalidOutput("options missing") }
         return items.map { item in
-            let body = (item["body"]?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let body = PromptScaffoldingFilter.strip(item["body"]?.stringValue ?? "", nonce: nonce)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             return ReplyOption(
-                label: label(item["label"]?.stringValue ?? ""),
+                label: label(PromptScaffoldingFilter.strip(item["label"]?.stringValue ?? "", nonce: nonce)),
                 body: body,
                 linkHostsAddedByAI: linkHostsNotIn(body, sources: sources))
         }

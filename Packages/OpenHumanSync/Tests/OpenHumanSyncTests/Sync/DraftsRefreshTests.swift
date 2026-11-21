@@ -64,4 +64,69 @@ import Testing
         let rows = try draftRows(location)
         #expect(Set(rows.map(\.gmailDraftID)) == [first.id, second.id] && rows.allSatisfy { $0.state == "editing" })
     }
+
+    @Test func aDraftFirstUploadedWhileTheListingIsReadIsNotDiscarded() async throws {
+        let h = try await WriteHarness()
+        let id = try h.newDraft()
+        let op = try h.store.saveDraftRemotely(id)
+        let store = h.store
+        await h.gmail.afterNext(.listDrafts) { gmail in
+            let remote = gmail.seedDraft()
+            try? store.complete(op, outcome: .draftSaved(gmailDraftID: GmailDraftID(remote.draftID),
+                                                         gmailMessageID: GmailMessageID(remote.messageID), version: 1))
+        }
+        try await h.syncer.refreshDrafts()
+        var draft = try #require(try h.store.draft(id))
+        #expect(draft.state == .editing && draft.gmailDraftID != nil)
+
+        try await h.syncer.refreshDrafts()
+        draft = try #require(try h.store.draft(id))
+        #expect(draft.state == .editing && draft.gmailDraftID != nil)
+        #expect(try h.store.drafts(account: h.account, states: [], limit: 10).count == 1)
+    }
+
+    @Test func aDraftEditedElsewhereReplacesTheCleanCopyAndMovesItsVersion() async throws {
+        let h = try SyncHarness()
+        await h.gmail.seedInbox(count: 2)
+        let remote = try await h.gmail.createDraft(rawRFC822: rawDraft(subject: "Plan", body: "First."), threadID: nil)
+        try await h.syncer.sync(reason: "launch")
+        try await h.syncer.refreshDrafts()
+        let before = try #require(try h.store.drafts(account: h.account, states: [.editing], limit: 10).first)
+        #expect(before.gmailDraftID?.rawValue == remote.id && before.localVersion == 1 && !before.isDirty)
+
+        _ = try await h.gmail.updateDraft(id: remote.id, rawRFC822: rawDraft(subject: "Plan", body: "Second."), threadID: nil)
+        try await h.syncer.sync(reason: "poll")
+        let after = try #require(try h.store.draft(before.id))
+        #expect(((after.content.bodyText ?? "") + after.content.bodyHTML).contains("Second."))
+        #expect(after.localVersion == 2 && !after.isDirty, "an open composer reloads on a newer version")
+        #expect(throws: StoreError.self) {
+            _ = try h.store.updateDraft(before.id, content: before.content, expectedVersion: before.localVersion)
+        }
+
+        try await h.syncer.refreshDrafts()
+        #expect(try #require(try h.store.draft(before.id)).localVersion == 2, "nothing changed, so the version stays")
+    }
+
+    @Test func aDraftSavedAgainWhileTheListingIsReadKeepsItsNewerLocalCopy() async throws {
+        let h = try await WriteHarness()
+        let id = try h.newDraft()
+        let first = try h.store.saveDraftRemotely(id)
+        let seeded = await h.gmail.seedDraft()
+        try h.store.complete(first, outcome: .draftSaved(gmailDraftID: GmailDraftID(seeded.draftID),
+                                                         gmailMessageID: GmailMessageID(seeded.messageID), version: 1))
+        try await h.syncer.refreshDrafts()
+        let before = try #require(try h.store.draft(id))
+        #expect(before.gmailMessageID?.rawValue == seeded.messageID)
+
+        let again = try h.store.saveDraftRemotely(id)
+        let store = h.store
+        await h.gmail.afterNext(.listDrafts) { _ in
+            try? store.complete(again, outcome: .draftSaved(gmailDraftID: GmailDraftID(seeded.draftID),
+                                                            gmailMessageID: GmailMessageID("newer-upload"), version: 1))
+        }
+        try await h.syncer.refreshDrafts()
+        let after = try #require(try h.store.draft(id))
+        #expect(after.state == .editing && after.gmailMessageID?.rawValue == "newer-upload")
+        #expect(after.content == before.content && after.localVersion == before.localVersion)
+    }
 }

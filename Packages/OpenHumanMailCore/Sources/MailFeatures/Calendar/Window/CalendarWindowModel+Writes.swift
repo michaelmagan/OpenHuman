@@ -235,8 +235,11 @@ extension CalendarWindowModel {
     func provider(for event: CalendarEvent) -> (key: String, provider: (any CalendarProviding)?) {
         let key = event.account?.lowercased() ?? sources.first?.key ?? ""
         if let found = providers[key] { return (key, found) }
-        // Why: a meeting drawn for several calendars must never fall back to another account's calendar
-        guard providers.count <= 1, !event.isMerged else { return (key, nil) }
+        // Why: a meeting drawn for several calendars must never fall back to another account's calendar, and neither
+        // must the event of an account whose calendar is no longer listed
+        let routed = environment.calendarConnections?.routesByAccount == true
+        let orphaned = routed && !providers.isEmpty && event.account?.isEmpty == false
+        guard providers.count <= 1, !event.isMerged, !orphaned else { return (key, nil) }
         let only: any CalendarProviding = providers.values.first ?? sidebar.provider
         return (key, only)
     }
@@ -326,7 +329,14 @@ extension CalendarWindowModel {
             closeCard()
             return
         }
+        // Why: the card can outlive its calendar (the account was removed or disconnected); it stays open and says so
+        let listed = provider(for: current.event).provider != nil
         if current.form != nil {
+            guard listed else {
+                current.note = Self.calendarGone
+                card = current
+                return
+            }
             await saveFormCard(current)
             return
         }
@@ -340,11 +350,20 @@ extension CalendarWindowModel {
             card = current
             return
         }
+        guard listed else {
+            current.note = Self.calendarGone
+            card = current
+            return
+        }
         if current.event.isRecurring {
             scopeQuestion = CalendarScopeQuestion(eventID: current.event.copyKey, action: .save)
             return
         }
         await commitSave(current)
+    }
+
+    static var calendarGone: String {
+        String(localized: "This event's calendar is no longer connected, so Mail didn't save your changes.")
     }
 
     public func respond(_ response: CalendarResponse) async {
@@ -636,10 +655,15 @@ extension CalendarWindowModel {
         if current.emailsPeople {
             hold(id, title: String(localized: "Saving \(event.title)… Google emails the attendees.")) { [weak self] in
                 do {
-                    var latest: CalendarEvent?
-                    if timesChanged { latest = try await target.moveEvent(event, to: start, end: end, sendUpdates: .all) }
-                    if !changes.isEmpty { latest = try await target.updateEvent(event, with: changes, sendUpdates: .all) }
-                    if let latest { self?.store(latest, replacing: event) }
+                    // Why: the move is stored before the details are sent, so a details failure still shows the new time
+                    if timesChanged {
+                        let moved = try await target.moveEvent(event, to: start, end: end, sendUpdates: .all)
+                        self?.store(moved, replacing: event)
+                    }
+                    if !changes.isEmpty {
+                        let updated = try await target.updateEvent(event, with: changes, sendUpdates: .all)
+                        self?.store(updated, replacing: event)
+                    }
                 } catch {
                     self?.failed(String(localized: "Couldn't save \(event.title). \(CalendarSidebarModel.message(error))"), id)
                     return
@@ -649,10 +673,8 @@ extension CalendarWindowModel {
             return
         }
         do {
-            var latest: CalendarEvent?
-            if timesChanged { latest = try await target.moveEvent(event, to: start, end: end, sendUpdates: .none) }
-            if !changes.isEmpty { latest = try await target.updateEvent(event, with: changes, sendUpdates: .none) }
-            if let latest { store(latest, replacing: event) }
+            if timesChanged { store(try await target.moveEvent(event, to: start, end: end, sendUpdates: .none), replacing: event) }
+            if !changes.isEmpty { store(try await target.updateEvent(event, with: changes, sendUpdates: .none), replacing: event) }
         } catch {
             failed(String(localized: "Couldn't save \(event.title). \(CalendarSidebarModel.message(error))"), id)
             return
@@ -816,10 +838,29 @@ extension CalendarWindowModel {
     }
 
     func failed(_ message: String, _ id: UUID) {
+        restoreAnswer(of: id)
         overlays[id] = nil
         dropLinkedOverlays(of: id)
         settling.remove(id)
         environment.notices.post(message, style: .error)
+    }
+
+    // An answer that was not sent leaves the open card on the answer the calendar has
+    func restoreAnswer(of id: UUID) {
+        guard case .response(let copyKey, let attempted)? = overlays[id], var current = card else { return }
+        func known(_ event: CalendarEvent) -> CalendarResponse? {
+            events.first { $0.copyKey == event.copyKey }?.myResponse ?? event.myResponse
+        }
+        var restored = false
+        if current.event.copyKey == copyKey, current.response == attempted {
+            current.response = known(current.event)
+            restored = true
+        }
+        if let row = current.copies.firstIndex(where: { $0.id == copyKey }), current.copies[row].response == attempted {
+            current.copies[row].response = known(current.copies[row].event)
+            restored = true
+        }
+        if restored { card = current }
     }
 
     func dropLinkedOverlays(of id: UUID) {
@@ -904,6 +945,7 @@ extension CalendarWindowModel {
         if let task = held.removeValue(forKey: id) {
             task.cancel()
             if case .removed(let key, _)? = overlays[id] { pendingRemovals.remove(key) }
+            restoreAnswer(of: id)
             overlays[id] = nil
             dropLinkedOverlays(of: id)
             settling.remove(id)

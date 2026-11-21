@@ -41,7 +41,7 @@ struct LearnedBehaviourSection: View {
                 }
             }
             SettingsRow(LearnedBehaviourCenter.resetTitle,
-                        detail: "Forgets what Mail learned on this Mac. Rules you accepted stay in the list above.") {
+                        detail: "Forgets what Mail learned on this Mac. Accepted rules stay.") {
                 Button("Reset…") { Task { await center.reset() } }
                     .disabled(center.observationCount == 0)
             }

@@ -18,6 +18,7 @@ public struct AITraceStep: Sendable, Hashable, Codable {
         case repairedJSON
         case summaryUsedForConversation
         case conversationShortened
+        case promptTagsRemoved
     }
 
     public var kind: Kind

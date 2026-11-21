@@ -51,7 +51,7 @@ public struct ReviewQueueView: View {
     }
 
     private func listRow(_ row: ReviewQueueModel.Row, selected: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: theme.space1) {
             Text(title(row))
                 .font((selected ? theme.typeBodyStrong : theme.typeBody).swiftUIFont)
                 .foregroundStyle(theme.textPrimary.color)
@@ -149,7 +149,7 @@ public struct ReviewQueueView: View {
                     .foregroundStyle(theme.textTertiary.color)
             }
             ForEach(context.recent) { message in
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: theme.space1) {
                     Text(message.from.map { $0.name ?? $0.email } ?? "").font(theme.typeBodyStrong.swiftUIFont)
                     Text(message.snippet).font(theme.typeBody.swiftUIFont).lineLimit(3)
                 }
@@ -182,7 +182,7 @@ public struct ReviewQueueView: View {
     private func recipientLine(_ label: String, _ people: [EmailAddress], flags: ReviewRecipientFlags) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: theme.space3) {
             Text(label).font(theme.typeMeta.swiftUIFont).foregroundStyle(theme.textTertiary.color).frame(width: 24, alignment: .leading)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: theme.space1) {
                 ForEach(people, id: \.email) { person in
                     let lower = person.email.lowercased()
                     HStack(spacing: theme.space3) {

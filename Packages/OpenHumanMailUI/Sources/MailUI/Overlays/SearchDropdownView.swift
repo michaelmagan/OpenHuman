@@ -333,7 +333,7 @@ struct SearchAskAIRow: View {
     var body: some View {
         Button(action: ask) {
             HStack(spacing: 8) {
-                Image(systemName: "sparkles")
+                Image(systemName: "sparkle")
                     .font(.system(size: NativeMetrics.Text.body))
                     .foregroundStyle(theme.textAI.color)
                     .frame(width: 18)
@@ -513,7 +513,7 @@ struct SearchContactPreviewView: View {
                         .accessibilityLabel("Domain \(domain)")
                 }
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, SearchTipsView.insetX)
             .padding(.bottom, NativeMetrics.Search.panelPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
         }

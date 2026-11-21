@@ -573,7 +573,6 @@ public final class InviteCenter {
 
     var heldCount: Int { held.count }
     var removalCount: Int { removals.count }
-    var recordCount: Int { records.count }
     func pendingLoad(_ key: MessageKey) -> Task<Void, Never>? { loads[key] }
     var heldTasks: [Task<Void, Never>] { Array(held.values) }
 }

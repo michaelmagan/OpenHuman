@@ -105,7 +105,7 @@ public struct CalendarSidebarView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: theme.space1) {
             HStack(alignment: .firstTextBaseline, spacing: theme.space3) {
                 let contact = router.environment.actions.superhumanCore?.contextSidebar
                 if let contact {
@@ -349,7 +349,7 @@ public struct CalendarSidebarView: View {
     private func pickedConflicts(_ timeline: CalendarDayTimeline) -> some View {
         let found = timeline.conflicts
         if !found.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: theme.space1) {
                 ForEach(found) { event in
                     Label {
                         Text("Busy then: \(event.title) · \(model.timeText(event.start, event.end))")
@@ -386,7 +386,7 @@ public struct CalendarSidebarView: View {
     @ViewBuilder
     private func freeTimes(_ day: CalendarSidebarModel.Day) -> some View {
         if !day.free.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: theme.space1) {
                 Text("Free (\(model.workdayText(day)))")
                     .themeFont(theme.typeLabel).foregroundStyle(theme.textTertiary.color)
                 ForEach(day.free, id: \.start) { gap in
@@ -544,7 +544,7 @@ struct CalendarDraftEditor: View {
     private func conflicts(_ timeline: CalendarDayTimeline) -> some View {
         let found = timeline.conflicts
         if !found.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: theme.space1) {
                 ForEach(found) { event in
                     Label {
                         Text("Conflicts with \(event.title) · \(model.timeText(event.start, event.end))")

@@ -82,7 +82,7 @@ struct CalendarDayView: View {
     }
 
     private func allDayBars(_ events: [CalendarEvent]) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: theme.space1) {
             ForEach(events, id: \.copyKey) { event in
                 let opened = model.isOpened(event)
                 let colors = CalendarPalette.block(CalendarDayTimeline.colorIndex(for: event),
@@ -235,9 +235,9 @@ struct CalendarDayView: View {
     }
 
     private func focusSlot(_ focus: CalendarDayTimeline.Span, width: CGFloat, height: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 4)
+        RoundedRectangle(cornerRadius: theme.radiusSM)
             .fill(theme.accentSubtle.color)
-            .overlay(RoundedRectangle(cornerRadius: 4)
+            .overlay(RoundedRectangle(cornerRadius: theme.radiusSM)
                 .strokeBorder(theme.accentFill.color, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])))
             .frame(width: width, height: max(CGFloat(focus.height) * height, 12))
             .offset(y: CGFloat(focus.top) * height)
@@ -329,7 +329,7 @@ struct CalendarDayView: View {
             }
         }
         .overlay { if model.isFocused(block.event) { focusRing } }
-        .contentShape(RoundedRectangle(cornerRadius: 4))
+        .contentShape(RoundedRectangle(cornerRadius: theme.radiusSM))
         .onTapGesture { open(block.event) }
         .offset(x: CGFloat(block.column) * (columnWidth + gap), y: CGFloat(block.top) * height)
         .help(block.event.title + "\n" + model.timeText(block.event.start, block.event.end)

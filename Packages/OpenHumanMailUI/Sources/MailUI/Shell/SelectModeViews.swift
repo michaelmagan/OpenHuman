@@ -85,7 +85,7 @@ struct CheckBeforeHint: View {
         let toast = theme.component.toast
         HStack(spacing: theme.space3) {
             HStack(spacing: theme.space3) {
-                Text("Want to select everything before this conversation? Hit")
+                Text("Select everything before this conversation? Hit")
                     .font(theme.typeBody.swiftUIFont)
                     .lineLimit(1)
                 HStack(spacing: theme.space1) {
@@ -118,7 +118,7 @@ struct CheckBeforeHint: View {
     }
 
     var spoken: String {
-        "Want to select everything before this conversation? Press \(SelectAllShortcuts.spoken(keycaps))."
+        "Select everything before this conversation? Press \(SelectAllShortcuts.spoken(keycaps))."
     }
 
     /// Only over the account's mail list on screen: not over a conversation, All Inboxes, or the Calendar, which is

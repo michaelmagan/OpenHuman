@@ -154,7 +154,7 @@ struct CalendarEventDetailRows: View {
 
     private var when: some View {
         row(symbol: "clock") {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: theme.space1) {
                 Text(verbatim: [details.dayText, details.timeText].compactMap { $0 }.joined(separator: " · "))
                     .foregroundStyle(theme.textPrimary.color)
                 ForEach([showsZone ? details.zoneText : nil, details.eventZoneText, details.repeatText].compactMap { $0 },

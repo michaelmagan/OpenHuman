@@ -46,10 +46,16 @@ public struct KeyChord: Hashable, Sendable {
         } else if !modifiers.intersection([.command, .control]).isEmpty, let digit = Self.digitKeys[event.keyCode] {
             self.init(.character(digit), modifiers: modifiers)
         } else if let chars = event.charactersIgnoringModifiers, !chars.isEmpty {
-            self.init(.character(chars), modifiers: modifiers)
+            self.init(.character(Self.withoutCapsLock(chars, modifiers)), modifiers: modifiers)
         } else {
             return nil
         }
+    }
+
+    /// Caps Lock upper-cases the letter a key reports. Only Shift makes a key its upper-case binding, so J with
+    /// Caps Lock on is still J, not ⇧J.
+    static func withoutCapsLock(_ characters: String, _ modifiers: NSEvent.ModifierFlags) -> String {
+        modifiers.contains(.capsLock) && !modifiers.contains(.shift) ? characters.lowercased() : characters
     }
 
     static let digitKeys: [UInt16: String] = [

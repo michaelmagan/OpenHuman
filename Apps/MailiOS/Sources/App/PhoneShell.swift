@@ -9,6 +9,7 @@ struct PhoneShell: View {
     @Environment(\.touch) private var theme
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(environment: AppEnvironment) {
         _phone = State(initialValue: PhoneMail(environment: environment))
@@ -28,7 +29,7 @@ struct PhoneShell: View {
             }
             if phone.reader == nil {
                 BottomChrome(phone: phone)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(reduceMotion ? AnyTransition.opacity : .move(edge: .bottom).combined(with: .opacity))
             }
             ToastHost(phone: phone)
         }
@@ -89,12 +90,13 @@ struct PhoneShell: View {
 struct ToastHost: View {
     let phone: PhoneMail
     @Environment(\.touch) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: theme.tokens.component.toast.gap) {
             ForEach(phone.notices.toasts) { toast in
                 ToastPill(toast: toast) { phone.activate(toast) }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(reduceMotion ? AnyTransition.opacity : .move(edge: .bottom).combined(with: .opacity))
             }
         }
         .padding(.horizontal, theme.tokens.space4)

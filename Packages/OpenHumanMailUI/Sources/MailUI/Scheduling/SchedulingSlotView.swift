@@ -90,7 +90,7 @@ public struct SchedulingSlotView: View {
                         Button(String(localized: "Accept \(assistant.clockText(analysis.proposal.start)) and move \(SchedulingAssistantText.title(event.title))")) {
                             Task { await assistant.draft(.acceptAndMove(moves), in: thread) }
                         }
-                        .help("Reply that their time works; Mail offers to move this meeting after you send the reply.")
+                        .help("Reply that their time works; Mail offers to move this meeting after you send it.")
                     }
                     Button("Keep") { assistant.conflictThread = nil }
                         .help("Keep this meeting where it is.")

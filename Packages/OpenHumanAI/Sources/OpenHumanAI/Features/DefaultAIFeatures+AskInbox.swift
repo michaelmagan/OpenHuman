@@ -46,22 +46,24 @@ extension DefaultAIFeatures {
                     continuation.yield(.started(engine.provenance(prepared)))
                     started = true
                 }
+                var scaffolding = PromptScaffoldingFilter(nonce: nonce)
                 var sources = SourcesLineFilter()
                 var capper = StreamCapper(maxTokens: output.maxTokens)
                 let outcome = try await self.run(prepared, engine: engine, untrustedTokens: used) { delta in
-                    let shown = capper.accept(sources.feed(delta))
+                    let shown = capper.accept(sources.feed(scaffolding.feed(delta)))
                     if !shown.isEmpty {
                         emitted = true
                         continuation.yield(.textDelta(shown))
                     }
                     return true
                 }
-                let tail = capper.accept(sources.finish())
+                let tail = capper.accept(sources.feed(scaffolding.finish()) + sources.finish())
                 if !tail.isEmpty { continuation.yield(.textDelta(tail)) }
                 let citations = OutputGuard.filterCitations(sources.cited, allowed: included)
                 continuation.yield(.citations(citations))
                 let suspicious = OutputGuard.isSuspicious(outcome.text, nonce: nonce)
                 var steps: [AITraceStep] = []
+                if scaffolding.removedAny { steps.append(AITraceStep(.promptTagsRemoved)) }
                 if outcome.text.range(of: SourcesLineFilter.marker, options: .caseInsensitive) != nil {
                     steps.append(AITraceStep(.sourcesLineRemoved))
                 }

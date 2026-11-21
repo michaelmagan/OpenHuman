@@ -42,6 +42,9 @@ struct SwipeRow<Content: View>: View {
         .accessibilityAction(named: "Done") { phone.perform(.markDone, on: row.id, source: .menu) }
         .accessibilityAction(named: "Remind me") { phone.askReminder(row.id, source: .menu) }
         .accessibilityAction(named: row.isStarred ? "Unstar" : "Star") { phone.perform(.toggleStar, on: row.id, source: .menu) }
+        .accessibilityAction(named: row.isUnread ? "Mark read" : "Mark unread") {
+            phone.perform(.toggleRead, on: row.id, source: .menu)
+        }
         .accessibilityAction(named: "Trash") { phone.perform(.trash, on: row.id, source: .menu) }
         .accessibilityIdentifier("row.\(row.id.rowID)")
     }

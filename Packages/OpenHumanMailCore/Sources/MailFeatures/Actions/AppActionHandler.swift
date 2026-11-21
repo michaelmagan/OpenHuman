@@ -52,7 +52,7 @@ final class AppActionHandler: ActionHandler {
                 do {
                     try await settings.set(AppSettings.syncRequestAt, stamp)
                 } catch {
-                    feedback.failed("Couldn't ask Mail to check for new mail. Try again.")
+                    feedback.failed("Couldn't check for new mail. Try again.")
                 }
             })
         case .addAccount:

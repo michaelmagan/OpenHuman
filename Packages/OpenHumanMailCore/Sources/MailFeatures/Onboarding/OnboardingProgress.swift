@@ -33,11 +33,11 @@ public enum OnboardingStep: String, Sendable, Hashable, Codable, CaseIterable {
     public var laterNote: String? {
         switch self {
         case .welcome, .ready, .inboxes, .connectEmail: nil
-        case .calendar: "You can connect it later in Settings › Calendar."
-        case .permissions: "You can change these later in System Settings and in Mail's Settings › Notifications and General."
-        case .look: "You can change the look any time in Settings › Appearance."
-        case .keys: "The shortcuts are always listed under Settings › Shortcuts, or press ? in Mail."
-        case .ai: "You can change this any time in Settings › AI."
+        case .calendar: "Connect it later in Settings › Calendar."
+        case .permissions: "Change these later in System Settings and in Mail's Settings › Notifications and General."
+        case .look: "Change the look any time in Settings › Appearance."
+        case .keys: "Shortcuts are listed under Settings › Shortcuts, or press ? in Mail."
+        case .ai: "Change this any time in Settings › AI."
         }
     }
 }

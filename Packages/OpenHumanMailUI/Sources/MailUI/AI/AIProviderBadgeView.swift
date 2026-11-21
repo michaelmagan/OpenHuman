@@ -16,7 +16,7 @@ public struct AIProviderBadgeView: View {
     }
 
     public var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: theme.space2) {
             Image(systemName: badge.symbol).font(.system(size: 10))
             Text(verbatim: short ? badge.short : badge.title).font(theme.typeCaption.swiftUIFont)
         }

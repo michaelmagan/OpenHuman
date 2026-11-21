@@ -309,7 +309,8 @@ public final class ReaderViewController: NSViewController {
             column.setCustomSpacing(theme.space8, after: subjectRow)
         }
         if !aiAccessoryResolved { addAIAccessory(model) }
-        let subject = model.state == .missing ? "This conversation is no longer here." : model.subject
+        let subject = ReaderFormatting.conversationTitle(subject: model.subject, state: model.state,
+                                                         hasMessages: !messages.isEmpty)
         if subjectLabel.stringValue != subject { subjectLabel.stringValue = subject }
         renderMeta(model)
 
@@ -741,7 +742,6 @@ public final class ReaderViewController: NSViewController {
     var subjectView: NSView { subjectLabel }
     var subjectContainer: NSView { subjectRow }
     var metaLabelView: NSTextField { metaLabel }
-    var metaText: String { metaLabel.attributedStringValue.string }
 
     func perform(_ action: ActionID, source: ActionSource = .toolbar) {
         guard let router else { return }
@@ -760,7 +760,10 @@ public final class ReaderViewController: NSViewController {
 
     func handleKey(_ event: NSEvent) -> Bool {
         guard let model, !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control),
-              !event.modifierFlags.contains(.option), let chars = event.charactersIgnoringModifiers else { return false }
+              !event.modifierFlags.contains(.option),
+              let chars = event.charactersIgnoringModifiers.map({ KeyChord.withoutCapsLock($0, event.modifierFlags) }) else {
+            return false
+        }
         switch event.keyCode {
         case 125 where !event.modifierFlags.contains(.shift): return model.focusNext()
         case 126 where !event.modifierFlags.contains(.shift): return model.focusPrevious()

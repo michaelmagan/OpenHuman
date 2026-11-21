@@ -16,7 +16,7 @@ public enum AttachmentRisk: Sendable, Hashable {
         for ext in ["pkg", "mpkg"] { map[ext] = .installer }
         for ext in ["dmg", "iso", "img", "sparseimage", "sparsebundle", "cdr"] { map[ext] = .diskImage }
         map["mobileconfig"] = .changesSettings
-        for ext in ["webloc", "fileloc", "inetloc", "url"] { map[ext] = .opensLocation }
+        for ext in ["webloc", "fileloc", "inetloc", "afploc", "ftploc", "vncloc", "url"] { map[ext] = .opensLocation }
         return map
     }()
 

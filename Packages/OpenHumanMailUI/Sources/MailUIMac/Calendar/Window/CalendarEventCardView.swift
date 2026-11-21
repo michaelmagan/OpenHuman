@@ -231,7 +231,7 @@ struct CalendarEventCardView: View {
         return VStack(alignment: .leading, spacing: theme.space1) {
             Text(move.kind == .resized ? "Change the length?" : "Move this event?")
                 .themeFont(theme.typeHeadline).foregroundStyle(theme.textPrimary.color)
-            Grid(alignment: .leading, horizontalSpacing: theme.space3, verticalSpacing: 2) {
+            Grid(alignment: .leading, horizontalSpacing: theme.space3, verticalSpacing: theme.space1) {
                 GridRow {
                     Text("From").foregroundStyle(theme.textTertiary.color)
                     Text(CalendarPendingMove.line(move.originalStart, move.originalEnd, zone: model.cardTimeZone))

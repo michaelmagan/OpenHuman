@@ -236,7 +236,7 @@ public struct AskPanelView: View {
                     .font(.system(size: NativeMetrics.Text.body))
                     .fixedSize(horizontal: false, vertical: true)
             } icon: {
-                Image(systemName: "exclamationmark.triangle.fill")
+                Image(systemName: "exclamationmark.triangle")
                     .symbolRenderingMode(.monochrome)
                     .foregroundStyle(.orange)
             }

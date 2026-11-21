@@ -425,6 +425,34 @@ func soon(_ condition: @MainActor () -> Bool, sourceLocation: SourceLocation = #
         #expect(recovery.load(key, version: version) == nil)
     }
 
+    @Test func aDraftChangedElsewhereReloadsInTheOpenComposerAndUnsavedTextIsKept() async throws {
+        let f = ComposeFixture()
+        await f.loaded()
+        let session = try #require(f.compose.openNew(placement: .modal))
+        session.to.text = "dana@acme.example,"
+        session.updateBody(doc("First"))
+        await soon { session.draftKey != nil && session.saveState == .saved }
+        let key = try #require(session.draftKey)
+
+        func elsewhere(_ text: String) -> DraftFields {
+            DraftFields(from: EmailAddress(email: "robin@example.com"), to: [EmailAddress(email: "dana@acme.example")],
+                        subject: "Edited", bodyHTML: "<div dir=\"auto\"><p>\(text)</p></div>")
+        }
+        _ = try await f.store.updateDraft(key, elsewhere("Edited elsewhere"), expectedVersion: nil)
+        await soon { session.plainText == "Edited elsewhere" }
+        #expect(session.subject == "Edited" && session.notice == nil)
+        #expect(session.version == (try #require(await f.draftRow(key))).version)
+
+        session.stopObserving()
+        _ = try await f.store.updateDraft(key, elsewhere("Edited elsewhere again"), expectedVersion: nil)
+        let moved = try #require(await f.draftRow(key)).version
+        session.updateBody(doc("Typed here"))
+        await soon { session.version == moved + 1 && session.saveState == .saved }
+        #expect(session.plainText == "Typed here", "what is typed in this window is never dropped")
+        #expect(try #require(await f.draftRow(key)).fields.bodyHTML.contains("Typed here"))
+        #expect(session.notice?.kind == .warning)
+    }
+
     @Test func popOutMovesTheSameSessionAndOneComposerShowsInTheWindow() async throws {
         let f = ComposeFixture()
         await f.loaded()

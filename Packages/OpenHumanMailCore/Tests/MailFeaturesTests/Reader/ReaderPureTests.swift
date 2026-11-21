@@ -116,9 +116,9 @@ struct ReaderPureTests {
     }
 
     @Test func bannerAndWarningText() throws {
-        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 0) == "Remote images are hidden to keep your reading private.")
-        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 1) == "1 remote image hidden to keep your reading private.")
-        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 3) == "3 remote images hidden to keep your reading private.")
+        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 0) == "Remote images hidden for privacy.")
+        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 1) == "1 remote image hidden for privacy.")
+        #expect(ReaderFormatting.imagesHiddenText(blockedCount: 3) == "3 remote images hidden for privacy.")
         #expect(ReaderFormatting.imagesShownText(source: .once, trackerCount: 2) == "Images shown · 2 trackers blocked")
         #expect(ReaderFormatting.imagesShownText(source: .allowlist("@example.com"), trackerCount: 0)
             == "Images always shown for example.com")
@@ -248,5 +248,32 @@ struct ReaderPureTests {
         #expect(await again.value != nil)
         #expect(await queue.renderCount == 1)
         #expect(await queue.skippedCancelled == 1)
+    }
+}
+
+@MainActor
+struct ReaderStateTextTests {
+    @Test func aConversationThatCannotBeShownSaysWhy() {
+        #expect(ReaderFormatting.conversationTitle(subject: "Plans", state: .loaded, hasMessages: true) == "Plans")
+        #expect(ReaderFormatting.conversationTitle(subject: "", state: .loading, hasMessages: false) == "")
+        #expect(ReaderFormatting.conversationTitle(subject: "Plans", state: .missing, hasMessages: false)
+            == "This conversation is no longer here.")
+        #expect(ReaderFormatting.conversationTitle(subject: "", state: .failed("x"), hasMessages: false)
+            == "Couldn't open this conversation.")
+        #expect(ReaderFormatting.conversationTitle(subject: "Plans", state: .failed("x"), hasMessages: true) == "Plans")
+    }
+
+    @Test func filesThatRunOrOpenSomethingAskBeforeOpening() {
+        #expect(AttachmentRisk.of(filename: "Report.pdf") == nil)
+        #expect(AttachmentRisk.of(filename: "Setup.APP") == .runsCode)
+        #expect(AttachmentRisk.of(filename: "update.pkg") == .installer)
+        #expect(AttachmentRisk.of(filename: "site.webloc") == .opensLocation)
+        #expect(AttachmentRisk.of(filename: "share.afploc") == .opensLocation)
+        #expect(AttachmentRisk.of(filename: "files.ftploc") == .opensLocation)
+        #expect(AttachmentRisk.of(filename: "screen.vncloc") == .opensLocation)
+        #expect(ReaderFormatting.openWarning(filename: "notes.txt") == nil)
+        #expect(ReaderFormatting.openWarning(filename: "share.afploc")?.title == "Open “share.afploc”?")
+        let onDisk = URL(fileURLWithPath: "/tmp/cache/run.command")
+        #expect(ReaderFormatting.openWarning(filename: "notes.txt", file: onDisk) != nil)
     }
 }
