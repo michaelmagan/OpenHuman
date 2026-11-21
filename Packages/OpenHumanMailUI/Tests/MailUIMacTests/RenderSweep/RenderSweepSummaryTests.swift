@@ -38,7 +38,7 @@ extension RenderSweepTests {
             }
             let text = String(repeating: sentence, count: sentences)
             provider.write(text)
-            try await until { line.textLabel.stringValue == text }
+            try await until { line.textLabel.stringValue == SummaryLayoutJumpTests.shown(text) }
             let column = try #require(line.superview as? NSStackView)
             let index = try #require(column.arrangedSubviews.firstIndex { $0 === line })
             let card = column.arrangedSubviews[index + 1]
