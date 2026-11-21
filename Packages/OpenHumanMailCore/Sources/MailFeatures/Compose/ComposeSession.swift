@@ -138,6 +138,8 @@ public final class ComposeSession: Identifiable {
     public private(set) var source: DraftSource = .user
     public private(set) var review: DraftReview = .none
     public var notice: Notice?
+    // True while another version of this draft exists and the user has not chosen between the two
+    public private(set) var offersConflictChoice = false
     public internal(set) var pendingReminder: PendingReminder?
     public private(set) var linkRecipients: [EmailAddress]?
     public private(set) var linkTriedBcc = false
@@ -184,6 +186,12 @@ public final class ComposeSession: Identifiable {
     @ObservationIgnored private var dirty = false
     @ObservationIgnored private var isSaving = false
     @ObservationIgnored private var loading = false
+    // The version another device or an agent wrote, kept after this window's text was saved over it
+    @ObservationIgnored private var otherVersion: DraftSummary?
+    @ObservationIgnored private var storedConflict = false
+    @ObservationIgnored private var resolvingConflict = false
+    // What the stored draft held when this window last loaded or saved it
+    @ObservationIgnored private var savedFields: DraftFields?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var saveChain: Task<Bool, Never>?
     @ObservationIgnored private var observeTask: Task<Void, Never>?
@@ -635,11 +643,13 @@ public final class ComposeSession: Identifiable {
         do {
             if let key = draftKey {
                 version = try await commands.updateDraft(key, fields, expectedVersion: version)
+                savedFields = fields
             } else {
                 let created = try await commands.createDraft(DraftInput(account: account.id, mode: mode, replyTo: replyTo,
                                                                          content: fields))
                 draftKey = created.key
                 version = created.version
+                savedFields = fields
                 services.draftOpened(created.key)
                 startObserving(created.key)
             }
@@ -660,10 +670,16 @@ public final class ComposeSession: Identifiable {
                 version = row.version
                 apply(row: row)
                 dirty = true
-                notice = Notice(.warning, String(localized: "This draft also changed somewhere else. Mail kept what you have here."))
+                // A version that moved without new content (a schedule, a review state) leaves nothing to choose
+                if row.fields != savedFields {
+                    otherVersion = row
+                    refreshConflictChoice()
+                }
                 return await performSave(force: force, afterConflict: true)
             }
             saveState = .saved
+            otherVersion = nil
+            refreshConflictChoice()
             load(from: row, recovered: nil)
             notice = Notice(.warning, String(localized: "This draft changed somewhere else. Mail reloaded it."))
             return false
@@ -679,6 +695,7 @@ public final class ComposeSession: Identifiable {
         defer { loading = false }
         draftKey = row.id
         version = row.version
+        savedFields = row.fields
         if let original = row.replyToGmailMessageID { replyToGmailMessageID = original }
         to.setTokens(row.fields.to)
         cc.setTokens(row.fields.cc)
@@ -763,8 +780,73 @@ public final class ComposeSession: Identifiable {
             return
         }
         apply(row: row)
+        if !resolvingConflict, row.hasRemoteConflict != storedConflict {
+            storedConflict = row.hasRemoteConflict
+            refreshConflictChoice()
+        }
+        if let version, row.version == version { savedFields = row.fields }
         if let version, row.version > version, !dirty, !isSaving {
-            load(from: row, recovered: nil)
+            // Why: reloading the same content would only move the caret
+            if row.fields == savedFields { self.version = row.version } else { load(from: row, recovered: nil) }
+        }
+    }
+
+    private func refreshConflictChoice() {
+        let offers = otherVersion != nil || storedConflict
+        if offers != offersConflictChoice { offersConflictChoice = offers }
+    }
+
+    public static var conflictText: String { String(localized: "This draft also changed somewhere else.") }
+
+    /// Keeps this window's text. The other version is dropped.
+    public func keepMine() async {
+        guard offersConflictChoice else { return }
+        let stored = storedConflict
+        otherVersion = nil
+        storedConflict = false
+        refreshConflictChoice()
+        guard stored, let key = draftKey, let commands = services.commands else { return }
+        resolvingConflict = true
+        defer { resolvingConflict = false }
+        do {
+            try await commands.resolveDraftConflict(key, .keepLocal)
+        } catch {
+            storedConflict = true
+            refreshConflictChoice()
+            notice = Notice(.error, String(localized: "Couldn't keep this version. Try again."))
+        }
+    }
+
+    /// Replaces this window's text with the other version and saves it.
+    public func takeTheirs() async {
+        guard offersConflictChoice, let key = draftKey, let commands = services.commands else { return }
+        saveTask?.cancel()
+        saveTask = nil
+        _ = await saveChain?.value
+        if let theirs = otherVersion {
+            otherVersion = nil
+            refreshConflictChoice()
+            let current = version
+            load(from: theirs, recovered: nil)
+            version = current
+            if let fresh = await services.draftRow(key) {
+                version = fresh.version
+                apply(row: fresh)
+            }
+            hasUserEdits = true
+            dirty = true
+            await save()
+            return
+        }
+        resolvingConflict = true
+        defer { resolvingConflict = false }
+        do {
+            try await commands.resolveDraftConflict(key, .takeRemote)
+            storedConflict = false
+            refreshConflictChoice()
+            if let row = await services.draftRow(key) { load(from: row, recovered: nil) }
+        } catch {
+            notice = Notice(.error, String(localized: "Couldn't load the other version. Try again."))
         }
     }
 

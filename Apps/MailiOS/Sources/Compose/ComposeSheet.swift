@@ -52,6 +52,7 @@ struct ComposeSheet: View {
                     .padding(.horizontal, theme.tokens.space5)
                     .padding(.vertical, theme.tokens.space2)
             }
+            if session.offersConflictChoice { conflictChoice }
             ZStack(alignment: .topLeading) {
                 if text.isEmpty {
                     Text(isReply ? "Write your reply" : "Write your message")
@@ -124,6 +125,24 @@ struct ComposeSheet: View {
         }
         .padding(.horizontal, theme.tokens.space4)
         .padding(.vertical, theme.tokens.space3)
+    }
+
+    private var conflictChoice: some View {
+        HStack(spacing: theme.tokens.space3) {
+            Text(ComposeSession.conflictText)
+                .font(theme.snippet)
+                .foregroundStyle(theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button("Keep mine") { Task { await session.keepMine() } }
+                .accessibilityIdentifier("compose.conflict.keepMine")
+            Button("Take theirs") { Task { await session.takeTheirs() } }
+                .accessibilityIdentifier("compose.conflict.takeTheirs")
+        }
+        .font(theme.snippet)
+        .buttonStyle(.plain)
+        .foregroundStyle(theme.accent)
+        .frame(minHeight: 44)
+        .padding(.horizontal, theme.tokens.space5)
     }
 
     private var divider: some View {

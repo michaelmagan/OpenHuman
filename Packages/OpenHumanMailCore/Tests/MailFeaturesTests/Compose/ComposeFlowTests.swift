@@ -450,7 +450,90 @@ func soon(_ condition: @MainActor () -> Bool, sourceLocation: SourceLocation = #
         await soon { session.version == moved + 1 && session.saveState == .saved }
         #expect(session.plainText == "Typed here", "what is typed in this window is never dropped")
         #expect(try #require(await f.draftRow(key)).fields.bodyHTML.contains("Typed here"))
-        #expect(session.notice?.kind == .warning)
+        #expect(session.offersConflictChoice && session.notice == nil, "the other version is offered")
+
+        await session.takeTheirs()
+        #expect(session.plainText == "Edited elsewhere again" && session.subject == "Edited")
+        #expect(!session.offersConflictChoice && session.saveState == .saved)
+        let taken = try #require(await f.draftRow(key))
+        #expect(taken.fields.bodyHTML.contains("Edited elsewhere again") && session.version == taken.version)
+    }
+
+    @Test func keepingMineAfterADraftChangedElsewhereLeavesTheTextAndEndsTheChoice() async throws {
+        let f = ComposeFixture()
+        await f.loaded()
+        let session = try #require(f.compose.openNew(placement: .modal))
+        session.to.text = "dana@acme.example,"
+        session.updateBody(doc("First"))
+        await soon { session.draftKey != nil && session.saveState == .saved }
+        let key = try #require(session.draftKey)
+        #expect(!session.offersConflictChoice)
+
+        session.stopObserving()
+        let theirs = DraftFields(from: EmailAddress(email: "robin@example.com"), to: [EmailAddress(email: "dana@acme.example")],
+                                 subject: "Edited", bodyHTML: "<div dir=\"auto\"><p>Edited elsewhere</p></div>")
+        _ = try await f.store.updateDraft(key, theirs, expectedVersion: nil)
+        session.updateBody(doc("Typed here"))
+        await soon { session.offersConflictChoice && session.saveState == .saved }
+        session.updateBody(doc("Typed here, and more"))
+        #expect(session.offersConflictChoice, "typing does not answer the question")
+
+        await session.keepMine()
+        #expect(!session.offersConflictChoice && session.plainText == "Typed here, and more")
+        await session.takeTheirs()
+        #expect(session.plainText == "Typed here, and more", "nothing is left to take once the choice is made")
+        await soon { session.saveState == .saved }
+        #expect(try #require(await f.draftRow(key)).fields.bodyHTML.contains("Typed here, and more"))
+    }
+
+    @Test func aVersionThatMovedWithoutNewContentAsksNothing() async throws {
+        let f = ComposeFixture()
+        await f.loaded()
+        let session = try #require(f.compose.openNew(placement: .modal))
+        session.to.text = "dana@acme.example,"
+        session.updateBody(doc("First"))
+        await soon { session.draftKey != nil && session.saveState == .saved }
+        let key = try #require(session.draftKey)
+        let created = try #require(session.version)
+        session.updateBody(doc("Second"))
+        await soon { session.version == created + 1 && session.saveState == .saved }
+
+        session.stopObserving()
+        let stored = try #require(await f.draftRow(key))
+        _ = try await f.store.updateDraft(key, stored.fields, expectedVersion: nil)
+        let moved = try #require(await f.draftRow(key)).version
+        session.updateBody(doc("Typed here"))
+        await soon { session.version == moved + 1 && session.saveState == .saved }
+        #expect(!session.offersConflictChoice && session.notice == nil && session.plainText == "Typed here")
+    }
+
+    @Test func aConflictKeptInTheStoreIsAnsweredFromTheComposer() async throws {
+        func fields(_ text: String) -> DraftFields {
+            DraftFields(from: EmailAddress(email: "robin@example.com"), to: [EmailAddress(email: "dana@acme.example")],
+                        subject: "Plan", bodyHTML: "<div dir=\"auto\"><p>\(text)</p></div>")
+        }
+        for takesTheirs in [true, false] {
+            let f = ComposeFixture()
+            await f.loaded()
+            let key = f.store.agentCreatesDraft(account: ComposeFixture.work, fields: fields("First version"))
+            let session = try #require(await f.compose.openDraft(key).value)
+            let opened = try #require(session.version)
+            #expect(!session.offersConflictChoice)
+            session.updateBody(doc("My own words"))
+            await soon { session.version == opened + 1 && session.saveState == .saved }
+            f.store.agentUpdatesDraft(key, fields: fields("Second version"))
+            await soon { session.offersConflictChoice }
+            #expect(session.plainText == "My own words", "the stored conflict changes nothing by itself")
+
+            if takesTheirs { await session.takeTheirs() } else { await session.keepMine() }
+            #expect(!session.offersConflictChoice)
+            #expect(f.recorder.calls.filter { $0 == "resolveDraftConflict" }.count == 1)
+            let row = try #require(await f.draftRow(key))
+            #expect(!row.hasRemoteConflict)
+            #expect(session.plainText == (takesTheirs ? "Second version" : "My own words"))
+            #expect(row.fields.bodyHTML.contains(takesTheirs ? "Second version" : "My own words"))
+            #expect(session.version == row.version)
+        }
     }
 
     @Test func popOutMovesTheSameSessionAndOneComposerShowsInTheWindow() async throws {
