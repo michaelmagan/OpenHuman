@@ -151,7 +151,9 @@ import Testing
         await f.run(.commandPalette)
         let palette = try #require(f.palette)
         palette.query = "snooze"
-        #expect(!palette.entries.contains { $0.title.lowercased().contains("snooze") }, "no snooze entry: \(palette.entries.map(\.title))")
+        // Searching mail for the typed word is still offered
+        let offered = palette.entries.filter { $0.kind != .searchMail("snooze") }
+        #expect(!offered.contains { $0.title.lowercased().contains("snooze") }, "no snooze entry: \(palette.entries.map(\.title))")
         #expect(f.registry.availability(.remind, host: f.router) == .enabled)
     }
 
