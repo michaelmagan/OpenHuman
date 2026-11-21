@@ -9,6 +9,7 @@ extension AccountSyncer {
     public func refreshDrafts() async throws -> Int {
         let started = clock.now
         let generation = try store.syncStatus(account: account).generation
+        let uploadedBefore = try uploadedDraftIDs()
         var listed: [GmailDraft] = []
         var token: String?
         var calls = 0, units = 0
@@ -59,6 +60,10 @@ extension AccountSyncer {
             let result = try store.upsertMessages(messages, account: account, generation: generation)
             if !result.unknownLabelIDs.isEmpty { try await refreshLabels() }
         }
+        // Why: a draft first uploaded after the listing was read is missing from it, not deleted; the next refresh decides
+        if complete, !(try uploadedDraftIDs()).subtracting(uploadedBefore).isSubset(of: Set(listed.map(\.id))) {
+            complete = false
+        }
         try store.reconcileRemoteDrafts(drafts, account: account, complete: complete)
         draftCache = cache
         let finished = clock.now
@@ -68,5 +73,10 @@ extension AccountSyncer {
                   Counts(added: 0, changed: drafts.count, deleted: 0), errorCode: nil)
         log.info("account \(account.rawValue): drafts refreshed (\(listed.count) listed, \(complete ? "complete" : "partial"))")
         return drafts.count
+    }
+
+    private func uploadedDraftIDs() throws -> Set<String> {
+        Set(try store.drafts(account: account, states: [.editing, .scheduled, .failed], limit: Int.max / 2)
+            .compactMap(\.gmailDraftID?.rawValue))
     }
 }

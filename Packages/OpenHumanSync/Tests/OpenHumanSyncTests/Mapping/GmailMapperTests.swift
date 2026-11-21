@@ -80,6 +80,9 @@ import Testing
         #expect(batch.labelDeltas.map(\.historyID.rawValue) == [105, 106])
         #expect(batch.labelDeltas[0].removed == [GmailLabelID("INBOX")] && batch.labelDeltas[1].added == [GmailLabelID("Label_9")])
         #expect(batch.labelDeltas.allSatisfy { $0.fullSetIfKnown == nil })
+        #expect(batch.addedLabelDeltas.map(\.gmailMessageID.rawValue) == ["a"])
+        #expect(batch.addedLabelDeltas.first?.historyID == HistoryID(102))
+        #expect(batch.addedLabelDeltas.first?.added == [GmailLabelID("STARRED")])
         #expect(batch.touchesDrafts && batch.unknownLabelIDs == ["Label_9"])
     }
 

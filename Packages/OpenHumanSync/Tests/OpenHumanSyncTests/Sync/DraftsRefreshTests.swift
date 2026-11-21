@@ -64,4 +64,24 @@ import Testing
         let rows = try draftRows(location)
         #expect(Set(rows.map(\.gmailDraftID)) == [first.id, second.id] && rows.allSatisfy { $0.state == "editing" })
     }
+
+    @Test func aDraftFirstUploadedWhileTheListingIsReadIsNotDiscarded() async throws {
+        let h = try await WriteHarness()
+        let id = try h.newDraft()
+        let op = try h.store.saveDraftRemotely(id)
+        let store = h.store
+        await h.gmail.afterNext(.listDrafts) { gmail in
+            let remote = gmail.seedDraft()
+            try? store.complete(op, outcome: .draftSaved(gmailDraftID: GmailDraftID(remote.draftID),
+                                                         gmailMessageID: GmailMessageID(remote.messageID), version: 1))
+        }
+        try await h.syncer.refreshDrafts()
+        var draft = try #require(try h.store.draft(id))
+        #expect(draft.state == .editing && draft.gmailDraftID != nil)
+
+        try await h.syncer.refreshDrafts()
+        draft = try #require(try h.store.draft(id))
+        #expect(draft.state == .editing && draft.gmailDraftID != nil)
+        #expect(try h.store.drafts(account: h.account, states: [], limit: 10).count == 1)
+    }
 }

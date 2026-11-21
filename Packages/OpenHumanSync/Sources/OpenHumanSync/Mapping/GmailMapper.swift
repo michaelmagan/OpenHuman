@@ -8,13 +8,16 @@ struct HistoryBatch: Sendable, Equatable {
     var addedMessageIDs: [String] = []
     var deletedMessageIDs: [String] = []
     var labelDeltas: [LabelDelta] = []
+    // Why: a message this batch adds is fetched whole, unless it is already stored; then only these carry its changes
+    var addedLabelDeltas: [LabelDelta] = []
     var touchesDrafts = false
     var unknownLabelIDs: Set<String> = []
     var deleteHistoryID: HistoryID?
 
     static func == (a: HistoryBatch, b: HistoryBatch) -> Bool {
         a.addedMessageIDs == b.addedMessageIDs && a.deletedMessageIDs == b.deletedMessageIDs
-            && a.labelDeltas.map(DeltaKey.init) == b.labelDeltas.map(DeltaKey.init) && a.touchesDrafts == b.touchesDrafts
+            && a.labelDeltas.map(DeltaKey.init) == b.labelDeltas.map(DeltaKey.init)
+            && a.addedLabelDeltas.map(DeltaKey.init) == b.addedLabelDeltas.map(DeltaKey.init) && a.touchesDrafts == b.touchesDrafts
             && a.unknownLabelIDs == b.unknownLabelIDs && a.deleteHistoryID == b.deleteHistoryID
     }
 
@@ -143,6 +146,9 @@ enum GmailMapper {
         batch.addedMessageIDs = added.filter { !deletedSet.contains($0) }
         batch.labelDeltas = deltas.filter {
             !addedSet.contains($0.gmailMessageID.rawValue) && !deletedSet.contains($0.gmailMessageID.rawValue)
+        }
+        batch.addedLabelDeltas = deltas.filter {
+            addedSet.contains($0.gmailMessageID.rawValue) && !deletedSet.contains($0.gmailMessageID.rawValue)
         }
         batch.deleteHistoryID = maxDelete.map { HistoryID($0) }
         return batch
