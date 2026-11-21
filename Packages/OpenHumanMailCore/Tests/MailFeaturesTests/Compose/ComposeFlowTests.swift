@@ -482,7 +482,7 @@ func soon(_ condition: @MainActor () -> Bool, sourceLocation: SourceLocation = #
         #expect(!session.offersConflictChoice && session.plainText == "Typed here, and more")
         await session.takeTheirs()
         #expect(session.plainText == "Typed here, and more", "nothing is left to take once the choice is made")
-        await soon { session.saveState == .saved }
+        await session.settle()
         #expect(try #require(await f.draftRow(key)).fields.bodyHTML.contains("Typed here, and more"))
     }
 
