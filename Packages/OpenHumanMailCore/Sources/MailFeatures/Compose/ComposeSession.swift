@@ -622,7 +622,7 @@ public final class ComposeSession: Identifiable {
         _ = await saveChain?.value
     }
 
-    private func performSave(force: Bool) async -> Bool {
+    private func performSave(force: Bool, afterConflict: Bool = false) async -> Bool {
         guard canPersist, let commands = services.commands else { return false }
         await preparation?.value
         if draftKey != nil, !dirty { return true }
@@ -651,11 +651,21 @@ public final class ComposeSession: Identifiable {
             if dirty { scheduleSave() }
             return !dirty
         } catch MailPortError.conflict {
-            saveState = .saved
-            if let key = draftKey, let row = await services.draftRow(key) {
-                load(from: row, recovered: nil)
-                notice = Notice(.warning, String(localized: "This draft changed somewhere else. Mail reloaded it."))
+            guard let key = draftKey, let row = await services.draftRow(key) else {
+                saveState = .saved
+                return false
             }
+            // Why: the stored draft moved on while this window had unsaved changes; what is written here is never dropped
+            if !afterConflict, row.version != version, [.editing, .scheduled, .failed].contains(row.status) {
+                version = row.version
+                apply(row: row)
+                dirty = true
+                notice = Notice(.warning, String(localized: "This draft also changed somewhere else. Mail kept what you have here."))
+                return await performSave(force: force, afterConflict: true)
+            }
+            saveState = .saved
+            load(from: row, recovered: nil)
+            notice = Notice(.warning, String(localized: "This draft changed somewhere else. Mail reloaded it."))
             return false
         } catch {
             dirty = true

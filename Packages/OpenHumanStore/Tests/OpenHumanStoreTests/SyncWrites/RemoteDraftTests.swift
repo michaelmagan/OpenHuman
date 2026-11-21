@@ -67,6 +67,45 @@ import Testing
         #expect(row["local_version"] as Int == row["synced_version"] as Int)
     }
 
+    @Test func remoteContentInACleanRowIsANewVersion() throws {
+        let f = try setup()
+        try reconcile(f, [f.remote("r1", message: "dm1", thread: "t1", subject: "First")])
+        let uuid = try #require(try f.draftRow(gmailDraftID: "r1"))["draft_uuid"] as String
+        try reconcile(f, [f.remote("r1", message: "dm2", thread: "t1", subject: "Edited elsewhere")])
+        var row = try #require(try f.draftRow(gmailDraftID: "r1"))
+        #expect(row["subject"] as String == "Edited elsewhere")
+        #expect(row["local_version"] as Int == 2 && row["synced_version"] as Int == 2)
+        let stale = DraftContent(to: [], cc: [], bcc: [], subject: "Typed over the old text", bodyHTML: "", attachments: [])
+        #expect(throws: StoreError.self) { _ = try f.store.updateDraft(DraftID(uuid), content: stale, expectedVersion: 1) }
+        #expect(try f.draftRow(gmailDraftID: "r1")?["subject"] as String? == "Edited elsewhere")
+
+        try reconcile(f, [f.remote("r1", message: "dm3", thread: "t1", subject: "Edited elsewhere")])
+        row = try #require(try f.draftRow(gmailDraftID: "r1"))
+        #expect(row["gmail_message_id"] as String? == "dm3")
+        #expect(row["local_version"] as Int == 2 && row["synced_version"] as Int == 2, "the same content keeps the version")
+    }
+
+    @Test func aCleanRowIsNotReplacedWhileOurOwnSaveIsInFlight() throws {
+        let f = try setup()
+        try reconcile(f, [f.remote("r1", message: "dm1", thread: "t1", subject: "Ours")])
+        let uuid = try #require(try f.draftRow(gmailDraftID: "r1"))["draft_uuid"] as String
+        try f.store.write { db in
+            try db.execute(sql: """
+                INSERT INTO pending_operations (account_id, kind, payload_json, status, created_at, updated_at)
+                VALUES (?, 'upsert_draft', ?, 'in_flight', 0, 0)
+                """, arguments: [f.account.rawValue, OperationPayloadCodec.encode(.upsertDraft(draftID: DraftID(uuid), version: 1))])
+        }
+        try reconcile(f, [f.remote("r1", message: "dm-ours", thread: "t1", subject: "Read back")])
+        var row = try #require(try f.draftRow(gmailDraftID: "r1"))
+        #expect(row["subject"] as String == "Ours" && row["gmail_message_id"] as String? == "dm1")
+        #expect(row["state"] as String == "editing" && row["local_version"] as Int == 1)
+
+        try f.store.write { db in try db.execute(sql: "UPDATE pending_operations SET status = 'succeeded'") }
+        try reconcile(f, [f.remote("r1", message: "dm-other", thread: "t1", subject: "Edited elsewhere")])
+        row = try #require(try f.draftRow(gmailDraftID: "r1"))
+        #expect(row["subject"] as String == "Edited elsewhere" && row["local_version"] as Int == 2)
+    }
+
     @Test func aDirtyRowKeepsLocalAndStoresAConflictOnlyWhenRemoteChanged() throws {
         let f = try setup()
         try reconcile(f, [f.remote("r1", message: "dm1", thread: "t1")])

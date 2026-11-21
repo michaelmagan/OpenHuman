@@ -49,6 +49,16 @@ final class RecipientUndoBox {
     weak var session: ComposeSession?
 }
 
+struct RecipientMoveRecord: Equatable, Sendable {
+    var address: EmailAddress
+    var source: RecipientFieldModel.Kind
+    var target: RecipientFieldModel.Kind
+    var sourceIndex: Int
+    var addedToTarget: Bool
+    var showedCc: Bool
+    var showedBcc: Bool
+}
+
 struct RecipientLayout: Equatable, Sendable {
     var to: [EmailAddress]
     var cc: [EmailAddress]
@@ -102,13 +112,19 @@ extension ComposeSession {
             return false
         }
         let before = recipientLayout
+        let sourceTokens = before.tokens(source)
+        let index = sourceTokens.firstIndex(of: address)
+            ?? sourceTokens.firstIndex { RecipientMove.same($0, address) } ?? 0
+        let record = RecipientMoveRecord(address: sourceTokens[index], source: source, target: target, sourceIndex: index,
+                                         addedToTarget: moved.target.count > before.tokens(target).count,
+                                         showedCc: before.showsCc, showedBcc: before.showsBcc)
         var after = before
         after.set(source, moved.source)
         after.set(target, moved.target)
         if target == .cc { after.showsCc = true }
         if target == .bcc { after.showsBcc = true }
         applyRecipientLayout(after)
-        registerRecipientUndo(restoring: before, redo: after, undoManager: undoManager)
+        registerRecipientUndo(record, undoManager: undoManager)
         return true
     }
 
@@ -124,15 +140,44 @@ extension ComposeSession {
         bcc.setTokens(layout.bcc, notify: true)
     }
 
-    private func registerRecipientUndo(restoring layout: RecipientLayout, redo: RecipientLayout, undoManager: UndoManager?) {
+    // Why: recipients added or removed after the move are not undo steps, so undo puts back one address, not a snapshot
+    @discardableResult
+    func undoRecipientMove(_ record: RecipientMoveRecord, undoManager: UndoManager?) -> Bool {
+        var layout = recipientLayout
+        var target = layout.tokens(record.target)
+        if record.addedToTarget {
+            guard let index = target.firstIndex(where: { RecipientMove.same($0, record.address) }) else { return false }
+            target.remove(at: index)
+        }
+        var source = layout.tokens(record.source)
+        if !source.contains(where: { RecipientMove.same($0, record.address) }) {
+            source.insert(record.address, at: min(record.sourceIndex, source.count))
+        }
+        layout.set(record.target, target)
+        layout.set(record.source, source)
+        if !record.showedCc, layout.cc.isEmpty { layout.showsCc = false }
+        if !record.showedBcc, layout.bcc.isEmpty { layout.showsBcc = false }
+        applyRecipientLayout(layout)
+        guard let undoManager else { return true }
+        let box = recipientUndoBox
+        box.session = self
+        undoManager.registerUndo(withTarget: box) { [box, weak undoManager] _ in
+            MainActor.assumeIsolated {
+                _ = box.session?.moveRecipient(record.address, from: record.source, to: record.target,
+                                               undoManager: undoManager)
+            }
+        }
+        undoManager.setActionName(String(localized: "Move Recipient"))
+        return true
+    }
+
+    private func registerRecipientUndo(_ record: RecipientMoveRecord, undoManager: UndoManager?) {
         guard let undoManager else { return }
         let box = recipientUndoBox
         box.session = self
         undoManager.registerUndo(withTarget: box) { [box, weak undoManager] _ in
             MainActor.assumeIsolated {
-                guard let session = box.session else { return }
-                session.applyRecipientLayout(layout)
-                session.registerRecipientUndo(restoring: redo, redo: layout, undoManager: undoManager)
+                _ = box.session?.undoRecipientMove(record, undoManager: undoManager)
             }
         }
         undoManager.setActionName(String(localized: "Move Recipient"))
@@ -140,6 +185,14 @@ extension ComposeSession {
 }
 
 extension RecipientLayout {
+    func tokens(_ kind: RecipientFieldModel.Kind) -> [EmailAddress] {
+        switch kind {
+        case .to: to
+        case .cc: cc
+        case .bcc: bcc
+        }
+    }
+
     mutating func set(_ kind: RecipientFieldModel.Kind, _ tokens: [EmailAddress]) {
         switch kind {
         case .to: to = tokens

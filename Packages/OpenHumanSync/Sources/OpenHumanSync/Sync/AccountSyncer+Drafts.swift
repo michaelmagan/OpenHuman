@@ -9,7 +9,7 @@ extension AccountSyncer {
     public func refreshDrafts() async throws -> Int {
         let started = clock.now
         let generation = try store.syncStatus(account: account).generation
-        let uploadedBefore = try uploadedDraftIDs()
+        let uploadedBefore = try uploadedDrafts()
         var listed: [GmailDraft] = []
         var token: String?
         var calls = 0, units = 0
@@ -60,9 +60,14 @@ extension AccountSyncer {
             let result = try store.upsertMessages(messages, account: account, generation: generation)
             if !result.unknownLabelIDs.isEmpty { try await refreshLabels() }
         }
-        // Why: a draft first uploaded after the listing was read is missing from it, not deleted; the next refresh decides
-        if complete, !(try uploadedDraftIDs()).subtracting(uploadedBefore).isSubset(of: Set(listed.map(\.id))) {
+        // Why: a draft uploaded after the listing was read is missing from it or older there, not deleted or edited
+        // elsewhere; the next refresh decides
+        let listedMessages = Dictionary(listed.map { ($0.id, $0.message?.id ?? "") }, uniquingKeysWith: { first, _ in first })
+        let raced = Set(try uploadedDrafts()
+            .filter { uploadedBefore[$0.key] != $0.value && listedMessages[$0.key] != $0.value }.keys)
+        if !raced.isEmpty {
             complete = false
+            drafts.removeAll { raced.contains($0.gmailDraftID.rawValue) }
         }
         try store.reconcileRemoteDrafts(drafts, account: account, complete: complete)
         draftCache = cache
@@ -75,8 +80,11 @@ extension AccountSyncer {
         return drafts.count
     }
 
-    private func uploadedDraftIDs() throws -> Set<String> {
-        Set(try store.drafts(account: account, states: [.editing, .scheduled, .failed], limit: Int.max / 2)
-            .compactMap(\.gmailDraftID?.rawValue))
+    private func uploadedDrafts() throws -> [String: String] {
+        var messages: [String: String] = [:]
+        for draft in try store.drafts(account: account, states: [.editing, .scheduled, .failed], limit: Int.max / 2) {
+            if let id = draft.gmailDraftID?.rawValue { messages[id] = draft.gmailMessageID?.rawValue ?? "" }
+        }
+        return messages
     }
 }

@@ -51,6 +51,8 @@ extension MailStore {
                     continue
                 }
 
+                // Why: our own upload has replaced the Gmail message but is not recorded yet; the next refresh decides
+                if changed, try Self.upsertInFlight(draft: uuid, in: db) { continue }
                 var sets: [(String, DatabaseValue)] = []
                 if changed {
                     let tid = try threadRow(account: account, thread: remote.gmailThreadID, now: now, in: db)
@@ -74,8 +76,14 @@ extension MailStore {
                 if (row["review_state"] as String) == DraftReviewState.pending.rawValue && !hasAgentMarker {
                     sets.append(("review_state", DraftReviewState.approved.rawValue.databaseValue))
                 }
-                let changes = sets.filter { (row[$0.0] as DatabaseValue) != $0.1 }
+                var changes = sets.filter { (row[$0.0] as DatabaseValue) != $0.1 }
                 guard !changes.isEmpty else { continue }
+                // Why: an open composer and a saver holding the old version must see that the content was replaced
+                let contentNames = Set(Self.contentColumns(remote.content).map(\.0))
+                if changes.contains(where: { contentNames.contains($0.0) }) {
+                    let version = (row["local_version"] as Int) + 1
+                    changes += [("local_version", version.databaseValue), ("synced_version", version.databaseValue)]
+                }
                 var args = StatementArguments(changes.map(\.1))
                 args += [now, uuid]
                 try db.execute(sql: "UPDATE drafts SET \(changes.map { "\($0.0) = ?" }.joined(separator: ", ")), updated_at = ? WHERE draft_uuid = ?",
