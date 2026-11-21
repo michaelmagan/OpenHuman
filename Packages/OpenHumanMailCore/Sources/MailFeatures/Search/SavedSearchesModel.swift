@@ -22,7 +22,7 @@ public final class SavedSearchesModel {
     public var hasPort: Bool { settings != nil }
     public var canSave: Bool { settings != nil && account != nil }
 
-    public static let fullMessage = "Limit of 50 saved searches per account. Delete one in Settings › General › Search."
+    public static let fullMessage = "Limit of 50 saved searches per account. Delete one in Settings › Search."
     static let failedMessage = "That saved search couldn't be stored."
 
     public func follow(_ account: AccountID?) {

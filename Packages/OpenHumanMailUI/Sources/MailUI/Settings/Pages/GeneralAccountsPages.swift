@@ -9,29 +9,21 @@ import UniformTypeIdentifiers
 struct GeneralSettingsPage: View {
     @State private var model: GeneralSettingsModel
     @State private var menuBar: MenuBarSettingsModel
-    @State private var savedSearches: SavedSearchesModel
     @State private var writing: ComposeTextSettings
     let modules: [FeatureModuleID]
     let extras: () -> AnyView
-    let ai: AICenter?
-    let savedSearchAccount: AccountID?
     let environment: AppEnvironment
 
     static let schedulingNote = "These switches apply to this Mac only."
-    static let sentencesNote = "When you type a search as a sentence, Mail offers the matching filters to use with ⇥. "
-        + "It runs only on this Mac and sends nothing anywhere."
     static let welcomeTourNote = "The short guide from your first sign-in: look, keys and AI replies. It opens over the "
         + "mail window and changes no mail."
 
     init(environment: AppEnvironment, extras: @escaping () -> AnyView) {
         _model = State(initialValue: GeneralSettingsModel(environment: environment))
         _menuBar = State(initialValue: MenuBarSettingsModel(system: environment.system))
-        _savedSearches = State(initialValue: SavedSearchesModel(settings: environment.settings))
         _writing = State(initialValue: environment.composeText)
         modules = environment.modules.modules
         self.extras = extras
-        ai = environment.ai
-        savedSearchAccount = environment.router.active?.id
         self.environment = environment
     }
 
@@ -72,8 +64,6 @@ struct GeneralSettingsPage: View {
                 }
             }
             SettingsSection("Window") {
-                switchRow("Show shortcut hints", model.showShortcutHints,
-                          detail: "A strip along the bottom with the keys that matter where you are.")
                 switchRow("Show sync progress in the footer", model.showPendingSync,
                           detail: "How many changes are still on their way to Gmail.")
                 SettingsRow("Tab counts", detail: GeneralSettingsModel.tabCountsNote, selection: binding(model.tabCounts)) {
@@ -93,19 +83,19 @@ struct GeneralSettingsPage: View {
                     ForEach(ReaderPreferences.zoomSteps, id: \.self) { Text(ReaderPreferences.percent($0)).tag($0) }
                 }
             }
-            SettingsSection("Learning the keys") {
+            SettingsSection("Move to") {
+                switchRow("Show splits and places in Move to", model.moveToSuperset,
+                          detail: GeneralSettingsModel.moveToSupersetNote)
+            }
+            SettingsSection("Learning Mail") {
+                switchRow("Show shortcut hints", model.showShortcutHints,
+                          detail: "A strip along the bottom with the keys that matter where you are.")
                 switchRow(GeneralSettingsModel.hintOnClickTitle, model.hintOnClick, detail: GeneralSettingsModel.hintOnClickNote)
                 SettingsRow(GeneralSettingsModel.resetHintsTitle, detail: GeneralSettingsModel.resetHintsNote) {
                     Button("Reset") { Task { await model.resetShortcutHints() } }
                         .disabled(!model.canResetShortcutHints)
                         .accessibilityLabel("Reset shortcut hints")
                 }
-            }
-            SettingsSection("Move to") {
-                switchRow("Show splits and places in Move to", model.moveToSuperset,
-                          detail: GeneralSettingsModel.moveToSupersetNote)
-            }
-            SettingsSection("Welcome tour") {
                 SettingsRow("Run welcome tour again", detail: Self.welcomeTourNote) {
                     Button("Run Again") { environment.welcomeGuide.presentFromStart() }
                         .accessibilityLabel("Run welcome tour again")
@@ -139,23 +129,6 @@ struct GeneralSettingsPage: View {
                     switchRow("Weekdays only", model.reminderWeekdaysOnly, detail: GeneralSettingsModel.reminderWeekdaysOnlyNote)
                 }
             }
-            SettingsSection("Search") {
-                switchRow("Download message bodies for search", model.downloadBodies, detail: GeneralSettingsModel.downloadBodiesNote)
-                SettingsRow("Keep at most", detail: model.bodyDiskNote, selection: binding(model.bodyMax)) {
-                    ForEach(GeneralSettingsModel.bodyCapChoices, id: \.self) { Text(GeneralSettingsModel.bodyCapTitle($0)).tag($0) }
-                }
-                .disabled(!model.availability.canEditSettings || !model.downloadBodies.value)
-                if modules.contains(.smartSearch) {
-                    if let ai {
-                        SettingsRow("Understand searches written as sentences", detail: Self.sentencesNote,
-                                    isOn: Binding(get: { ai.understandsSearchSentences },
-                                                  set: { ai.setUnderstandsSearchSentences($0) }))
-                    }
-                    if savedSearches.canSave {
-                        SavedSearchSettingsRows(model: savedSearches)
-                    }
-                }
-            }
             SettingsSection("Login, Dock and menu bar") {
                 extras()
                 SettingsRow("Show Mail in the menu bar", detail: MenuBarSettingsModel.note,
@@ -168,10 +141,7 @@ struct GeneralSettingsPage: View {
             }
             SettingsErrorLine(text: model.errorMessage)
         }
-        .task {
-            model.start()
-            savedSearches.follow(savedSearchAccount)
-        }
+        .task { model.start() }
     }
 
     private func binding<Value>(_ setting: StoredSetting<Value>) -> Binding<Value> {

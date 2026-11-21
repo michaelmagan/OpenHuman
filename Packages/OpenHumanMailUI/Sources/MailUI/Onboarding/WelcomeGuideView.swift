@@ -82,7 +82,7 @@ public struct WelcomeGuideView: View {
             .help(AIStepModel.footnote)
         case .calendar:
             if let calendar = model.setupCalendar, calendar.canConnect, !calendar.isConnected {
-                Button("Not now") { Task { await model.skipCalendar() } }
+                Button("Skip for now") { Task { await model.skipCalendar() } }
                     .ohLinkButtonStyle()
                     .help("Skip this inbox's calendar. Connect it later in Settings › Calendar.")
                 Button(calendar.needsReconnect ? "Connect again" : "Connect calendar") {

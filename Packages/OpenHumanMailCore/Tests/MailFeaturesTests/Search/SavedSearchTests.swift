@@ -46,6 +46,7 @@ private let bills = "from:billing@example.com has:attachment"
         }
         #expect(await model.save(query: "subject:one-more") == nil)
         #expect(model.errorMessage == SavedSearchesModel.fullMessage)
+        #expect(SavedSearchesModel.fullMessage.hasSuffix("Delete one in Settings › Search."))
         #expect(try await f.store.get(AppSettings.savedSearches(f.work)).count == SavedSearch.maxPerAccount)
         await eventually { model.searches.count == SavedSearch.maxPerAccount }
     }

@@ -1,16 +1,21 @@
+import MailActions
 import MailFeatures
 import MailModel
+import OpenHumanCore
 import SwiftUI
 
 struct SearchSettingsPage: View {
     let model: SearchRankingModel
+    private let environment: AppEnvironment?
 
     init(environment: AppEnvironment) {
         self.model = environment.searchRanking
+        self.environment = environment
     }
 
     init(model: SearchRankingModel) {
         self.model = model
+        environment = nil
     }
 
     static let learningNote = "Search learning remembers which conversations you open from search results: only which "
@@ -26,6 +31,7 @@ struct SearchSettingsPage: View {
                     ForEach(SearchSortOrder.allCases, id: \.self) { Text($0.title).tag($0) }
                 }
             }
+            if let environment { SearchMailSections(environment: environment) }
             SettingsSection("Most relevant", detail: model.settings.preset.detail, footnote: dominanceNote) {
                 SettingsRow("Ranking", selection: Binding(get: { model.settings.preset }, set: { model.setPreset($0) })) {
                     ForEach(SearchRankingPreset.allCases, id: \.self) { Text($0.title).tag($0) }
@@ -43,10 +49,10 @@ struct SearchSettingsPage: View {
                 }
             }
             SettingsSection {
-                SettingsRow("All search settings", detail: "Most relevant, Balanced and every weight as they came.") {
+                SettingsRow("Order and ranking", detail: "Most relevant, Balanced and every weight as they came.") {
                     Button("Reset all") { model.resetAll() }
                         .ohLinkButtonStyle()
-                        .accessibilityLabel("Reset all search settings")
+                        .accessibilityLabel("Reset order and ranking")
                 }
             }
         }
@@ -66,6 +72,60 @@ struct SearchSettingsPage: View {
         return weights.headerLevelsDominate
             ? "Sender and subject matches always rank above matches found only in the text."
             : "With these weights, very recent or often-opened mail can rank above a sender or subject match."
+    }
+}
+
+// What search can find: message text kept on this Mac, sentences and saved searches.
+struct SearchMailSections: View {
+    @State private var model: GeneralSettingsModel
+    @State private var savedSearches: SavedSearchesModel
+    let modules: [FeatureModuleID]
+    let ai: AICenter?
+    let savedSearchAccount: AccountID?
+
+    static let sentencesNote = "When you type a search as a sentence, Mail offers the matching filters to use with ⇥. "
+        + "It runs only on this Mac and sends nothing anywhere."
+
+    init(environment: AppEnvironment) {
+        _model = State(initialValue: GeneralSettingsModel(environment: environment))
+        _savedSearches = State(initialValue: SavedSearchesModel(settings: environment.settings))
+        modules = environment.modules.modules
+        ai = environment.ai
+        savedSearchAccount = environment.router.active?.id
+    }
+
+    var body: some View {
+        SettingsSection("Message text") {
+            SettingsRow("Download message bodies for search", detail: GeneralSettingsModel.downloadBodiesNote,
+                        isOn: binding(model.downloadBodies))
+                .disabled(!model.availability.canEditSettings)
+                .task {
+                    model.downloadBodies.start()
+                    model.bodyMax.start()
+                    savedSearches.follow(savedSearchAccount)
+                }
+            SettingsRow("Keep at most", detail: model.bodyDiskNote, selection: binding(model.bodyMax)) {
+                ForEach(GeneralSettingsModel.bodyCapChoices, id: \.self) { Text(GeneralSettingsModel.bodyCapTitle($0)).tag($0) }
+            }
+            .disabled(!model.availability.canEditSettings || !model.downloadBodies.value)
+            SettingsErrorLine(text: model.downloadBodies.errorMessage ?? model.bodyMax.errorMessage)
+        }
+        if modules.contains(.smartSearch) {
+            SettingsSection("Smart search") {
+                if let ai {
+                    SettingsRow("Understand searches written as sentences", detail: Self.sentencesNote,
+                                isOn: Binding(get: { ai.understandsSearchSentences },
+                                              set: { ai.setUnderstandsSearchSentences($0) }))
+                }
+                if savedSearches.canSave {
+                    SavedSearchSettingsRows(model: savedSearches)
+                }
+            }
+        }
+    }
+
+    private func binding<Value>(_ setting: StoredSetting<Value>) -> Binding<Value> {
+        Binding(get: { setting.value }, set: { value in Task { await setting.set(value) } })
     }
 }
 

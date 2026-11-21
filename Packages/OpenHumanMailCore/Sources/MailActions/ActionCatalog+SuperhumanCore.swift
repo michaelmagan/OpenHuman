@@ -16,7 +16,7 @@ extension ActionCatalog {
                          changesMail: true,
                          keywords: ["inbox zero", "archive old", "mark all done", "clean up inbox", "bulk archive"],
                          module: .hygiene),
-        ActionDescriptor(.undoBulkArchive, "Bulk actions: undo Get me to zero", category: .thread,
+        ActionDescriptor(.undoBulkArchive, "Undo Get me to zero", category: .thread,
                          scopes: [.list, .reader], changesMail: true,
                          keywords: ["bulk actions", "undo get me to zero", "restore archived", "back to inbox"],
                          module: .hygiene),
