@@ -648,10 +648,14 @@ public final class SchedulingAssistant {
         title.count <= limit ? title : String(title.prefix(limit - 1)).trimmingCharacters(in: .whitespaces) + "…"
     }
 
+    static let firstNameCharacters = 40
+
     static func firstName(_ sender: String?) -> String {
         let name = (sender ?? "").components(separatedBy: "<").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let first = name.split(separator: " ").first.map(String.init) ?? ""
-        return first.isEmpty || first.contains("@") ? String(localized: "there") : first
+        let word = name.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
+        // Why: the sender chose this name and it goes into the request to the model, so it stays one short plain word
+        let first = String(word.filter { $0.isLetter || $0.isNumber || "-'\u{2019}.".contains($0) }.prefix(Self.firstNameCharacters))
+        return first.isEmpty || word.contains("@") ? String(localized: "there") : first
     }
 
     private func read<Value>(_ key: AppSettingKey<Value>) async -> Value {

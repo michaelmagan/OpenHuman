@@ -370,7 +370,7 @@ public final class AICenter {
                 break
             }
         }
-        return text
+        return PromptScaffoldingFilter.strip(text, nonce: nil)
     }
 
     public func refreshProviders() async {

@@ -174,8 +174,8 @@ extension DefaultAIFeatures {
                 _ = capper.accept(delta)
                 return !capper.truncated
             }
-            let body = String(outcome.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                .prefix(AIPolicy.schedulingReplyCharacters))
+            let body = String(PromptScaffoldingFilter.strip(outcome.text, nonce: nonce)
+                .trimmingCharacters(in: .whitespacesAndNewlines).prefix(AIPolicy.schedulingReplyCharacters))
             return SchedulingDraftResult(body: body, providerID: engine.provider.id,
                                          suspicious: OutputGuard.isSuspicious(outcome.text, nonce: nonce))
         }

@@ -52,17 +52,21 @@ extension DefaultAIFeatures {
                     continuation.yield(.started(engine.provenance(prepared)))
                     started = true
                 }
+                var scaffolding = PromptScaffoldingFilter(nonce: nonce)
                 var capper = StreamCapper(maxTokens: output.maxTokens)
                 let outcome = try await self.run(prepared, engine: engine, untrustedTokens: used) { delta in
-                    let shown = capper.accept(delta)
+                    let shown = capper.accept(scaffolding.feed(delta))
                     if !shown.isEmpty {
                         emitted = true
                         continuation.yield(.textDelta(shown))
                     }
                     return !capper.truncated
                 }
+                let tail = capper.accept(scaffolding.finish())
+                if !tail.isEmpty { continuation.yield(.textDelta(tail)) }
                 let suspicious = OutputGuard.isSuspicious(outcome.text, nonce: nonce)
                 var steps = conversation.steps
+                if scaffolding.removedAny { steps.append(AITraceStep(.promptTagsRemoved)) }
                 if suspicious { steps.append(AITraceStep(.flaggedSuspicious)) }
                 await self.amendTrace(prepared, finalText: capper.text, steps: steps)
                 continuation.yield(.completed(outcome.report(suspicious: suspicious, truncated: capper.truncated)))

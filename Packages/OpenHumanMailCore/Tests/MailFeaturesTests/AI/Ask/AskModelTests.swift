@@ -149,6 +149,33 @@ import Testing
         #expect(!f.model.canShowAsList)
     }
 
+    @Test func thisConversationIsAlwaysTheOneOnScreen() async throws {
+        let f = AskFixture(providers: [Self.citing()])
+        await f.loaded()
+        let first = try await f.conversation(matching: "hiring loop")
+        f.router.open(first.id)
+        await eventually { f.router.reader?.thread == first.id && f.router.reader?.state == .loaded }
+        await f.run(.aiAskInbox)
+        f.model.select(.conversation(first.id))
+        await f.ask("what did we decide?")
+        #expect(f.model.phase == .done && f.model.scope == .conversation(first.id))
+        f.model.close()
+
+        await f.run(.aiAskInbox)
+        #expect(f.model.phase == .done && f.model.scope == .conversation(first.id),
+                "the answer comes back while its conversation is still open")
+        f.model.close()
+
+        let other = try #require(f.router.list?.rows.first { $0.id != first.id })
+        f.router.open(other.id)
+        await eventually { f.router.reader?.thread == other.id && f.router.reader?.state == .loaded }
+        await f.run(.aiAskInbox)
+        #expect(f.model.phase == .idle && f.model.answer.isEmpty && f.model.question.isEmpty,
+                "an answer about another conversation is not shown over this one")
+        #expect(f.model.scope == .conversation(other.id))
+        #expect(!f.model.scopes.contains(.conversation(first.id)))
+    }
+
     @Test func allAccountsFailsClosedForAnOnDeviceOnlyAccountAndASwitchClosesTheCard() async throws {
         let claude = Self.remote()
         var settings = Self.consented

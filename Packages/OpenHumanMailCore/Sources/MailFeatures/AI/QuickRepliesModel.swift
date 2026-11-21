@@ -115,11 +115,13 @@ public final class QuickRepliesModel {
         let thread = self.thread
         let target = self.target
         task = Task { [weak self] in
-            guard let context = await center.context(for: thread, upTo: target, trigger: trigger) else {
+            let loaded = await center.context(for: thread, upTo: target, trigger: trigger)
+            // Why: a cancelled load comes back empty too, and that is not a conversation that went away
+            guard !Task.isCancelled else { return }
+            guard let context = loaded else {
                 self?.fail(String(localized: "This conversation is no longer here."), trigger: trigger, failure: .notOffered)
                 return
             }
-            guard !Task.isCancelled else { return }
             if let answered = context.messageKeys.last { self?.pin(answered) }
             if context.lastIsFromMe {
                 self?.failure = .notOffered
@@ -190,7 +192,6 @@ public final class QuickRepliesModel {
 
     public func cancel() {
         task?.cancel()
-        task = nil
         if phase == .loading { phase = .idle }
     }
 

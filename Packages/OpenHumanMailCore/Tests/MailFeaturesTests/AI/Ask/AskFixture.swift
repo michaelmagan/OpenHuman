@@ -27,6 +27,7 @@ final class AskTestSource: MailDataSource, Sendable {
         var bodyReads: [MessageKey] = []
         var held: Set<MessageKey> = []
         var holdAll = false
+        var holdDetails = false
         var completeness = SearchCompletenessInfo.complete
         var gmail: [ThreadKey] = []
         var gmailFails = false
@@ -46,6 +47,7 @@ final class AskTestSource: MailDataSource, Sendable {
 
     func hold(_ keys: Set<MessageKey>) { state.withLock { $0.held = keys } }
     func holdAllBodies() { state.withLock { $0.holdAll = true } }
+    func holdDetails() { state.withLock { $0.holdDetails = true } }
     func olderMailMissing(searchedBack: Date?) {
         state.withLock { $0.completeness = SearchCompletenessInfo(reasons: [.olderMailNotLocal(searchedBack: searchedBack)]) }
     }
@@ -67,7 +69,10 @@ final class AskTestSource: MailDataSource, Sendable {
                     limit: Int) async throws -> (rows: [ThreadRow], next: PageCursor?) {
         try await store.threadPage(location, account: account, after: after, limit: limit)
     }
-    func threadDetail(_ key: ThreadKey) -> AsyncThrowingStream<ConversationDetail?, Error> { store.threadDetail(key) }
+    func threadDetail(_ key: ThreadKey) -> AsyncThrowingStream<ConversationDetail?, Error> {
+        guard state.withLock({ $0.holdDetails }) else { return store.threadDetail(key) }
+        return AsyncThrowingStream { _ in }
+    }
 
     func body(_ key: MessageKey) -> AsyncThrowingStream<BodyLoadState, Error> {
         let held = state.withLock { s in

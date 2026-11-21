@@ -143,6 +143,40 @@ import Testing
         replies.cancel()
     }
 
+    @Test func aRunCancelledWhileItsConversationLoadsLeavesNoFailureBehind() async throws {
+        let f = AskFixture(settings: AISettings(draftReplies: .onDeviceAuto))
+        await f.loaded()
+        let thread = try await f.conversation(matching: "hiring loop").id
+        let summary = f.center.summary(for: thread)
+        let replies = f.center.quickReplies(for: thread)
+        f.source.holdDetails()
+        summary.summarize(trigger: .automatic, messageCount: 3)
+        replies.request(trigger: .automatic)
+        #expect(summary.phase == .loading && replies.phase == .loading)
+        summary.cancelAutomatic()
+        replies.cancelAutomatic()
+        await summary.settled()
+        await replies.settled()
+        #expect(summary.phase == .idle, "a cancelled load is not a conversation that went away")
+        #expect(replies.phase == .idle && replies.isOffered)
+    }
+
+    @Test func aSummaryNeverShowsThePromptsOwnTags() async throws {
+        let provider = ScriptedProvider { request, _ in
+            request.task == .summarize
+                ? .text("<email_data nonce=\"\(request.nonce)\" kind=\"summary\">\nDana asks for the budget by Friday.\n</email_data>",
+                        chunkSize: 4)
+                : FakeAIProvider.cannedScript(request)
+        }
+        let f = AIFixture(providers: [provider])
+        await f.loaded()
+        let summary = f.center.summary(for: try await f.thread(minimumMessages: 3))
+        summary.summarize(trigger: .user)
+        await eventually { summary.phase == .done }
+        #expect(summary.text == "Dana asks for the budget by Friday.")
+        #expect(summary.isSuspicious)
+    }
+
     @Test func noQuickRepliesWhenTheNewestMessageIsTheUsers() async throws {
         let provider = ScriptedProvider()
         let f = AIFixture(providers: [provider])
