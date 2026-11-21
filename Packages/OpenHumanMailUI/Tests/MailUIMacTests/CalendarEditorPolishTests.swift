@@ -221,6 +221,17 @@ struct CalendarEditorPolishTests {
                 "about ten lines, plus the field's own padding")
     }
 
+    @Test func theMiniMonthNamesItsColumnsFromTheCalendarsFirstWeekday() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_US_POSIX")
+        calendar.firstWeekday = 1
+        #expect(CalendarRightPanel.weekdayInitials(calendar) == ["S", "M", "T", "W", "T", "F", "S"])
+        calendar.firstWeekday = 2
+        #expect(CalendarRightPanel.weekdayInitials(calendar) == ["M", "T", "W", "T", "F", "S", "S"])
+        calendar.firstWeekday = 7
+        #expect(CalendarRightPanel.weekdayInitials(calendar) == ["S", "S", "M", "T", "W", "T", "F"])
+    }
+
     @Test func theSuggestionPanelHangsUnderTheFieldOrAboveItNearTheBottom() {
         let room = CompletionPanel.shadowRoom
         let size = CompletionPanel.size(fieldWidth: 300, rows: 3)

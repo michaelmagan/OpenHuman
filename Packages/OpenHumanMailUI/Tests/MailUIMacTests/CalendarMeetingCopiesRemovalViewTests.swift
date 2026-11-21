@@ -63,6 +63,7 @@ import Testing
                                       calendar: work, calendarConnections: connections)
         let model = try #require(env.calendarWindow)
         model.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        model.firstWeekday = 1
         let now = Self.start.addingTimeInterval(-3600)
         model.now = { now }
         await model.open()

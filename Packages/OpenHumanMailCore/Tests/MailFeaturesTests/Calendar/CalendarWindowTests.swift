@@ -69,6 +69,7 @@ private struct CalendarWindowFixture {
         sidebar.loadText = { _ in CalendarThreadText(subject: "Planning", texts: ["Planning"], participants: [sam]) }
         let model = env.calendarWindow!
         model.timeZone = losAngeles
+        model.firstWeekday = 1
         model.now = { clock.now }
         model.confirmsMovesOverride = false
         return model
@@ -471,6 +472,25 @@ private struct CalendarWindowFixture {
         #expect(week.titleDay == la(10, 14), "a week is named by its middle day")
     }
 
+    @Test func theWeekAndTheMonthStartOnTheCalendarsFirstWeekday() {
+        var monday = laCalendar
+        monday.firstWeekday = 2
+        let week = CalendarPeriod.containing(la(10, 14, 15), kind: .week, calendar: monday)
+        #expect(week.start == la(10, 12) && week.end == la(10, 19), "Monday 12 to Sunday 18")
+        #expect(CalendarPeriod.containing(la(10, 11), kind: .week, calendar: monday).start == la(10, 5),
+                "a Sunday closes its week")
+        #expect(week.moved(by: 1, calendar: monday).start == la(10, 19))
+        let october = CalendarPeriod.containing(la(10, 20), kind: .month, calendar: monday)
+        #expect(october.start == la(9, 28) && october.end == la(11, 2) && october.days.count == 35)
+        #expect(CalendarMiniMonth(containing: la(10, 20), calendar: monday).weeks[0][0] == la(9, 28))
+        var saturday = laCalendar
+        saturday.firstWeekday = 7
+        #expect(CalendarPeriod.containing(la(10, 14), kind: .week, calendar: saturday).start == la(10, 10))
+        var sunday = laCalendar
+        sunday.firstWeekday = 1
+        #expect(CalendarPeriod.containing(la(10, 14), kind: .week, calendar: sunday).start == la(10, 11))
+    }
+
     @Test func weeksOverASummerTimeChangeKeepSevenMidnightsAndWallClockPlaces() {
         let fallBack = CalendarPeriod.containing(la(11, 4), kind: .week, calendar: laCalendar)
         #expect(fallBack.start == la(11, 1) && fallBack.end == la(11, 8))
@@ -569,7 +589,7 @@ private struct CalendarWindowFixture {
         #expect(grid.weeks.joined().filter(\.isToday).map(\.day) == [la(10, 12)])
         let november = october.moved(by: 1, calendar: laCalendar)
         #expect(november.month == la(11, 1) && november.start == la(11, 1) && november.days.count == 35)
-        let mini = CalendarMiniMonth(containing: la(10, 20), timeZone: losAngeles)
+        let mini = CalendarMiniMonth(containing: la(10, 20), calendar: laCalendar)
         #expect(mini.weeks.count == 6 && mini.weeks[0][0] == la(9, 27) && mini.month == la(10, 1))
     }
 
@@ -676,6 +696,17 @@ private final class DetailsFailCalendar: CalendarProviding, Sendable {
 
 @MainActor
 @Suite struct CalendarWindowModelTests {
+    @Test func theWindowStartsItsWeekOnItsFirstWeekday() async {
+        let f = CalendarWindowFixture()
+        let model = f.window()
+        model.firstWeekday = 2
+        await model.open()
+        #expect(model.period.start == la(10, 12) && model.period.days.last == la(10, 18), "Monday 12 to Sunday 18")
+        #expect(model.miniMonth.weeks[0][0] == la(9, 28))
+        await model.move(by: 1)
+        #expect(model.period.start == la(10, 19))
+    }
+
     @Test func anOwnerGoneBeforeAHeldAnswerDispatchesLeavesTheCalendarUnchanged() async throws {
         let corpus = FakeCorpus.make(threadCount: 6, now: fixedNow)
         let meeting = event("held", la(10, 13, 9), la(10, 13, 10), attendees: [sam, FakeCorpus.me],
@@ -689,6 +720,7 @@ private final class DetailsFailCalendar: CalendarProviding, Sendable {
         let sleeper = Checkpoint()
         defer { sleeper.release() }
         window.timeZone = losAngeles
+        window.firstWeekday = 1
         window.now = { la(10, 12, 11) }
         window.sleep = { _ in await sleeper.pass() }
         await window.open(.week, around: la(10, 12))
@@ -726,6 +758,7 @@ private final class DetailsFailCalendar: CalendarProviding, Sendable {
             provider.reading.release()
         }
         window.timeZone = losAngeles
+        window.firstWeekday = 1
         window.now = { la(10, 12, 11) }
         window.sleep = { _ in await sleeper.pass() }
         await window.open(.week, around: la(10, 12))
@@ -775,6 +808,7 @@ private final class DetailsFailCalendar: CalendarProviding, Sendable {
         }
         sidebar.sleep = { _ in try await Task.sleep(for: .seconds(3_600)) }
         window.timeZone = losAngeles
+        window.firstWeekday = 1
         window.now = { la(10, 12, 11) }
         await sidebar.setShowAll(false)
         await sidebar.show(thread: thread)
@@ -878,7 +912,7 @@ private final class DetailsFailCalendar: CalendarProviding, Sendable {
         #expect(f.home.readCalls == homeReads, "a hidden calendar is not read")
         #expect(try await f.env.settings?.get(AppSettings.calendarHiddenCalendars) == [f.homeEmail])
         let again = CalendarWindowModel(environment: f.env, sidebar: try #require(f.env.calendarSidebar),
-                                        timeZone: losAngeles, now: { la(10, 12, 11) })
+                                        timeZone: losAngeles, firstWeekday: 1, now: { la(10, 12, 11) })
         await again.open()
         #expect(again.hiddenKeys == [f.homeEmail] && again.events.map(\.id) == ["w1"])
         await again.setVisible(f.homeEmail, true)
@@ -1796,6 +1830,7 @@ private final class StoreChanges {
                                       calendar: work, calendarConnections: connections)
         let model = try #require(env.calendarWindow)
         model.timeZone = losAngeles
+        model.firstWeekday = 1
         model.now = { la(10, 12, 11) }
         await model.open()
         model.openEvent(try #require(model.events.first { $0.id == "h1" }))
@@ -1820,6 +1855,7 @@ private final class StoreChanges {
                                       calendar: inner, calendarConnections: connections)
         let model = try #require(env.calendarWindow)
         model.timeZone = losAngeles
+        model.firstWeekday = 1
         model.now = { la(10, 12, 11) }
         await model.open()
         model.openEvent(try #require(model.events.first))

@@ -329,6 +329,7 @@ private struct DetailsFixture {
 
         let window = try #require(env.calendarWindow)
         window.timeZone = newYork
+        window.firstWeekday = 1
         window.now = { ny(10, 14, 9) }
         window.confirmsMovesOverride = false
         await window.openEditor(for: shown.event, calendarKey: shown.calendarKey)

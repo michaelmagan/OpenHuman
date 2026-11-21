@@ -83,6 +83,14 @@ import Testing
         #expect(try ink(staged.hosting, name: "date-pick-\(dark ? "dark" : "light")") > 1200, "days, month and time, dark \(dark)")
     }
 
+    @Test func theCalendarStartsItsWeeksOnThePickersFirstWeekday() {
+        for firstWeekday in [1, 2, 7] {
+            let m = model()
+            m.firstWeekday = firstWeekday
+            #expect(TimePickerDatePick(model: m).calendar.firstWeekday == firstWeekday)
+        }
+    }
+
     @Test func theCalendarIsTheSystemDatePickerOnTheChosenDay() throws {
         let m = model()
         let staged = stage(m, dark: false)

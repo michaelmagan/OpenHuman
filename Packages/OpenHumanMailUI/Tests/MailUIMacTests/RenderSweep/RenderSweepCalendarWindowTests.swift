@@ -17,7 +17,8 @@ enum CalendarWindowSweep {
                             configure: ((FakeCalendar) -> Void)? = nil) -> (AppEnvironment, now: Date) {
         let corpus = FakeCorpus.small
         let accounts = corpus.accounts
-        let calendar = CalendarDateMentions.calendar(.current)
+        var calendar = CalendarDateMentions.calendar(.current)
+        calendar.firstWeekday = Calendar.current.firstWeekday
         let week = CalendarPeriod.containing(Date(), kind: .week, calendar: calendar)
         func at(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
             calendar.date(bySettingHour: hour, minute: minute, second: 0, of: week.days[day]) ?? week.days[day]

@@ -701,6 +701,7 @@ private func configureOwnerLifetimeSidebar(_ model: CalendarSidebarModel) {
         if retainingOpenWindow {
             let window = try #require(owner?.calendarWindow)
             window.timeZone = newYork
+            window.firstWeekday = 1
             window.now = { at(10, 10, 9) }
             await window.open(.week, around: at(10, 12))
             #expect(window.isOpen && window.eventStore === store)

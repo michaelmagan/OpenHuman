@@ -146,10 +146,10 @@ public struct MonthGrid: Sendable, Hashable {
     public let month: Date
     public let days: [Day]
 
-    public init(month: Date, timeZone: TimeZone) {
+    public init(month: Date, timeZone: TimeZone, firstWeekday: Int) {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = timeZone
-        cal.firstWeekday = 2
+        cal.firstWeekday = firstWeekday
         let first = cal.date(from: cal.dateComponents([.year, .month], from: month)) ?? month
         let lead = (cal.component(.weekday, from: first) - cal.firstWeekday + 7) % 7
         let start = cal.date(byAdding: .day, value: -lead, to: first) ?? first

@@ -26,6 +26,7 @@ import Testing
                                       featureFlags: FeatureFlags(), calendar: fake)
         let model = try #require(env.calendarWindow)
         model.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        model.firstWeekday = 1
         let now = iso.date(from: times[1])!
         model.now = { now }
         await model.open()

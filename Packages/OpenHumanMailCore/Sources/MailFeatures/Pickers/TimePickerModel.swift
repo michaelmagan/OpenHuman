@@ -70,16 +70,20 @@ public final class TimePickerModel {
 
     @ObservationIgnored public let presets: TimePresets
     @ObservationIgnored public var locale: Locale
+    // 1 is Sunday, as in `Calendar.firstWeekday`
+    @ObservationIgnored public var firstWeekday: Int
     @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private let onChoose: @MainActor (TimeChoice) -> Void
 
     public init(kind: TimePickerKind, targets: [ThreadKey], presets: TimePresets = TimePresets(),
-                locale: Locale = .current, now: @escaping @Sendable () -> Date = { Date() },
+                locale: Locale = .current, firstWeekday: Int = Calendar.current.firstWeekday,
+                now: @escaping @Sendable () -> Date = { Date() },
                 perform: @escaping @MainActor (TimeChoice) -> Void) {
         self.kind = kind
         self.targets = targets
         self.presets = presets
         self.locale = locale
+        self.firstWeekday = firstWeekday
         self.now = now
         self.onChoose = perform
         onlyIfNoReply = kind == .remind
@@ -228,7 +232,7 @@ public final class TimePickerModel {
         var cal = presets.calendar
         cal.locale = locale
         let symbols = cal.veryShortStandaloneWeekdaySymbols
-        return (0..<7).map { symbols[($0 + 1) % 7] }
+        return (0..<7).map { symbols[($0 + firstWeekday - 1) % 7] }
     }
 
     public func monthTitle(_ month: Date) -> String {
@@ -282,7 +286,7 @@ public final class TimePickerModel {
     }
 
     public var monthGrid: MonthGrid? {
-        datePick.map { MonthGrid(month: $0.month, timeZone: presets.timeZone) }
+        datePick.map { MonthGrid(month: $0.month, timeZone: presets.timeZone, firstWeekday: firstWeekday) }
     }
 
     public func resolveDatePick() -> Date? {

@@ -49,6 +49,7 @@ import Testing
                                       featureFlags: FeatureFlags(), calendar: fake)
         let model = try #require(env.calendarWindow)
         model.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        model.firstWeekday = 1
         let now = try #require(events.first { $0.id == id }).start.addingTimeInterval(-3600)
         model.now = { now }
         await model.open()

@@ -48,6 +48,8 @@ public final class CalendarWindowModel {
     var overlays: [UUID: Overlay] = [:]
 
     @ObservationIgnored public var timeZone: TimeZone
+    // 1 is Sunday, as in `Calendar.firstWeekday`
+    @ObservationIgnored public var firstWeekday: Int
     @ObservationIgnored public var now: @MainActor () -> Date
     @ObservationIgnored public var confirmsMovesOverride: Bool?
     @ObservationIgnored public var holdWindow: Duration = NoticeCenter.toastDuration
@@ -78,13 +80,15 @@ public final class CalendarWindowModel {
     public let eventStore: CalendarEventStore
 
     public init(environment: AppEnvironment, sidebar: CalendarSidebarModel, timeZone: TimeZone = .current,
-                now: @escaping @MainActor () -> Date = Date.init) {
+                firstWeekday: Int = Calendar.current.firstWeekday, now: @escaping @MainActor () -> Date = Date.init) {
         self.environment = environment
         self.sidebar = sidebar
         eventStore = environment.calendarEvents
         self.timeZone = timeZone
+        self.firstWeekday = firstWeekday
         self.now = now
-        let calendar = CalendarDateMentions.calendar(timeZone)
+        var calendar = CalendarDateMentions.calendar(timeZone)
+        calendar.firstWeekday = firstWeekday
         let today = calendar.startOfDay(for: now())
         focusDay = today
         period = CalendarPeriod.containing(today, kind: .week, calendar: calendar)
@@ -102,7 +106,11 @@ public final class CalendarWindowModel {
         }
     }
 
-    var calendar: Calendar { CalendarDateMentions.calendar(timeZone) }
+    public var calendar: Calendar {
+        var calendar = CalendarDateMentions.calendar(timeZone)
+        calendar.firstWeekday = firstWeekday
+        return calendar
+    }
 
     public func open(_ requested: CalendarViewKind? = nil, source: ActionSource? = nil, around day: Date? = nil) async {
         let wasOpen = isOpen
@@ -399,7 +407,7 @@ public final class CalendarWindowModel {
         CalendarMonthGrid(period: period, events: shownEvents, timeZone: timeZone, now: now())
     }
 
-    public var miniMonth: CalendarMiniMonth { CalendarMiniMonth(containing: focusDay, timeZone: timeZone) }
+    public var miniMonth: CalendarMiniMonth { CalendarMiniMonth(containing: focusDay, calendar: calendar) }
 
     public var pendingSlot: DateInterval? {
         guard card == nil, let draft = sidebar.draft, draft.end > draft.start else { return nil }

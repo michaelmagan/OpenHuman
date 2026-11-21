@@ -148,7 +148,7 @@ struct TimePickerDatePick: View {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = model.timeZone
         calendar.locale = model.locale
-        calendar.firstWeekday = 2
+        calendar.firstWeekday = model.firstWeekday
         return calendar
     }
 

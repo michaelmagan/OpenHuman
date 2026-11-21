@@ -80,6 +80,7 @@ private struct MeetingFixture {
         sidebar.now = { clock.now }
         let model = env.calendarWindow!
         model.timeZone = losAngeles
+        model.firstWeekday = 1
         model.now = { clock.now }
         model.confirmsMovesOverride = false
         model.holdWindow = Self.hold
