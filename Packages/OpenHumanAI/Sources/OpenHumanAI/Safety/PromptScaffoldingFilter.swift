@@ -42,6 +42,15 @@ public struct PromptScaffoldingFilter: Sendable {
         return out
     }
 
+    /// Whitespace held back since the last returned text, when `finish()` would return exactly it were the stream to
+    /// end now. Empty while a possible tag or a removed piece can still change what becomes of that whitespace.
+    public var pendingWhitespace: String {
+        guard held.isEmpty, !removedSinceContent else { return "" }
+        var out = String.UnicodeScalarView()
+        out.append(contentsOf: space)
+        return String(out)
+    }
+
     private enum Decision {
         case content
         case remove(Int)

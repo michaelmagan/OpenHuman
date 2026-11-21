@@ -29,6 +29,25 @@ import Testing
         }
     }
 
+    @Test func whitespaceHeldAtTheEndOfAChunkIsKnownBeforeTheStreamEnds() {
+        var filter = PromptScaffoldingFilter(nonce: nonce)
+        var text = filter.feed("Friday works. ")
+        #expect(text == "Friday works." && filter.pendingWhitespace == " ")
+        text += filter.feed("<email")
+        #expect(text == "Friday works." && filter.pendingWhitespace.isEmpty, "not while a tag may follow")
+        text += filter.feed("_data>\nSee you then.\n")
+        #expect(text == "Friday works.\nSee you then." && filter.pendingWhitespace == "\n")
+        let shown = text + filter.pendingWhitespace
+        text += filter.finish()
+        #expect(text == shown, "the end of the stream adds nothing")
+        #expect(filter.pendingWhitespace.isEmpty)
+
+        var removed = PromptScaffoldingFilter(nonce: nonce)
+        text = removed.feed("Friday works.\n</email_data> ")
+        #expect(text == "Friday works." && removed.pendingWhitespace.isEmpty, "dropped after a removed tag")
+        #expect(removed.finish().isEmpty)
+    }
+
     @Test func anUnterminatedTagAtTheEndIsDropped() {
         #expect(strip("Hello <email_data nonce=\"x") == "Hello")
         #expect(strip("Hello <email_d") == "Hello <email_d")

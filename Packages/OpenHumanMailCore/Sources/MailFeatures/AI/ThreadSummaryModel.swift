@@ -88,21 +88,19 @@ public final class ThreadSummaryModel {
                     case .started(let provenance):
                         self.badge = AIProviderBadge(provenance: provenance)
                     case .textDelta(let delta):
-                        let shown = scaffolding.feed(delta)
+                        text += scaffolding.feed(delta)
+                        // Why: held whitespace shows with its chunk, so the end of the stream adds no text
+                        let shown = text + scaffolding.pendingWhitespace
                         guard !shown.isEmpty else { continue }
-                        text += shown
-                        self.text = text
+                        if self.text != shown { self.text = shown }
                         self.phase = .streaming
                     case .completed(let report):
                         self.isSuspicious = report.suspicious
                     }
                 }
                 guard let self, !Task.isCancelled else { return }
-                let rest = scaffolding.finish()
-                if !rest.isEmpty {
-                    text += rest
-                    self.text = text
-                }
+                text += scaffolding.finish()
+                if self.text != text { self.text = text }
                 self.summarizedCount = messageCount ?? context.messageKeys.count
                 self.phase = text.isEmpty ? .failed(String(localized: "The model returned no summary")) : .done
             } catch {

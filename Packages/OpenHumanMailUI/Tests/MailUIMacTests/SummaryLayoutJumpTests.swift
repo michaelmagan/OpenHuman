@@ -74,9 +74,6 @@ final class GatedSummaryProvider: AIProvider, Sendable {
 @Suite(.serialized) struct SummaryLayoutJumpTests {
     nonisolated static let sentence = "The team agreed on the plan and asks for the budget by Friday. "
 
-    // Whitespace at the end of a chunk shows with the next chunk, or when the answer finishes
-    nonisolated static func shown(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
-
     @MainActor final class Kept {
         var hosts: [StubHost] = []
         var windows: [NSWindow] = []
@@ -200,7 +197,7 @@ final class GatedSummaryProvider: AIProvider, Sendable {
         #expect(box >= 3.5 * Self.oneLine && box <= 4.5 * Self.oneLine, "4 lines held while Thinking, was \(box)")
 
         provider.write("The team ")
-        try await wait("the first chunk") { reader.summary.phase == .streaming && label.stringValue == Self.shown("The team ") }
+        try await wait("the first chunk") { reader.summary.phase == .streaming && label.stringValue == "The team " }
         #expect(reader.onScreen(reader.card) == card, "the first card does not move for a chunk")
         #expect(reader.onScreen(label).height == box)
 
@@ -224,7 +221,7 @@ final class GatedSummaryProvider: AIProvider, Sendable {
             provider.isWaiting && reader.line.stage == .generating && reader.oneLineSettled
         }
         provider.write(Self.sentence)
-        try await wait("the text") { reader.line.textLabel.stringValue == Self.shown(Self.sentence) }
+        try await wait("the text") { reader.line.textLabel.stringValue == Self.sentence }
         let card = reader.onScreen(reader.card)
         let subject = reader.onScreen(reader.controller.subjectContainer)
 
@@ -260,7 +257,7 @@ final class GatedSummaryProvider: AIProvider, Sendable {
         }
         let long = String(repeating: Self.sentence, count: 9)
         provider.write(long)
-        try await wait("the text") { reader.line.textLabel.stringValue == Self.shown(long) }
+        try await wait("the text") { reader.line.textLabel.stringValue == long }
         let card = reader.onScreen(reader.card)
 
         provider.finish()
