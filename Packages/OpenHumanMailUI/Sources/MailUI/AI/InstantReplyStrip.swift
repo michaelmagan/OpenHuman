@@ -261,7 +261,6 @@ public enum InstantReplyMetrics {
     static let chipMinWidth: CGFloat = 40
     static let narrowChipMinWidth: CGFloat = 32
     static let placeholderWidth: CGFloat = 96
-    static let selectedBorder: CGFloat = 1.5
     static let chipCorner: CGFloat = 4
     static let hideGlyph: CGFloat = 10
     static let hideTarget: CGFloat = 24

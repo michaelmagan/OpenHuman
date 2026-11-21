@@ -2,10 +2,6 @@ import Foundation
 import GRDB
 import OpenHumanCore
 
-func notInSlice(_ what: String) -> StoreError {
-    .conflict("not implemented in the store slice: \(what)")
-}
-
 extension MailStore: AccountStoring {
     public func addAccount(email: String, displayName: String?, scopes: [String]) throws -> AccountID {
         try write { db in

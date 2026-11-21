@@ -1,13 +1,6 @@
 import Foundation
 import GRDB
 
-enum LabelResolver {
-    static func labelRowID(account: Int64, key: String, in db: Database) throws -> Int64? {
-        try Int64.fetchOne(db, sql: "SELECT label_rid FROM labels WHERE account_id = ? AND key = ?",
-                           arguments: [account, key])
-    }
-}
-
 enum Labels {
     static func join(_ set: Set<String>) -> String { set.sorted().joined(separator: ",") }
     static func split(_ text: String) -> Set<String> { Set(text.split(separator: ",").map(String.init)) }

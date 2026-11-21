@@ -88,4 +88,11 @@ private func moveModel(_ calls: Calls, superset: Bool, sender: Bool = true) -> L
     model.confirm()
     #expect(calls.count == 1 && model.isClosed, "↵ applies the first row that can be chosen")
 }
+
+@MainActor
+@Test func anEmptyPickerSaysWhatWasTyped() {
+    #expect(LabelPickerView.emptyText(query: "") == "No labels")
+    #expect(LabelPickerView.emptyText(query: "  ") == "No labels")
+    #expect(LabelPickerView.emptyText(query: " zzz ") == "Nothing matches “zzz”")
+}
 #endif

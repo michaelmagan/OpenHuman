@@ -91,7 +91,6 @@ struct TouchTheme: Sendable {
 
     var gutter: CGFloat { tokens.space5 }
     var radiusCard: CGFloat { tokens.radiusXL }
-    var radiusChip: CGFloat { tokens.radiusMD }
 
     func labelColor(_ hex: String?) -> Color? {
         hex.flatMap { ThemeColor(hex: $0) }?.color

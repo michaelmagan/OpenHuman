@@ -178,6 +178,18 @@ public struct ReaderFormatting: Sendable {
         return name.isEmpty ? "attachment" : name
     }
 
+    public static let missingConversationText = "This conversation is no longer here."
+    public static let failedConversationText = "Couldn't open this conversation."
+
+    /// The reader's heading: the subject, or what went wrong when there is no conversation to show.
+    public static func conversationTitle(subject: String, state: ReaderModel.LoadState, hasMessages: Bool) -> String {
+        switch state {
+        case .missing: missingConversationText
+        case .failed where !hasMessages: failedConversationText
+        case .loading, .loaded, .failed: subject
+        }
+    }
+
     public static func newMessagesTitle(_ count: Int) -> String {
         count == 1 ? "Show new message" : "Show \(count) new messages"
     }

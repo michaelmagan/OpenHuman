@@ -222,8 +222,4 @@ extension MailStore {
             SELECT m.mid, m.tid FROM pending_op_messages pom JOIN messages m ON m.mid = pom.mid WHERE pom.op_id = ?
             """, arguments: [op]).map { ($0["mid"], $0["tid"]) }
     }
-
-    static func actionName(_ action: MailAction) -> String {
-        String(describing: action).prefix { $0 != "(" }.description
-    }
 }

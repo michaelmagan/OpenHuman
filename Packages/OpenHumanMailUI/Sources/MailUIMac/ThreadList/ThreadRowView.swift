@@ -157,12 +157,6 @@ public final class ThreadRowView: NSTableCellView {
         }
     }
 
-    func setChecked(_ checked: Bool) {
-        guard checked != isChecked else { return }
-        isChecked = checked
-        needsDisplay = true
-    }
-
     private func color(of indicator: ThreadRowIndicator) -> NSColor {
         switch indicator {
         case .starred, .snoozed: style.warning

@@ -12,7 +12,6 @@ public final class ThreadListViewController: NSViewController, NSTableViewDataSo
     private var emptyView: ThreadListEmptyView?
     private var retryBar: NSStackView?
     private var retryLabel: NSTextField?
-    var isRetryBarShown: Bool { retryBar?.isHidden == false }
     private(set) var style: ThreadRowStyle
     private var baseTheme: ThemeTokens
     public let zoom: ReaderPreferences

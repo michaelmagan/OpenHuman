@@ -309,7 +309,8 @@ public final class ReaderViewController: NSViewController {
             column.setCustomSpacing(theme.space8, after: subjectRow)
         }
         if !aiAccessoryResolved { addAIAccessory(model) }
-        let subject = model.state == .missing ? "This conversation is no longer here." : model.subject
+        let subject = ReaderFormatting.conversationTitle(subject: model.subject, state: model.state,
+                                                         hasMessages: !messages.isEmpty)
         if subjectLabel.stringValue != subject { subjectLabel.stringValue = subject }
         renderMeta(model)
 
@@ -741,7 +742,6 @@ public final class ReaderViewController: NSViewController {
     var subjectView: NSView { subjectLabel }
     var subjectContainer: NSView { subjectRow }
     var metaLabelView: NSTextField { metaLabel }
-    var metaText: String { metaLabel.attributedStringValue.string }
 
     func perform(_ action: ActionID, source: ActionSource = .toolbar) {
         guard let router else { return }

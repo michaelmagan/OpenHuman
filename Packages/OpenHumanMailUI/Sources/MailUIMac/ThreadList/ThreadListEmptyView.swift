@@ -96,8 +96,6 @@ final class ThreadListEmptyView: NSView {
         needsLayout = true
     }
 
-    var showsSpinner: Bool { !spinner.isHidden }
-
     private var reduceMotion: Bool { style.theme.reduceMotion }
 
     private func fade(_ view: NSView, duration: Double) {

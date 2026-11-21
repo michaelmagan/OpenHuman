@@ -5,6 +5,7 @@ import SwiftUI
 struct InboxScreen: View {
     let phone: PhoneMail
     @Environment(\.touch) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollView {
@@ -39,7 +40,8 @@ struct InboxScreen: View {
                 ThreadRowView(row: row, chips: list.chips(for: row), location: list.location,
                               formatting: phone.formatting)
             }
-            .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
+            .transition(reduceMotion ? AnyTransition.opacity
+                        : .asymmetric(insertion: .opacity, removal: .move(edge: .leading).combined(with: .opacity)))
             .onAppear { list.visibleRowsDidChange(lastVisibleIndex: index) }
         }
     }
@@ -157,7 +159,7 @@ struct EmptyListView: View {
     }
 
     private var detail: String {
-        if let failure { return failure }
+        if failure != nil { return "The mail on this iPhone couldn't be read. Try again in a moment." }
         if isSearch { return "Nothing on this iPhone matches the search." }
         return isSplit ? "New mail in this split shows up here." : "No conversations in this view."
     }

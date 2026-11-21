@@ -674,12 +674,6 @@ public final class ComposeSession: Identifiable {
         }
     }
 
-    var recoveryRecord: DraftRecoveryRecord? {
-        guard let draftKey, let version else { return nil }
-        return DraftRecoveryRecord(draftID: draftKey.rawValue, version: version, document: document,
-                                   quotedText: quotedText, includeSignature: includesSignature)
-    }
-
     func load(from row: DraftSummary, recovered: DraftRecoveryRecord?) {
         loading = true
         defer { loading = false }

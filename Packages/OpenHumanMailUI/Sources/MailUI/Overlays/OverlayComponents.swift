@@ -108,26 +108,6 @@ extension EnvironmentValues {
     @Entry var overlaySheet: Bool = false
 }
 
-@MainActor
-enum OverlaySheet {
-    private static var twins: [String: ResolvedTheme] = [:]
-
-    static func theme(for theme: ResolvedTheme) -> ResolvedTheme {
-        guard theme.appearance != .dark else { return theme }
-        let key = "\(theme.accentID)|\(theme.tokens.density)|\(theme.tokens.reduceMotion)"
-        if let twin = twins[key] { return twin }
-        let resolved = ThemeLibrary.builtIn.resolve(themeID: BuiltinThemeID.dark, appearance: .dark,
-                                                    preferences: ThemePreferences(accentID: theme.accentID,
-                                                                                  density: theme.tokens.density))
-        var tokens = resolved.tokens
-        tokens.reduceMotion = theme.tokens.reduceMotion
-        let twin = ResolvedTheme(themeID: resolved.themeID, themeName: resolved.themeName, accentID: resolved.accentID,
-                                 appearance: .dark, tokens: tokens, emailColors: resolved.emailColors, issues: resolved.issues)
-        twins[key] = twin
-        return twin
-    }
-}
-
 /// A keycap beside a row or field that already names its action, so it is hidden from accessibility. It draws as
 /// `NativeKeycap`.
 struct KeycapView: View {
