@@ -1,6 +1,7 @@
 import Foundation
 import MailActions
 import MailModel
+import MailRender
 import OpenHumanCore
 
 public struct InstantIntroPlan: Equatable, Sendable {
