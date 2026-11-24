@@ -17,12 +17,14 @@ import Testing
         #expect(f.registry.performCount == 0, "nothing was performed")
     }
 
-    @Test func inAComposerContextItSaysItIsNotBuilt() async {
+    @Test func inAComposerContextWithoutAReplyItSaysWhereItWorks() async {
         let f = ActionFixture()
         await f.loaded(10)
         let composer = ActionContext(scope: .composer)
         #expect(await f.run(.instantIntro, source: .keyboard, context: composer))
-        #expect(f.env.notices.toasts.contains { $0.message == "Instant Intro isn't built in OpenHuman Mail yet" })
+        #expect(f.env.notices.toasts.map(\.message)
+            == ["Instant Intro only works when you are writing a reply to an introduction"])
+        #expect(f.registry.performCount == 0, "nothing was performed")
     }
 
     @Test func aRepeatedPressReplacesTheNoticeInsteadOfStackingThem() async {

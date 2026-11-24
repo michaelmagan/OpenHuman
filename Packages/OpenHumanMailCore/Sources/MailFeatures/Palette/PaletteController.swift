@@ -296,7 +296,6 @@ public final class PaletteController {
         case .unavailable: "Not available with this mail source yet"
         case .noSelection: "Select a conversation first"
         case .needs(_, let context): "Only works when \(context)"
-        case .notBuilt: "Not built yet"
         case .nothingToUndo, .nothingToRedo, .other: nil
         }
     }

@@ -16,7 +16,7 @@ import Testing
         for scope in [ActionScope.list, .reader, .composer, .review, .calendar] {
             #expect(ActionRules.isInScope(descriptor, scope), "\(scope)")
         }
-        #expect(descriptor.appearsInPalette == false && descriptor.appearsInMenu == false, "not offered until it works")
+        #expect(descriptor.appearsInPalette && descriptor.appearsInMenu == false, "offered in the palette, not the menu")
         #expect(descriptor.menuKeyEquivalent == nil, "the key router owns the chord")
     }
 
@@ -28,11 +28,11 @@ import Testing
         #expect(result.reason?.announces == true, "\(scope): the key is consumed with a notice")
     }
 
-    @Test func inAComposerTheCatalogAllowsItAndTheHandlerSaysItIsNotBuilt() {
-        #expect(availability(.composer) == .enabled, "the handler has the last word")
-        let notBuilt = DisabledReason.notBuilt("Instant Intro")
-        #expect(notBuilt.description == "Instant Intro isn't built in OpenHuman Mail yet")
-        #expect(notBuilt.announces)
+    @Test func inAComposerTheCatalogAllowsItAndTheHandlerDecides() {
+        #expect(availability(.composer) == .enabled, "the handler knows whether the composer holds a reply")
+        #expect(DisabledReason.instantIntroNeedsReply.description
+            == "Instant Intro only works when you are writing a reply to an introduction")
+        #expect(DisabledReason.instantIntroNeedsReply.announces)
     }
 
     @Test func noOtherCatalogEntryUsesTheSameKey() {
