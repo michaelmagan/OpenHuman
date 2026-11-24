@@ -19,7 +19,7 @@ final class CoreActions {
     let extras: SuperhumanCoreActionHandler
     let invites: InviteActionHandler
 
-    let instantIntro = InstantIntroActionHandler()
+    let instantIntro: InstantIntroActionHandler
 
     init(environment: AppEnvironment) {
         feedback = ActionFeedback(environment: environment)
@@ -31,6 +31,7 @@ final class CoreActions {
         autoLabels = AutoLabelActionHandler(environment: environment, feedback: feedback)
         classification = ClassificationCorrectionHandler(environment: environment, feedback: feedback)
         composeEditing = ComposeEditingActionHandler(environment: environment)
+        instantIntro = InstantIntroActionHandler(environment: environment)
         app = AppActionHandler(environment: environment, feedback: feedback)
         extras = SuperhumanCoreActionHandler(environment: environment, feedback: feedback)
         invites = InviteActionHandler(environment: environment)

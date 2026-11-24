@@ -112,7 +112,6 @@ public enum DisabledReason: Hashable, Sendable, CustomStringConvertible {
     case nothingToRedo
     case other(String)
     case needs(action: String, context: String)
-    case notBuilt(String)
 
     public var description: String {
         switch self {
@@ -122,13 +121,12 @@ public enum DisabledReason: Hashable, Sendable, CustomStringConvertible {
         case .nothingToRedo: "Nothing to redo"
         case .other(let text): text
         case .needs(let action, let context): "\(action) only works when \(context)"
-        case .notBuilt(let what): "\(what) isn't built in OpenHuman Mail yet"
         }
     }
 
     public var announces: Bool {
         switch self {
-        case .unavailable, .noSelection, .needs, .notBuilt: true
+        case .unavailable, .noSelection, .needs: true
         case .nothingToUndo, .nothingToRedo, .other: false
         }
     }

@@ -49,8 +49,7 @@ public enum ActionRules {
     static func stateRule(_ id: ActionID, _ c: ActionContext) -> ActionAvailability? {
         switch id {
         case .instantIntro:
-            return c.scope == .composer ? nil
-                : .disabled(.needs(action: "Instant Intro", context: "you are writing a reply to an introduction"))
+            return c.scope == .composer ? nil : .disabled(.instantIntroNeedsReply)
         case .undo: return c.canUndo ? nil : .disabled(.nothingToUndo)
         case .redo: return c.canRedo ? nil : .disabled(.nothingToRedo)
         case .moveToInbox: return c.isInInbox ? .hidden : nil

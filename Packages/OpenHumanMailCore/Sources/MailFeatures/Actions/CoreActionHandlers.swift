@@ -16,7 +16,7 @@ public final class ActionFeedback {
         switch reason {
         case .unavailable:
             environment.notices.post(reason.description, style: .info, duration: NoticeCenter.infoDuration)
-        case .noSelection, .needs, .notBuilt:
+        case .noSelection, .needs:
             if let contextToast { environment.notices.dismiss(contextToast) }
             contextToast = environment.notices.post(reason.description, style: .info, duration: NoticeCenter.infoDuration)
         case .nothingToUndo, .nothingToRedo, .other:
