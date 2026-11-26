@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Why: check-test-patterns diffs against the merge base with the PR's base branch
           fetch-depth: 0
@@ -74,7 +74,7 @@ jobs:
       XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
       SWIFT_BACKTRACE: enable=yes,sanitize=yes,threads=all
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/select-xcode
         id: xcode
@@ -137,7 +137,7 @@ jobs:
       SWIFT_BACKTRACE: enable=yes,sanitize=yes,threads=all
       OH_COMPILATION_CACHE_PATH: ${{ github.workspace }}/build/compilation-cache
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/select-xcode
         id: xcode
@@ -237,7 +237,7 @@ jobs:
       XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
       SWIFT_BACKTRACE: enable=yes,sanitize=yes,threads=all
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: ./.github/actions/select-xcode
         id: xcode

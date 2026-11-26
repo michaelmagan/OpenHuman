@@ -44,7 +44,7 @@ jobs:
       XCODE_APP: ${{ vars.XCODE_APP || '/Applications/Xcode_27.0.app' }}
       XCODE_VERSION: ${{ vars.XCODE_VERSION || '27.0' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/select-xcode
         id: xcode
@@ -104,7 +104,7 @@ jobs:
       RUN_ID: ${{ github.run_id }}
     steps:
       # The scripts read the renders as data
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: Tools/ci
 
